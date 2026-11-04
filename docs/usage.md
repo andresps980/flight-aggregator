@@ -1,12 +1,15 @@
 # Usage
 
+> Only the template's example `greeting` endpoint exists so far. The flight search and ingestion APIs will be
+> documented here as they are implemented.
+
 ## Run
 
 ```bash
-./mvnw spring-boot:run
+./mvnw -pl flight-aggregator spring-boot:run
 ```
 
-The service starts on port `8080` (override with `--server.port=9090` or `SERVER_PORT`).
+The `flight-aggregator` service starts on port `8080` (override with `--server.port=9090` or `SERVER_PORT`).
 
 ## API
 
