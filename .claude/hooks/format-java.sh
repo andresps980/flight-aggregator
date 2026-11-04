@@ -15,7 +15,17 @@ esac
 cd "$(project_dir)" || exit 0
 [ -x ./mvnw ] || { echo "format-java: ./mvnw not found, skipping Spotless" >&2; exit 0; }
 
-if ! output="$(./mvnw -q -B spotless:apply 2>&1)"; then
+# Limit Spotless to the module that owns the file (first path segment with its own pom.xml);
+# edits to the root pom format every module.
+root="$(pwd -P)"
+rel="${file#"$root"/}"
+module="${rel%%/*}"
+scope=()
+if [ "$module" != "$rel" ] && [ -f "$module/pom.xml" ]; then
+  scope=(-pl "$module")
+fi
+
+if ! output="$(./mvnw -q -B spotless:apply "${scope[@]+"${scope[@]}"}" 2>&1)"; then
   echo "Spotless failed after editing $file:" >&2
   printf '%s\n' "$output" | tail -n 40 >&2
   exit 2

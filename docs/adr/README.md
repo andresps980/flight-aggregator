@@ -10,3 +10,8 @@ New ADR: copy [`0000-template.md`](0000-template.md) or run `/adr` in Claude Cod
 | [0003](0003-spec-driven-development.md) | Spec-driven development workflow | Accepted |
 | [0004](0004-quality-gates.md) | Automated quality gates | Accepted |
 | [0005](0005-ai-assisted-development.md) | AI-assisted development with Claude Code | Accepted |
+| [0006](0006-scheduled-pre-ingestion.md) | Scheduled pre-ingestion, decoupled from search | Accepted |
+| [0007](0007-postgresql-and-redis.md) | PostgreSQL as source of truth, Redis as search cache | Accepted |
+| [0008](0008-keyset-pagination.md) | Keyset pagination ordered by (price, id) | Accepted |
+| [0009](0009-react-frontend.md) | Minimal React + TypeScript + Vite frontend served by nginx | Accepted |
+| [0010](0010-domain-assumptions.md) | Domain assumptions for itineraries, deduplication and pricing | Accepted |

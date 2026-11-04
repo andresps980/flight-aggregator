@@ -1,42 +1,89 @@
-# spring-boot-template
+# Flight Aggregation & Cache Optimization System
 
-Spring Boot 4 / Java 21 service template with **hexagonal architecture**, a **spec-driven development (SDD)**
-workflow, automated **quality gates** and shared **Claude Code** tooling (skills, agents and hooks).
+An Online Travel Agency backend that ingests flight itineraries from three Global Distribution System (GDS)
+providers — **Mock-Alpha** (JSON lists), **Mock-Beta** (nested XML) and **Mock-Gamma** (CSV streams) — and
+deduplicates identical itineraries, keeping the cheapest offer plus a 5% OTA markup. It drops dead legs and invalid
+connections and serves the result through a filterable, paginated search API and a dashboard.
 
-> The `greeting` feature is a minimal end-to-end example (domain → use case → REST + config adapter, with unit,
-> integration and architecture tests). Delete it once the first real feature lands.
+Key constraints: 100,000 – 1,000,000 itinerary combinations per day, providers with 100 ms – 5000 ms latency and
+random HTTP 500s (one failing provider must not break aggregation), a framework-free core domain, and a full stack
+that boots with `docker compose up --build`.
+
+Full statement: [docs/exercise.md](docs/exercise.md). Design write-up: [SOLUTION.md](SOLUTION.md).
+
+> **Status:** project setup. The repository has the multi-module build, quality gates and agreed design decisions
+> (ADRs). The only code so far is the template's example `greeting` endpoint. Each functional feature lands in its own PR.
+
+## Components
+
+Target architecture. Each component is built in a later PR and described here once it exists.
+
+| Component | Role | Decision |
+|---|---|---|
+| `gds-mock` | Mock-Alpha (JSON), Mock-Beta (XML) and Mock-Gamma (CSV) provider APIs with artificial latency and errors | — |
+| `flight-aggregator` | Scheduled + on-demand **ingestion** from the 3 providers in parallel, **deduplication** and pricing in the domain, **search API** | [ADR-0006](docs/adr/0006-scheduled-pre-ingestion.md), [ADR-0010](docs/adr/0010-domain-assumptions.md) |
+| PostgreSQL | Source of truth for itineraries and ingestion runs | [ADR-0007](docs/adr/0007-postgresql-and-redis.md) |
+| Redis | Search results cache | [ADR-0007](docs/adr/0007-postgresql-and-redis.md) |
+| `frontend` | React + TypeScript dashboard served by nginx | [ADR-0009](docs/adr/0009-react-frontend.md) |
+
+```mermaid
+flowchart LR
+    ui[frontend<br/>React + nginx] -->|/api| agg[flight-aggregator]
+    agg -->|scheduled / on-demand ingestion| alpha[Mock-Alpha JSON]
+    agg --> beta[Mock-Beta XML]
+    agg --> gamma[Mock-Gamma CSV]
+    agg --> pg[(PostgreSQL)]
+    agg --> redis[(Redis cache)]
+    subgraph gds-mock
+        alpha
+        beta
+        gamma
+    end
+```
+
+Search reads only from PostgreSQL/Redis, never from the providers, and pages with keyset pagination
+([ADR-0008](docs/adr/0008-keyset-pagination.md)).
 
 ## Requirements
 
 - JDK 21
+- Docker (for the planned compose stack and Testcontainers-based integration tests)
 - Git, and optionally the [GitHub CLI](https://cli.github.com/) (`gh`)
-- Docker (only if you add Testcontainers-based integration tests)
 - [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) for the AI-assisted workflow
 - `jq` or `python3` recommended (used by the Claude Code hooks to parse JSON)
 
 ## Quick start
 
+**Current** — build and test all modules:
+
 ```bash
-./mvnw verify                 # format check, unit + integration tests, architecture rules, coverage gate
-./mvnw spring-boot:run        # start on http://localhost:8080
-curl "http://localhost:8080/api/v1/greetings?name=Ana"
+./mvnw verify                                   # format check, unit + IT tests, architecture rules, coverage gate
+./mvnw -pl flight-aggregator spring-boot:run    # start the aggregator on http://localhost:8080
 ```
 
-See [docs/usage.md](docs/usage.md) for the API and configuration.
+**Planned** — the full stack (backend, gds-mock, frontend, PostgreSQL, Redis). It doesn't exist yet:
+
+```bash
+docker compose up --build
+```
+
+See [docs/usage.md](docs/usage.md) for the endpoints that currently exist and their configuration.
 
 ## Quality gates
+
+Applied to every Maven module.
 
 | Gate | Tool | Where |
 |---|---|---|
 | Formatting | Spotless (palantir-java-format) | `verify`, pre-commit hook, Claude hook, CI |
 | Unit tests (`*Test`) | JUnit 5, Mockito, AssertJ (Surefire) | `verify`, CI |
 | Integration tests (`*IT`) | `@SpringBootTest` on a random port (Failsafe) | `verify`, CI |
-| Architecture & SOLID rules | ArchUnit (`ArchitectureTest`) | `verify`, CI |
-| Coverage ≥ 80 % lines / 70 % branches | JaCoCo (merged unit + IT) | `verify`, CI (summary + PR comment) |
+| Architecture & SOLID rules | ArchUnit (`ArchitectureTest` per module) | `verify`, CI |
+| Coverage ≥ 80 % lines / 70 % branches | JaCoCo (merged unit + IT, per module) | `verify`, CI (summary + PR comment) |
 | Vulnerable dependencies | Dependency Review, Dependabot | CI on PRs, weekly |
 | Static security analysis | CodeQL (`security-and-quality`) | CI on PRs, weekly |
 
-Coverage report: `target/site/jacoco/index.html`.
+Coverage report: `<module>/target/site/jacoco/index.html`.
 
 ## Development workflow (SDD)
 
@@ -47,6 +94,7 @@ Coverage report: `target/site/jacoco/index.html`.
 5. Open a **PR** with the What / Why / Changes format (`/pr-description`). CI must be green to merge.
 
 `main` is protected: no direct commits or pushes (enforced by GitHub rulesets, git hooks and Claude Code hooks).
+Everything in the repository is written in English (see [CLAUDE.md](CLAUDE.md)).
 
 ## Claude Code tooling
 
@@ -60,31 +108,39 @@ Coverage report: `target/site/jacoco/index.html`.
 | Agent | `spec-reviewer` | Acceptance-criteria traceability matrix, scope creep, spec drift |
 | Agent | `test-engineer` | Writes tests and closes coverage gaps |
 | Hook | `guard-git.sh` | Blocks commit/push on `main`, force-push and `--no-verify` |
-| Hook | `format-java.sh` | Spotless after every Java/POM edit |
-| Hook | `verify-on-stop.sh` | `./mvnw verify` before Claude finishes, if sources changed |
+| Hook | `format-java.sh` | Spotless after every Java/POM edit, scoped to the edited module |
+| Hook | `verify-on-stop.sh` | `./mvnw verify` before Claude finishes, if any module changed |
 | Hook | `session-start.sh` | Activates `.githooks`, reports the current branch |
 
-Project rules for Claude live in [CLAUDE.md](CLAUDE.md).
+Project rules for Claude live in [CLAUDE.md](CLAUDE.md). The prompts and agents used to build the solution are
+logged in [docs/ai/](docs/ai/README.md).
 
 ## Project structure
 
 ```
+pom.xml               parent POM: shared plugin config (Spotless, JaCoCo, Failsafe), module list
+mvnw                  Maven wrapper (run everything from the root)
+flight-aggregator/    aggregation service (Spring Boot), base package com.andresps.flights
+  src/main/java/com/andresps/flights/
+    <feature>/domain           model and invariants (framework-free)
+    <feature>/application      ports and use cases (framework-free)
+    <feature>/infrastructure   adapters (REST, config, persistence...) and wiring
+    shared/                    cross-feature building blocks
+gds-mock/             mock GDS providers (placeholder, no code yet)
 .claude/              shared Claude Code config: settings + hooks, skills, agents
 .githooks/            versioned git hooks (pre-commit, pre-push)
 .github/              CI, CodeQL, Dependabot, PR template
-docs/                 usage, architecture, ADRs, GitHub setup
+docs/                 exercise, usage, architecture, ADRs, AI log, GitHub setup
 specs/                one spec per feature (SDD)
-src/main/java/com/example/app/
-  <feature>/domain             model and invariants (framework-free)
-  <feature>/application        ports and use cases (framework-free)
-  <feature>/infrastructure     adapters (REST, config, persistence...) and wiring
-  shared/                      cross-feature building blocks
 ```
 
 ## Documentation
 
-- [Usage](docs/usage.md)
+- [SOLUTION.md](SOLUTION.md) — architectural decisions, data modelling and pagination, limitations
+- [Assessment statement](docs/exercise.md)
 - [Architecture](docs/architecture.md)
 - [Architecture Decision Records](docs/adr/README.md)
 - [Specs](specs/README.md)
+- [Usage](docs/usage.md)
+- [AI-assisted development log](docs/ai/README.md)
 - [Repository bootstrap & GitHub setup](docs/github-setup.md)

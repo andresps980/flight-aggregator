@@ -1,6 +1,10 @@
 # Architecture
 
-The service follows **hexagonal architecture** (ports & adapters), organised **by feature** first and by layer
+> Target system components (gds-mock, flight-aggregator, PostgreSQL, Redis, frontend) are summarised in the
+> [README](../README.md#components) and decided in [ADR-0006](adr/0006-scheduled-pre-ingestion.md) to
+> [ADR-0010](adr/0010-domain-assumptions.md). This page describes the internal structure every backend module follows.
+
+Each backend module (`flight-aggregator`, `gds-mock`) follows **hexagonal architecture** (ports & adapters), organised **by feature** first and by layer
 second. The rationale is in [ADR-0002](adr/0002-hexagonal-architecture.md).
 
 ```mermaid
@@ -36,7 +40,7 @@ flowchart LR
 
 `infrastructure → application → domain`. Inner layers know nothing about outer ones, and `domain` and
 `application` don't depend on Spring. This is verified on every build by
-[`ArchitectureTest`](../src/test/java/com/example/app/architecture/ArchitectureTest.java):
+`ArchitectureTest` in each module (e.g. [`flight-aggregator`](../flight-aggregator/src/test/java/com/andresps/flights/architecture/ArchitectureTest.java)):
 
 | Rule | Why |
 |---|---|
@@ -63,4 +67,5 @@ flowchart LR
 | Integration | `*IT` | Full application on a random port, real HTTP | `@SpringBootTest`, `RestClient` |
 | Architecture | `ArchitectureTest` | Package dependencies and coding rules | ArchUnit |
 
-Coverage from unit and integration tests is merged by JaCoCo; the build fails below 80 % lines / 70 % branches.
+Coverage from unit and integration tests is merged by JaCoCo per module; the build fails if any module drops below
+80 % lines / 70 % branches.

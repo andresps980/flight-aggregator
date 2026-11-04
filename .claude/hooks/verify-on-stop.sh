@@ -14,15 +14,18 @@ git rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 0
 [ -x ./mvnw ] || exit 0
 
 # Fingerprint of the working tree for build-relevant paths (tracked diff + untracked files).
+# Multi-module build: the root pom plus every module's pom.xml and src/.
+paths=(pom.xml ':(glob)*/pom.xml' ':(glob)*/src/**')
+
 fingerprint="$( {
-  git diff HEAD -- src pom.xml 2>/dev/null
-  git ls-files --others --exclude-standard -- src pom.xml 2>/dev/null | while read -r f; do
+  git diff HEAD -- "${paths[@]}" 2>/dev/null
+  git ls-files --others --exclude-standard -- "${paths[@]}" 2>/dev/null | while read -r f; do
     echo "$f $(git hash-object "$f")"
   done
 } | git hash-object --stdin )"
 
 # Nothing changed versus HEAD: nothing to verify.
-if [ -z "$(git status --porcelain -- src pom.xml)" ]; then
+if [ -z "$(git status --porcelain -- "${paths[@]}")" ]; then
   exit 0
 fi
 
