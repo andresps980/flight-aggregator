@@ -1,0 +1,88 @@
+# CLAUDE.md
+
+Guidance for Claude Code (and humans) working in this repository.
+
+## Project
+
+Spring Boot 4 / Java 21 service built with **hexagonal architecture** and a **spec-driven development (SDD)** workflow.
+Every change starts from a spec in `specs/`, is delivered through a PR, and must pass the quality gates.
+
+## Commands
+
+| Task | Command |
+|---|---|
+| Format code | `./mvnw spotless:apply` |
+| Unit tests only | `./mvnw test` |
+| Full build (unit + IT + coverage gate + format check) | `./mvnw verify` |
+| Run the app | `./mvnw spring-boot:run` |
+| Coverage report | `target/site/jacoco/index.html` (after `verify`) |
+
+Always run `./mvnw verify` before declaring a task done. The Stop hook also runs it automatically.
+
+## Architecture (enforced by `ArchitectureTest`)
+
+Package layout per feature, under `com.example.app.<feature>`:
+
+```
+domain/            model, value objects, domain exceptions. Plain Java: no Spring, no Jakarta, no Jackson.
+application/
+  port/in/         use case interfaces (driving ports)
+  port/out/        interfaces the use cases need (driven ports)
+  service/         use case implementations. Plain Java: no Spring annotations.
+infrastructure/
+  adapter/in/      REST controllers, DTOs, listeners
+  adapter/out/     persistence, HTTP clients, config-backed providers
+  config/          @Configuration wiring use cases and adapters (composition root)
+shared/            cross-feature building blocks (e.g. DomainValidationException, global error handler)
+```
+
+Rules:
+- Dependencies point inwards: `infrastructure -> application -> domain`. Never the other way.
+- Use cases are wired as `@Bean`s in `infrastructure/config`, never annotated with `@Service`.
+- Controllers expose DTOs (`*Request`/`*Response` records), never domain objects.
+- Constructor injection only. No field injection, no `System.out`, no generic exceptions.
+- Errors go out as RFC 9457 `ProblemDetail` via `GlobalExceptionHandler`.
+- Features must not have cyclic dependencies on each other.
+
+SOLID in practice here: one use case per interface (SRP/ISP), new behaviour through new adapters/implementations rather
+than editing existing ones (OCP), ports as abstractions owned by the application (DIP), implementations honour port
+contracts (LSP).
+
+## SDD workflow
+
+1. **Spec** — `/spec-feature`: write `specs/NNN-<slug>/spec.md` from the template. Acceptance criteria in Given/When/Then.
+   Do not invent requirements: list doubts under *Open questions* and ask the user.
+2. **Design decision?** — `/adr`: record significant decisions in `docs/adr/`.
+3. **Implement** — `/implement-spec NNN`: branch, tests first from the acceptance criteria, then code.
+4. **Review** — run the `code-reviewer` and `spec-reviewer` agents on the branch.
+5. **PR** — `/pr-description`: push the branch and open the PR with the required format.
+
+## Git workflow
+
+- **Never commit or push to `main`.** Hooks block it; `main` only changes through merged PRs.
+- Branch names: `feat/NNN-<slug>`, `fix/<slug>`, `chore/<slug>`, `docs/<slug>`.
+- Conventional Commits: `feat: ...`, `fix: ...`, `test: ...`, `docs: ...`, `refactor: ...`, `chore: ...`.
+- One functional increment per PR, with its unit and integration tests and docs updates.
+- Never use `--no-verify` or force-push.
+
+## Testing conventions
+
+- Unit tests: `*Test.java` (Surefire). No Spring context. Mock ports with Mockito.
+- Integration tests: `*IT.java` (Failsafe). `@SpringBootTest(webEnvironment = RANDOM_PORT)` and real HTTP calls.
+- Each acceptance criterion in the spec maps to at least one test; reference it in the test name or `@DisplayName`.
+- Coverage gate: 80% lines / 70% branches on merged unit + IT coverage. Don't game it with trivial tests.
+- AssertJ for assertions, given/when/then structure.
+
+## Definition of done
+
+- [ ] Spec exists and acceptance criteria are covered by tests
+- [ ] `./mvnw verify` is green locally
+- [ ] Docs updated: `docs/usage.md` for behaviour, an ADR for design decisions
+- [ ] PR description follows the What / Why / Changes format
+
+## Hooks active in this repo (`.claude/settings.json`)
+
+- `SessionStart` — activates `.githooks` and reports the current branch.
+- `PreToolUse(Bash)` — `guard-git.sh` blocks commits/pushes on main, force-push and `--no-verify`.
+- `PostToolUse(Edit|Write)` — `format-java.sh` runs Spotless after Java/POM edits.
+- `Stop` — `verify-on-stop.sh` runs `./mvnw verify` when sources changed since the last green build.

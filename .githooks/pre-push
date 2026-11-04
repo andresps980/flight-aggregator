@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Versioned git hook (activate with: git config core.hooksPath .githooks)
+# - forbids pushing to main/master
+# - runs the full build (unit + integration tests, architecture rules, coverage gate, formatting)
+set -euo pipefail
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$remote_ref" in
+    refs/heads/main|refs/heads/master)
+      if [ "${ALLOW_MAIN_PUSH:-0}" != "1" ]; then
+        echo "pre-push: pushing to '${remote_ref#refs/heads/}' is not allowed. Push a branch and open a PR." >&2
+        exit 1
+      fi
+      ;;
+  esac
+done
+
+echo "pre-push: running ./mvnw verify ..."
+if ! ./mvnw -q -B verify; then
+  echo "pre-push: build failed, push aborted." >&2
+  exit 1
+fi

@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Versioned git hook (activate with: git config core.hooksPath .githooks)
+# - forbids commits on main/master (set ALLOW_MAIN_COMMIT=1 for the one-off bootstrap commit)
+# - checks formatting of the code being committed
+set -euo pipefail
+
+branch="$(git rev-parse --abbrev-ref HEAD)"
+if { [ "$branch" = "main" ] || [ "$branch" = "master" ]; } && [ "${ALLOW_MAIN_COMMIT:-0}" != "1" ]; then
+  echo "pre-commit: committing on '$branch' is not allowed. Create a feature branch: git switch -c feat/<spec-id>-<slug>" >&2
+  exit 1
+fi
+
+if git diff --cached --name-only --diff-filter=ACMR | grep -Eq '(\.java|pom\.xml)$'; then
+  if ! ./mvnw -q -B spotless:check; then
+    echo "pre-commit: formatting issues found. Run './mvnw spotless:apply', re-stage and commit again." >&2
+    exit 1
+  fi
+fi
