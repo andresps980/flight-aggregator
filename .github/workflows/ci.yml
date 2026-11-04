@@ -27,6 +27,8 @@ jobs:
           cache: maven
       - name: Check formatting
         run: ./mvnw -B -ntp spotless:check
+      - name: Claude hook tests (guard-git)
+        run: bash .claude/hooks/tests/guard-git.test.sh
 
   build:
     name: Build, tests & coverage

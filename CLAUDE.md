@@ -105,6 +105,8 @@ contracts (LSP).
 ## Hooks active in this repo (`.claude/settings.json`)
 
 - `SessionStart` — activates `.githooks` and reports the current branch.
-- `PreToolUse(Bash)` — `guard-git.sh` blocks commits/pushes on main, force-push and `--no-verify`.
+- `PreToolUse(Bash)` — `guard-git.sh` blocks commits/pushes on main, pushes to main, force-push and `--no-verify`.
+  Rules apply per sub-command (split on `&&`, `||`, `;`, `|` outside quotes), only to real `git push` / `git commit`.
+  Tests: `bash .claude/hooks/tests/guard-git.test.sh` (also run in CI); extend them when changing the hook.
 - `PostToolUse(Edit|Write)` — `format-java.sh` runs Spotless after Java/POM edits (scoped to the edited module).
 - `Stop` — `verify-on-stop.sh` runs `./mvnw verify` when any `pom.xml` or `<module>/src` changed since the last green build.

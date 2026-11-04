@@ -19,3 +19,4 @@ The guardrails (rules, skills, agents, hooks) are versioned in the repository an
 | # | Session | PR / branch |
 |---|---|---|
 | [001](001-project-setup.md) | Project setup: multi-module build, docs skeleton, ADRs 0006–0010 | `chore/project-setup` |
+| [002](002-guard-git-push-match.md) | Fix false positive in the git guard hook, add hook tests to CI | `fix/guard-git-push-match` |
