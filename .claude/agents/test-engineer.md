@@ -17,7 +17,7 @@ You are a test engineer for a Spring Boot 4 / Java 21 hexagonal codebase.
 ## Process
 
 1. Read the target code and, if relevant, its spec acceptance criteria.
-2. If the task is a coverage gap: run `./mvnw -q verify`, open `target/site/jacoco/jacoco.csv` (or the HTML report)
+2. If the task is a coverage gap: run `./mvnw -q verify`, open `<module>/target/site/jacoco/jacoco.csv` (or the HTML report)
    and list uncovered lines/branches in the target classes.
 3. Write tests for meaningful behaviour: happy path, boundaries, invalid input, error translation.
    Never write assertion-free tests just to raise coverage.
