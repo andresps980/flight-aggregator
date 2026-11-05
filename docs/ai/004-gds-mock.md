@@ -198,6 +198,47 @@ figures, a concurrency IT and quiet client aborts.
 - Moving `FeedRequestResolver` to `shared`: it depends on the inventory's `Horizon`. The chaos → inventory
   dependency only goes one way, and ArchUnit checks it.
 
+## Code scanning findings on the PR (CodeQL)
+
+### Prompts
+
+````text
+Watch CI, and also review the code scanning findings that github-advanced-security left on this PR:
+- Fetch them with gh: the PR review comments (gh api repos/{owner}/{repo}/pulls/{number}/comments)
+  and the code scanning alerts for the PR ref
+  (gh api "repos/{owner}/{repo}/code-scanning/alerts?ref=refs/pull/{number}/merge&state=open").
+- For each finding, classify it: real issue (fix it), or false positive / acceptable in context
+  (explain why). Show me the table — rule, file:line, verdict, reason — before changing anything.
+- After my OK: fix the real ones in new commits on this branch (with tests where relevant), and for
+  the rest give me the dismissal reason and comment so I can dismiss them in GitHub
+  (or dismiss them via gh api if the token has the security_events scope).
+- Record the findings and decisions in docs/ai/ and, if relevant, in SOLUTION.md limitations.
+````
+
+````text
+OK, go ahead. If any of the fixes for #3–#11 changes observable behaviour (not just a
+refactor), add or adjust a test for it. When done, show me the list of alerts with their
+final state (fixed / dismissed + reason).
+````
+
+### Findings and decisions
+
+CI was green. CodeQL left 11 alerts (warnings and notes, no security findings). The agent classified them and the
+author approved the table before any change.
+
+| Alert | Rule | Where | Decision |
+|---|---|---|---|
+| #5–#11 | `java/integer-multiplication-cast-to-long` | `ScheduleFactory` (7 lines) | **Fixed.** No overflow was possible (`5 × n ≤ 1,440`), but making `STEP_MINUTES` a `long` puts the arithmetic in `long` and removes the noise. |
+| #3, #4 | `java/local-variable-is-never-read` | `ChaosInterceptor`, `ChaosPolicyTest` | **Fixed.** `case Outage() ->` (a record pattern with no fields) instead of an unused binding; Java 21's unnamed `_` is still preview. |
+| #1, #2 | `java/uncaught-number-format-exception` | `ProviderPayloads` (test parsers) | **Dismissed: used in tests.** An unexpected non-numeric flight number should fail the test, and the mock never malforms flight numbers. |
+
+The fixes are not behaviour changes, and the agent proved it rather than assumed it. The three feeds from the jar
+built before the fix and from the jar built after it have identical SHA-256 checksums (20,000 itineraries, 30 %
+invalid so every schedule builder runs). So no test was added; the outage path behind #3 was already covered. The
+dismissals were made with `gh api` (the classic `repo` scope allows it), with the comment: *"Test-side parser: an
+unexpected non-numeric flight number should fail the test, and the mock never malforms flight numbers. Production
+adapters (ingestion spec) will handle it explicitly."*
+
 ## Notable corrections during the session
 
 - **Latency was applied twice per feed.** Streamed responses are asynchronous, and Spring dispatches the request a

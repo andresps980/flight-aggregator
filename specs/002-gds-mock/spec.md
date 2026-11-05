@@ -232,7 +232,8 @@ record (AC-3).
   retry **per partition** and accept partial results, recording which partitions failed.
 - Adapters must normalise times to `Instant` (epoch ms, offset date-times, local date-time + zone) and flight
   numbers (no leading zeros, carrier + number joined), or deduplication across providers fails.
-- Malformed records must be counted per provider, never sent to the aggregator.
+- Malformed records must be counted per provider, never sent to the aggregator. Any field a client can't parse counts as malformed, including fields the mock
+  never corrupts today (e.g. a non-numeric flight number): adapters must not let a parse exception abort a feed.
 - `GET /admin/world/stats` is the oracle to reconcile an ingestion report. `ALREADY_DEPARTED` counts hold while the
   aggregator's clock is on or after the reference date and before the horizon starts.
 
