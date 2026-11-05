@@ -1,0 +1,20 @@
+# Full stack is added in later PRs (aggregator, PostgreSQL, Redis, frontend). For now: the mock GDS providers.
+#   docker compose up --build
+services:
+  gds-mock:
+    build:
+      context: .
+      dockerfile: gds-mock/Dockerfile
+    image: flight-aggregator/gds-mock:local
+    ports:
+      - "8081:8081"
+    environment:
+      # Any gds.* setting can be overridden here (see docs/usage.md), e.g.:
+      GDS_WORLD_VOLUME: ${GDS_WORLD_VOLUME:-100000}
+      GDS_CHAOS_DEFAULT_ERROR_RATE: ${GDS_CHAOS_DEFAULT_ERROR_RATE:-0.10}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8081/actuator/health/readiness"]
+      interval: 10s
+      timeout: 3s
+      start_period: 30s
+      retries: 5

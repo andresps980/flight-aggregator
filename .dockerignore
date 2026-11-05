@@ -1,0 +1,10 @@
+# Keep the build context small: only poms, the Maven wrapper and module sources are needed
+.git
+.idea
+.claude
+.github
+**/target
+**/node_modules
+**/*.iml
+docs
+specs
