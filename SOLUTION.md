@@ -20,6 +20,8 @@ links to the ADRs, which hold the full reasoning.
 | Minimal React + TypeScript + Vite frontend served by nginx | [ADR-0009](docs/adr/0009-react-frontend.md) |
 | Domain assumptions: invalid connections, EUR, one airline, 5% `HALF_EVEN` markup, date filter | [ADR-0010](docs/adr/0010-domain-assumptions.md) |
 | Incremental deduplication keyed by a deterministic itinerary key, total-order tie-break | [ADR-0011](docs/adr/0011-incremental-deduplication.md) |
+| One `gds-mock` app serving the three providers, chaos per provider, no dependency on the aggregator | [ADR-0012](docs/adr/0012-single-gds-mock-application.md) |
+| Mock data generated lazily per request from per-itinerary seeds, streamed, never materialised | [ADR-0013](docs/adr/0013-stateless-seeded-streamed-generation.md) |
 
 ### Core domain (spec 001)
 
@@ -50,6 +52,45 @@ There are two kinds of bad input, and they are handled differently:
 | **ISP** | `ItineraryRule.check` and `MarkupPolicy.apply` each have a single method. The aggregator exposes only `accept` and `result`. |
 | **DIP** | `OfferAggregator` depends on the `MarkupPolicy` abstraction and on rules through their interface. Time comes from an injected `java.time.Clock`, so "already departed" is testable. |
 | **Not abstracted** | `ItineraryValidator`, `OfferAggregator`, key derivation and the tie-break are concrete classes. Each has one obvious implementation and no variation point, so an interface would only add indirection. |
+
+### Mock GDS providers (spec 002)
+
+`gds-mock` is the test double of the three external providers: a separate Spring Boot app that shares no code with
+the aggregator (an ArchUnit rule forbids any dependency on `com.andresps.flights`). It is built to exercise the
+aggregator, not to look pretty: cross- and same-provider duplicates at different prices, one invalid itinerary
+kind per spec 001 discard reason, malformed records, three different time representations, latency, random `500`s and
+a runtime outage switch. Formats: [docs/providers.md](docs/providers.md).
+
+| Concern | Design |
+|---|---|
+| Data | `WorldGenerator` (plain Java). Itinerary *i* of day *d* comes from its own `SplittableRandom(seed, d, i)`, so a provider or a day is generated on its own and every provider sees the same itinerary. Index ↔ (airline, first flight number) makes identities unique by construction. |
+| Formats | One `ProviderFormat` per provider (Jackson 3 streaming generator, StAX, `BufferedWriter`). A new provider is a new class; a shared contract test checks round trip, empty feed, streaming and client disconnects for every format. |
+| Chaos | `ChaosPolicy` (plain Java, injected randomness) decides; `ChaosInterceptor` applies it before the controller. Serializers and controllers know nothing about chaos (ArchUnit). |
+| Reconciliation | `GET /admin/world/stats` reports what the world contains and what spec 001 should produce from the well-formed records, so the ingestion PR can check its counts exactly. |
+
+**SOLID, pragmatically.** SRP: generation (`ScheduleFactory`, `OfferFactory`), serialization (one class per format),
+chaos (policy vs. interceptor) and statistics are separate. OCP: a provider is added with a new `ProviderFormat`
+bean, and nothing else changes. LSP: every format honours the same contract, checked by one abstract test that runs
+for each format. ISP/DIP: controllers depend on `ProviderFormat` and the injected `Sleeper` / `RandomGenerator`
+supplier make chaos testable without sleeping. **Not abstracted:** the module has no `application/port` layer. The
+mock has no use-case orchestration and no driven ports, so ports would be single-implementation ceremony.
+
+**Measured at 1,000,000 itineraries** (Docker on an Apple Silicon laptop, `deterministic` profile, `-Xmx256m`):
+
+| | Mock-Alpha | Mock-Beta | Mock-Gamma |
+|---|---:|---:|---:|
+| Records | 619,577 | 619,925 | 619,224 |
+| Feed size | 144 MB | 332 MB | 100 MB |
+| Full feed, one request | 2.7 s | 10.6 s | 2.8 s |
+
+The container stayed at about 229 MiB with the 256 MB heap cap, and nothing was logged at WARN or ERROR. The three
+feeds requested in parallel took 11.4 s, about as long as the slowest one alone. `GET /admin/world/stats` took 1.7 s
+the first time. Beta is the slowest (verbose XML through StAX); a per-day partition is about 1/7 of these numbers.
+
+**Found while implementing:** the first version applied the latency **twice** per feed. A streamed response is
+asynchronous, and Spring dispatches the request again when the body completes, so the interceptor ran a second time.
+That also made it possible to inject a `500` after a feed had already been sent. `ConcurrencyIT` (three providers in
+parallel, expected ≈ slowest, got ≈ sum) exposed it; the interceptor now ignores `ASYNC` dispatches.
 
 *To be completed:* resilience strategy per provider (timeouts, retries, partial results) and the module/component
 diagram as built.
@@ -116,5 +157,14 @@ Known from the accepted decisions:
   format.
 - Arrival times aren't part of the identity. If providers disagree on arrival for the same flight, the earliest
   arrival is kept (deterministic, but it may not be the true schedule).
+
+- gds-mock regenerates the world on every request (each provider call walks every itinerary, including those it
+  doesn't offer). That is CPU instead of memory, and cheap at this volume (see the measurements above). Records come
+  in generation order, not shuffled.
+- gds-mock's admin API is unauthenticated (a mock on an internal network), and the three providers share one JVM, so
+  a GC pause or a crash affects all of them at once. Real providers fail more independently.
+- gds-mock doesn't simulate failures in the middle of a stream (truncated responses), gzip or slow trickling. Failures
+  happen before the first byte only.
+- Changing the generator code changes the data for a given seed. Determinism holds per version of the mock.
 
 *To be completed:* limitations found during implementation and what would change for production.

@@ -21,7 +21,7 @@ Target architecture. Each component is built in a later PR and described here on
 
 | Component | Role | Decision |
 |---|---|---|
-| `gds-mock` | Mock-Alpha (JSON), Mock-Beta (XML) and Mock-Gamma (CSV) provider APIs with artificial latency and errors | — |
+| `gds-mock` | Mock-Alpha (JSON), Mock-Beta (XML) and Mock-Gamma (CSV) provider APIs over a seeded, streamed world of up to 1M itineraries, with latency, random errors and an outage switch (**implemented**) | [ADR-0012](docs/adr/0012-single-gds-mock-application.md), [ADR-0013](docs/adr/0013-stateless-seeded-streamed-generation.md) |
 | `flight-aggregator` | Scheduled + on-demand **ingestion** from the 3 providers in parallel, **deduplication** and pricing in the domain, **search API** | [ADR-0006](docs/adr/0006-scheduled-pre-ingestion.md), [ADR-0010](docs/adr/0010-domain-assumptions.md) |
 | PostgreSQL | Source of truth for itineraries and ingestion runs | [ADR-0007](docs/adr/0007-postgresql-and-redis.md) |
 | Redis | Search results cache | [ADR-0007](docs/adr/0007-postgresql-and-redis.md) |
@@ -60,13 +60,11 @@ Search reads only from PostgreSQL/Redis, never from the providers, and pages wit
 ```bash
 ./mvnw verify                                   # format check, unit + IT tests, architecture rules, coverage gate
 ./mvnw -pl flight-aggregator spring-boot:run    # start the aggregator on http://localhost:8080
+./mvnw verify -Pslow-tests                      # also the slow 1,000,000-record tests
 ```
 
-**Planned** — the full stack (backend, gds-mock, frontend, PostgreSQL, Redis). It doesn't exist yet:
-
-```bash
-docker compose up --build
-```
+`docker compose up --build` currently starts **gds-mock** only (port 8081, with a healthcheck). The rest of the stack
+(aggregator, frontend, PostgreSQL, Redis) is added in later PRs.
 
 See [docs/usage.md](docs/usage.md) for the endpoints that currently exist and their configuration.
 
@@ -127,7 +125,13 @@ flight-aggregator/    aggregation service (Spring Boot), base package com.andres
     <feature>/application      ports and use cases (framework-free)
     <feature>/infrastructure   adapters (REST, config, persistence...) and wiring
     shared/                    cross-feature building blocks
-gds-mock/             mock GDS providers (placeholder, no code yet)
+gds-mock/             mock GDS providers (Spring Boot), base package com.andresps.gdsmock
+  src/main/java/com/andresps/gdsmock/
+    inventory/                 seeded world generator, provider formats and feeds, expected figures
+    chaos/                     latency, injected errors, outage switch
+    shared/                    provider id, request errors, Problem Details handler
+  Dockerfile                 multi-stage image (build context = repository root)
+docker-compose.yml    the stack (gds-mock for now)
 .claude/              shared Claude Code config: settings + hooks, skills, agents
 .githooks/            versioned git hooks (pre-commit, pre-push)
 .github/              CI, CodeQL, Dependabot, PR template
