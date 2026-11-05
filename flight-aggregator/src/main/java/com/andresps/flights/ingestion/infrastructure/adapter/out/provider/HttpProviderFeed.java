@@ -195,7 +195,10 @@ public final class HttpProviderFeed implements ProviderFeed {
         if (e instanceof RuntimeException bug) {
             throw bug; // not a provider failure: reported as UNEXPECTED_ERROR by the use case
         }
-        throw new IllegalStateException("Unexpected failure fetching " + provider(), e);
+        if (e instanceof Error error) {
+            throw error; // e.g. OutOfMemoryError: never disguised as a provider failure
+        }
+        throw new IllegalStateException("Unexpected checked failure fetching " + provider(), e);
     }
 
     private static <T extends Throwable> T cause(Throwable e, Class<T> type) {

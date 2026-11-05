@@ -318,6 +318,23 @@ class IngestionServiceTest {
             });
             assertThat(report.status()).isEqualTo(IngestionStatus.PARTIAL);
         }
+
+        @Test
+        @DisplayName("AC-21: an Error in a fetch (e.g. OutOfMemoryError) fails its partition without stalling the run")
+        void errorInFetchDoesNotStallTheRun() {
+            alpha.on(DAY2, FakeProviderFeed.throwsError());
+            long start = System.nanoTime();
+
+            IngestionReport report = ingest();
+
+            assertThat(Duration.ofNanos(System.nanoTime() - start))
+                    .as("not waiting for the 10 s run deadline")
+                    .isLessThan(Duration.ofSeconds(3));
+            assertThat(report.provider(ALPHA).failures()).singleElement().satisfies(f -> {
+                assertThat(f.day()).isEqualTo(DAY2);
+                assertThat(f.kind()).isEqualTo(FailureKind.UNEXPECTED_ERROR);
+            });
+        }
     }
 
     @Nested

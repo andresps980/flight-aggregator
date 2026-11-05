@@ -57,7 +57,13 @@ class IngestionConfiguration {
     List<ProviderFeed> providerFeeds(
             List<FeedParser> parsers, AggregatorProperties properties, CircuitBreakerRegistry providerCircuitBreakers) {
         Map<String, FeedParser> adapters = parsers.stream()
-                .collect(Collectors.toMap(parser -> parser.provider().value(), Function.identity()));
+                .collect(Collectors.toMap(
+                        parser -> parser.provider().value(),
+                        Function.identity(),
+                        (a, b) -> {
+                            throw new IllegalArgumentException("Two adapters for provider " + a.provider());
+                        },
+                        java.util.TreeMap::new)); // providers in id order, in feeds and reports
         properties.providers().keySet().forEach(id -> {
             if (!adapters.containsKey(id)) {
                 throw new IllegalArgumentException(

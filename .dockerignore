@@ -8,5 +8,6 @@
 **/*.iml
 docs
 specs
-flight-aggregator/src
+flight-aggregator/src/test
+gds-mock/src/test
 frontend

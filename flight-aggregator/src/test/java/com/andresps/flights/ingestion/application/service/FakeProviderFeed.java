@@ -119,6 +119,12 @@ final class FakeProviderFeed implements ProviderFeed {
         };
     }
 
+    static Behaviour throwsError() {
+        return (provider, day) -> {
+            throw new OutOfMemoryError("simulated (test)");
+        };
+    }
+
     /** Blocks until the calling thread is interrupted (e.g. by the run deadline). */
     static Behaviour blocksUntilInterrupted() {
         return (provider, day) -> {

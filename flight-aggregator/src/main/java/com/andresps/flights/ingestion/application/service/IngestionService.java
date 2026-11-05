@@ -206,7 +206,7 @@ public final class IngestionService implements IngestFlightsUseCase {
             BlockingQueue<PartitionOutcome> completed = new LinkedBlockingQueue<>();
             Map<ProviderId, Future<?>> inFlight = new LinkedHashMap<>();
             for (ProviderFeed feed : feeds) {
-                inFlight.put(feed.provider(), executor.submit(() -> completed.add(fetch(feed, day))));
+                inFlight.put(feed.provider(), executor.submit(() -> fetchInto(completed, feed, day)));
             }
 
             OfferAggregator aggregator = new OfferAggregator(validator, markupPolicy);
@@ -246,6 +246,25 @@ public final class IngestionService implements IngestFlightsUseCase {
                 missing.add(provider);
             });
             LOG.warn("Run deadline reached: {} partitions of {} cancelled {}", inFlight.size(), day, inFlight.keySet());
+        }
+
+        /**
+         * Always delivers an outcome to the day's coordinator, even when the fetch dies with an {@link Error} (e.g.
+         * {@code OutOfMemoryError}): otherwise the coordinator would wait for the run deadline. The error is reported
+         * as {@code UNEXPECTED_ERROR} and then rethrown, never swallowed.
+         */
+        private void fetchInto(BlockingQueue<PartitionOutcome> completed, ProviderFeed feed, LocalDate day) {
+            try {
+                completed.add(fetch(feed, day));
+            } catch (Error e) {
+                LOG.error("Partition {} {} died with {}", feed.provider(), day, e.toString());
+                completed.add(PartitionOutcome.failed(
+                        feed.provider(),
+                        new PartitionFailure(day, FailureKind.UNEXPECTED_ERROR, 0, e.toString()),
+                        -1,
+                        -1));
+                throw e;
+            }
         }
 
         private PartitionOutcome fetch(ProviderFeed feed, LocalDate day) {

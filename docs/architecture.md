@@ -40,6 +40,52 @@ flowchart LR
     cfg -. wires .-> out
 ```
 
+## Ingestion flow (spec 003)
+
+The `ingestion` feature of `flight-aggregator` turns the three provider feeds into deduplicated itineraries, one
+horizon day at a time ([ADR-0014](adr/0014-provider-resilience.md), [ADR-0015](adr/0015-atomic-partition-buffers.md),
+[ADR-0016](adr/0016-day-partitioned-aggregation.md)).
+
+```mermaid
+flowchart LR
+    subgraph application["application (plain Java)"]
+        uc[IngestionService<br/>implements IngestFlightsUseCase]
+        subgraph day["one coordinator per day (≤ max-concurrent-days)"]
+            q[[completion queue]] --> agg[OfferAggregator<br/>single consumer]
+        end
+        uc --> day
+    end
+
+    subgraph infra["infrastructure / adapter.out"]
+        subgraph feed["HttpProviderFeed × 3 (≤ max-concurrent-partitions each)"]
+            retry[Retry<br/>3 attempts, backoff + jitter] --> cb[CircuitBreaker<br/>per provider]
+            cb --> att[attempt on a virtual thread<br/>read timeout · attempt deadline]
+            att --> parser[FeedParser<br/>Alpha JSON · Beta StAX · Gamma CSV]
+            parser --> buf[(PartitionBuffer<br/>per attempt)]
+        end
+        sink[InMemoryDayAggregationStore]
+    end
+
+    mock[(gds-mock<br/>/provider/flights?date=)]
+
+    day -- "fetch(day) on virtual threads" --> retry
+    att -- "GET, body as InputStream" --> mock
+    buf -- "complete partition only" --> q
+    agg -- "DayAggregation (contributing / missing)" --> sink
+    uc -. "IngestionReport" .-> caller([caller])
+```
+
+1. A run reads "now" once, builds the horizon (the UTC days after today) and starts one coordinator per day, at most
+   `max-concurrent-days` at a time. The run deadline cancels whatever is unfinished (`RUN_TIMEOUT`).
+2. The coordinator asks each provider's feed for its day in parallel (`ProviderFeed`, an outbound port).
+3. The feed makes an **attempt** on a virtual worker thread: the request, then the body streamed through the
+   provider's parser into a fresh buffer. Malformed records are counted and skipped; a broken document fails the
+   attempt. Attempts go through the provider's circuit breaker and are retried for provider failures only.
+4. Only a completed attempt returns its partition (atomicity). The coordinator feeds each partition to the day's
+   aggregator as soon as it arrives, then drops it.
+5. When every partition of the day has finished, the day is published (if any provider contributed) and released.
+   The day statistics are summed into the report.
+
 ## Dependency rule
 
 `infrastructure → application → domain`. Inner layers know nothing about outer ones, and `domain` and

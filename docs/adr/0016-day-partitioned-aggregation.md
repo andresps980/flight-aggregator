@@ -49,5 +49,7 @@ served under two days would appear twice: a visible duplicate, never a lost offe
 - **Negative / trade-offs:** relies on the partitioning assumption; a day's itineraries can be published while other
   days are still running, so a reader may briefly see a mix of runs (the persistence spec decides visibility);
   memory still grows with the size of the largest day.
-- **Follow-ups:** the persistence spec must not wipe a missing provider's previous data for a day (spec 003); the
-  memory footprint is measured in this PR (`SOLUTION.md`).
+- **Measured (1M itineraries, SOLUTION.md):** the working set is about 250 MB per day in flight (512 MB with the
+  default 2 days, 1 GB with all 7). That is below the estimate above, because each partition is fed and dropped as
+  it arrives.
+- **Follow-ups:** the persistence spec must not wipe a missing provider's previous data for a day (spec 003).
