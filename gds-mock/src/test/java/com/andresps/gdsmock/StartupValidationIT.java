@@ -8,7 +8,10 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.boot.builder.SpringApplicationBuilder;
 
-/** AC-3: settings out of range stop the application at startup with a message naming the property. */
+/**
+ * AC-3: settings out of range stop the application at startup with a message naming the property. Settings are
+ * passed as command-line arguments, which (unlike builder default properties) override {@code application.yml}.
+ */
 class StartupValidationIT {
 
     @ParameterizedTest(name = "{0} -> {1}")
@@ -24,8 +27,7 @@ class StartupValidationIT {
     void invalidSettingsFailStartup(String property, String named) {
         assertThatThrownBy(() -> new SpringApplicationBuilder(GdsMockApplication.class)
                         .profiles("deterministic")
-                        .properties("server.port=0", property)
-                        .run()
+                        .run("--server.port=0", "--" + property)
                         .close())
                 .satisfies(e -> assertThat(rootCauseMessages(e)).contains(named));
     }

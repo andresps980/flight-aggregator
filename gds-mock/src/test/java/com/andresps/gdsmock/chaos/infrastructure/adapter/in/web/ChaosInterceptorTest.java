@@ -14,6 +14,7 @@ import com.andresps.gdsmock.chaos.domain.ChaosSettings;
 import com.andresps.gdsmock.chaos.domain.OutageRegistry;
 import com.andresps.gdsmock.inventory.domain.model.Horizon;
 import com.andresps.gdsmock.inventory.infrastructure.adapter.in.web.FeedRequestResolver;
+import jakarta.servlet.DispatcherType;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -92,6 +93,19 @@ class ChaosInterceptorTest {
         assertThat(interceptor.preHandle(request("mock-alpha", "2026-13-01"), new MockHttpServletResponse(), null))
                 .isTrue();
         assertThat(interceptor.preHandle(request("mock-alpha", "2026-11-05"), new MockHttpServletResponse(), null))
+                .isTrue();
+        assertThat(sleeps).isEmpty();
+        verifyNoInteractions(random);
+    }
+
+    @Test
+    @DisplayName("AC-15, AC-16: the async re-dispatch after a streamed feed gets no second latency or error")
+    void asyncDispatchSkipsChaos() throws Exception {
+        outages.start(ALPHA);
+        var asyncDispatch = request("mock-alpha", null);
+        asyncDispatch.setDispatcherType(DispatcherType.ASYNC);
+
+        assertThat(interceptor.preHandle(asyncDispatch, new MockHttpServletResponse(), null))
                 .isTrue();
         assertThat(sleeps).isEmpty();
         verifyNoInteractions(random);

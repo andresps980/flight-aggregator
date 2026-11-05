@@ -3,6 +3,7 @@ package com.andresps.gdsmock.inventory.infrastructure.adapter.in.web.format;
 import static com.andresps.gdsmock.support.WorldFixtures.generator;
 import static com.andresps.gdsmock.support.WorldFixtures.settings;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.andresps.gdsmock.inventory.domain.model.Airport;
 import com.andresps.gdsmock.inventory.domain.model.Malformation;
@@ -24,6 +25,7 @@ import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -157,10 +159,31 @@ abstract class ProviderFormatContractTest {
     }
 
     @Test
-    @DisplayName("AC-12: output is written while records are still being produced (1,000,000 records)")
+    @DisplayName("AC-12: output is written while records are still being produced (probe at 25,000 of 50,000)")
     void streamsWhileProducing() throws IOException {
+        assertStreams(50_000);
+    }
+
+    @Test
+    @Tag("slow")
+    @DisplayName("AC-12: 1,000,000 records are written while being produced (slow)")
+    void streamsAMillionRecords() throws IOException {
+        assertStreams(1_000_000);
+    }
+
+    @Test
+    @DisplayName("AC-12: when the client disconnects, writing fails fast and records stop being consumed")
+    void stopsConsumingWhenTheClientDisconnects() {
+        var out = new DisconnectingOutputStream(64 * 1024);
+        var records = new ProbingIterator(direct(), 1_000_000, 0, new CountingOutputStream());
+
+        assertThatThrownBy(() -> format().write(records, out)).isInstanceOf(IOException.class);
+        assertThat(records.produced).isLessThan(50_000);
+    }
+
+    private void assertStreams(int total) throws IOException {
         var out = new CountingOutputStream();
-        var records = new ProbingIterator(direct(), 1_000_000, 500_000, out);
+        var records = new ProbingIterator(direct(), total, total / 2, out);
 
         format().write(records, out);
 
@@ -189,13 +212,36 @@ abstract class ProviderFormatContractTest {
         }
     }
 
+    /** Accepts {@code limit} bytes, then fails like a socket whose client went away. */
+    static final class DisconnectingOutputStream extends OutputStream {
+        private final long limit;
+        private long count;
+
+        DisconnectingOutputStream(long limit) {
+            this.limit = limit;
+        }
+
+        @Override
+        public void write(int b) throws IOException {
+            write(new byte[] {(byte) b}, 0, 1);
+        }
+
+        @Override
+        public void write(byte[] b, int off, int len) throws IOException {
+            count += len;
+            if (count > limit) {
+                throw new IOException("Broken pipe");
+            }
+        }
+    }
+
     /** Yields the same record {@code total} times and records how many bytes were written at {@code probeAt}. */
     static final class ProbingIterator implements Iterator<ProviderRecord> {
         private final ProviderRecord record;
         private final int total;
         private final int probeAt;
         private final CountingOutputStream out;
-        private int produced;
+        int produced;
         long bytesWrittenAtProbe = -1;
 
         ProbingIterator(ProviderRecord record, int total, int probeAt, CountingOutputStream out) {

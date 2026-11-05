@@ -1,0 +1,10 @@
+# Deterministic profile (spec 002, AC-19): no latency, no injected errors, fixed seed.
+# The admin outage switch still works.
+gds:
+  world:
+    seed: 42
+  chaos:
+    default:
+      latency-min: 0ms
+      latency-max: 0ms
+      error-rate: 0

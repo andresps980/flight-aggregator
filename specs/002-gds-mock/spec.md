@@ -92,7 +92,8 @@ spec can reconcile its counts.
 - **AC-11** — When a response is parsed, then it yields exactly that provider's records of the world, in generation
   order: same flights, airports, instants and prices; malformed records differ only in their injected field.
 - **AC-12** — Responses are streamed while they are generated (chunked, no `Content-Length`); nothing proportional to
-  the volume is held in memory, so a 1,000,000-itinerary world is served with a bounded heap.
+  the volume is held in memory, so a 1,000,000-itinerary world is served with a bounded heap. If the client
+  disconnects mid-stream, generation stops and the disconnect is not logged as an error.
 - **AC-13** — Given `?date=YYYY-MM-DD` inside the horizon, then only itineraries of that partition day are returned;
   the partitions are disjoint and their union is the unfiltered response.
 - **AC-14 (error)** — A `date` outside the horizon or not in `YYYY-MM-DD` ⇒ `400`; an unknown provider ⇒ `404`. Both
@@ -100,7 +101,8 @@ spec can reconcile its counts.
 
 **Chaos** (provider endpoints only)
 - **AC-15** — Given a latency range [min, max] for a provider (default 100–5000 ms), then each request waits a
-  uniformly random time in that range before the first byte.
+  uniformly random time in that range before the first byte. Requests are served concurrently: three providers
+  requested in parallel answer in about the slowest latency, not the sum.
 - **AC-16** — Given an `error-rate` p for a provider (default 0.10), then each request fails with `500` Problem
   Details with probability p, after the latency; p = 0 never fails, p = 1 always fails. A successful response's
   content never depends on chaos.
@@ -114,7 +116,9 @@ spec can reconcile its counts.
 **Expected figures**
 - **AC-20** — `GET /admin/world/stats[?date=]` returns, for the current settings and reference date (and partition
   day if given): distinct itineraries; invalid itineraries per kind; per provider the records served, malformed
-  records per kind and same-provider duplicates; cross-provider duplicates; and the **expected aggregation** that
+  records per kind, same-provider duplicates and itineraries whose records from that provider are all malformed;
+  cross-provider duplicates; itineraries whose records are all malformed (total and per invalid kind, since a
+  client can't classify them); and the **expected aggregation** that
   spec 001 should produce from the well-formed records: offers received per provider, discarded per reason,
   duplicates merged and itineraries produced, with received = discarded + merged + produced. Each figure equals the
   count obtained by parsing the three provider responses.
@@ -185,8 +189,10 @@ Unparseable times: Alpha `"depTs":"TBD"`, Beta `dateTime="2026-11-10T25:61:00+01
   "invalidItineraries": {"MIXED_AIRLINES": 714, "...": 0},
   "crossProviderDuplicates": 85000,
   "providers": {
-    "mock-alpha": {"records": 61800, "sameProviderDuplicates": 300, "malformed": {"BAD_AIRPORT_CODE": 205, "...": 0}}
+    "mock-alpha": {"records": 61800, "sameProviderDuplicates": 300, "fullyMalformedItineraries": 380,
+                   "malformed": {"BAD_AIRPORT_CODE": 205, "...": 0}}
   },
+  "fullyMalformedItineraries": {"total": 410, "byInvalidKind": {"MIXED_AIRLINES": 3, "...": 0}},
   "expectedAggregation": {
     "offersReceived": {"mock-alpha": 61182}, "discarded": {"MIXED_AIRLINES": 1420},
     "duplicatesMerged": 84000, "itinerariesProduced": 94900
@@ -207,6 +213,8 @@ record (AC-3).
 
 ## Non-functional requirements
 
+- **Tests:** every random behaviour is seeded in tests (no flaky statistics). Tests over 1,000,000 records are tagged
+  `slow` and excluded from the default build (`./mvnw verify -Pslow-tests` runs them).
 - **Memory:** generation and serialization are lazy; memory does not grow with the volume (AC-12). Stats are one
   lazy pass with counters, cached per reference date and partition.
 - **Determinism:** data depends only on seed, reference date and settings, never on request order or chaos.
@@ -240,3 +248,5 @@ All resolved (2026-11-05):
 - [x] Q8 Unauthenticated admin API that only toggles the outage — yes.
 - [x] Added by the author: `GET /admin/world/stats` (AC-20), the partition day of `ALREADY_DEPARTED` (AC-6), the
   consequences section above, multi-arch image (AC-22).
+- [x] Added by the author at the test checkpoint: fully malformed itineraries in the stats (AC-20, exact
+  reconciliation), concurrent serving (AC-15), quiet client aborts (AC-12), seeded tests and a `slow` tag.

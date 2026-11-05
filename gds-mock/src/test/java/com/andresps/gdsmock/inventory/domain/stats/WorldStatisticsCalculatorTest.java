@@ -76,6 +76,15 @@ class WorldStatisticsCalculatorTest {
                 .containsEntry(MalformationKind.UNPARSEABLE_TIME, 1L)
                 .containsEntry(MalformationKind.NON_POSITIVE_PRICE, 0L);
 
+        assertThat(stats.fullyMalformedItineraries().total()).isEqualTo(2);
+        assertThat(stats.fullyMalformedItineraries().byInvalidKind())
+                .containsOnlyKeys(InvalidKind.values())
+                .containsEntry(InvalidKind.ALREADY_DEPARTED, 1L)
+                .containsEntry(InvalidKind.MIXED_AIRLINES, 0L);
+        assertThat(stats.providers().get(ALPHA).fullyMalformedItineraries()).isZero();
+        assertThat(stats.providers().get(BETA).fullyMalformedItineraries()).isEqualTo(1);
+        assertThat(stats.providers().get(GAMMA).fullyMalformedItineraries()).isEqualTo(2);
+
         ExpectedAggregation expected = stats.expectedAggregation();
         assertThat(expected.offersReceived())
                 .containsExactlyInAnyOrderEntriesOf(Map.of(ALPHA, 4L, BETA, 2L, GAMMA, 2L));
@@ -91,6 +100,8 @@ class WorldStatisticsCalculatorTest {
     @DisplayName("AC-20: an empty world has all counters at zero, with every provider and kind listed")
     void emptyWorld() {
         WorldStatistics stats = calculator.calculate(Stream.empty());
+
+        assertThat(stats.fullyMalformedItineraries().total()).isZero();
 
         assertThat(stats.distinctItineraries()).isZero();
         assertThat(stats.crossProviderDuplicates()).isZero();

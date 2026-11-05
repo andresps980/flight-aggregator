@@ -56,7 +56,8 @@ class WorldStatsIT {
 
     @ParameterizedTest(name = "query \"{0}\"")
     @ValueSource(strings = {"", "?date=2026-11-08"})
-    @DisplayName("AC-20: stats equal the counts parsed from the three provider responses (whole horizon and one day)")
+    @DisplayName(
+            "AC-20: stats exactly equal the counts parsed from the three provider responses (whole horizon and one day)")
     void statsMatchParsedResponses(String query) {
         JsonNode stats = JsonMapper.builder()
                 .build()
@@ -67,6 +68,7 @@ class WorldStatsIT {
                 parser.apply(http.get("/" + provider + "/flights" + query).getBody())));
 
         Map<String, Set<String>> providersByItinerary = new HashMap<>();
+        Set<String> withWellFormedRecord = new HashSet<>();
         Map<String, Long> discarded = new HashMap<>();
         Map<String, Set<String>> invalidItinerariesSeen = new HashMap<>();
         Set<String> producedIdentities = new HashSet<>();
@@ -104,6 +106,14 @@ class WorldStatsIT {
                             .longValue())
                     .isEqualTo(wellFormed.size());
 
+            Set<String> offered = new HashSet<>();
+            Set<String> offeredWellFormed = new HashSet<>();
+            records.forEach(r -> offered.add(r.itineraryRef()));
+            wellFormed.forEach(r -> offeredWellFormed.add(r.itineraryRef()));
+            withWellFormedRecord.addAll(offeredWellFormed);
+            assertThat(providerStats.get("fullyMalformedItineraries").longValue())
+                    .isEqualTo(offered.size() - offeredWellFormed.size());
+
             for (ParsedRecord record : records) {
                 providersByItinerary
                         .computeIfAbsent(record.itineraryRef(), k -> new HashSet<>())
@@ -129,6 +139,11 @@ class WorldStatsIT {
                         .mapToLong(p -> p.size() - 1)
                         .sum());
 
+        JsonNode fullyMalformed = stats.get("fullyMalformedItineraries");
+        assertThat(fullyMalformed.get("total").longValue())
+                .isEqualTo(providersByItinerary.size() - withWellFormedRecord.size())
+                .isPositive();
+
         JsonNode expected = stats.get("expectedAggregation");
         for (String kind : List.of(
                 "MIXED_AIRLINES",
@@ -141,11 +156,13 @@ class WorldStatsIT {
             assertThat(expected.get("discarded").get(kind).longValue())
                     .as("discarded %s", kind)
                     .isEqualTo(discarded.getOrDefault(kind, 0L));
-            // Itineraries whose every record is malformed can't be classified by a client, hence the lower bound.
+            // Itineraries whose every record is malformed can't be classified by a client: the stats report them.
             assertThat(stats.get("invalidItineraries").get(kind).longValue())
                     .as("invalid itineraries %s", kind)
-                    .isGreaterThanOrEqualTo(
-                            invalidItinerariesSeen.getOrDefault(kind, Set.of()).size());
+                    .isEqualTo(invalidItinerariesSeen
+                                    .getOrDefault(kind, Set.of())
+                                    .size()
+                            + fullyMalformed.get("byInvalidKind").get(kind).longValue());
         }
         assertThat(expected.get("itinerariesProduced").longValue()).isEqualTo(producedIdentities.size());
         assertThat(expected.get("duplicatesMerged").longValue()).isEqualTo(validWellFormed - producedIdentities.size());

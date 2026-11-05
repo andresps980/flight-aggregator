@@ -35,6 +35,9 @@
         <!-- Coverage gate, applied per module to merged unit + integration coverage -->
         <jacoco.line.minimum>0.80</jacoco.line.minimum>
         <jacoco.branch.minimum>0.70</jacoco.branch.minimum>
+
+        <!-- JUnit tags excluded by default (long-running volume tests); -Pslow-tests runs everything -->
+        <test.excludedGroups>slow</test.excludedGroups>
     </properties>
 
     <dependencyManagement>
@@ -52,10 +55,22 @@
              so the aggregator itself runs no tests, coverage or formatting. -->
         <pluginManagement>
             <plugins>
+                <!-- Unit tests: *Test.java -->
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <configuration>
+                        <excludedGroups>${test.excludedGroups}</excludedGroups>
+                    </configuration>
+                </plugin>
+
                 <!-- Integration tests: *IT.java, run in integration-test / verify phases -->
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-failsafe-plugin</artifactId>
+                    <configuration>
+                        <excludedGroups>${test.excludedGroups}</excludedGroups>
+                    </configuration>
                     <executions>
                         <execution>
                             <goals>
@@ -181,4 +196,14 @@
             </plugins>
         </pluginManagement>
     </build>
+
+    <profiles>
+        <!-- ./mvnw verify -Pslow-tests: also run tests tagged "slow" (e.g. 1,000,000-record generation/streaming) -->
+        <profile>
+            <id>slow-tests</id>
+            <properties>
+                <test.excludedGroups></test.excludedGroups>
+            </properties>
+        </profile>
+    </profiles>
 </project>
