@@ -69,7 +69,7 @@ providers, aggregates each day with the rules above and publishes it. It has no 
 | Parsing | Streamed (Jackson 3 parser, StAX, line reader). Times become UTC instants; flight numbers lose leading zeros (`VY0001` = `VY1`). |
 | Malformed record | Skipped and counted per provider under one reason (first failing field): `BAD_AIRPORT_CODE`, `BAD_FLIGHT_NUMBER`, `NON_POSITIVE_PRICE`, `UNPARSEABLE_TIME`, `INVALID_RECORD`. Never stops the feed. |
 | Broken document | Invalid or truncated JSON/XML/CSV, a wrong root or header, any XML `DOCTYPE` (XXE-safe): the attempt fails as `MALFORMED_DOCUMENT` and leaves nothing behind. |
-| Retries | `5xx`, timeouts, I/O errors and broken documents: up to 3 attempts, 500 ms then 1 s (±50 % jitter). `4xx`: no retry. |
+| Retries | `5xx`, timeouts, I/O errors and broken documents: up to 3 attempts, 500 ms then 1 s (±50 % jitter). `4xx` (and any other non-2xx status): no retry. |
 | Circuit breaker | Per provider, opens when ≥ 80 % of the last 10 attempts failed; then calls fail at once as `CIRCUIT_OPEN` for 30 s, after which 2 probes decide. Survives across runs. |
 | Deadlines | 6 s without data (first byte or mid-body), 60 s per attempt, 10 min per run (`RUN_TIMEOUT`). |
 | Partial results | A failed partition never fails the run. Provider: `COMPLETED` / `PARTIAL` / `FAILED` by its partitions; run: `FAILED` only if every provider failed. A day is published if at least one provider delivered it, naming the missing ones. |
@@ -101,6 +101,7 @@ As in gds-mock, per-provider keys contain a dash, so override them with command-
 | `aggregator.resilience.default.connect-timeout` | `1s` | TCP connect timeout |
 | `aggregator.resilience.default.read-timeout` | `6s` | Max wait for the first byte and between body bytes (above the 5 s max latency) |
 | `aggregator.resilience.default.attempt-timeout` | `60s` | Total time per attempt; must be greater than `read-timeout` |
+| `aggregator.resilience.default.max-records-per-partition` | `500000` | Records one attempt may buffer; more fails the attempt as `MALFORMED_DOCUMENT` (protects the heap from a runaway feed) |
 | `aggregator.resilience.default.retry.max-attempts` | `3` | Attempts per partition, first one included |
 | `aggregator.resilience.default.retry.initial-backoff` / `multiplier` / `jitter` | `500ms` / `2` / `0.5` | Wait before attempt n+1: `initial × multiplier^(n-1) × (1 ± jitter)` |
 | `aggregator.resilience.default.circuit-breaker.sliding-window` / `minimum-calls` | `10` / `10` | Attempts considered, and needed before deciding |

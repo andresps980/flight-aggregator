@@ -9,6 +9,7 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -40,6 +41,11 @@ public record AggregatorProperties(
                     || provider.baseUrl() == null
                     || provider.baseUrl().toString().isBlank()) {
                 throw new IllegalArgumentException("aggregator.providers." + id + ".base-url is required");
+            }
+            URI url = provider.baseUrl();
+            if (!url.isAbsolute() || !List.of("http", "https").contains(url.getScheme()) || url.getHost() == null) {
+                throw new IllegalArgumentException(
+                        "aggregator.providers." + id + ".base-url must be an absolute http(s) URL, got " + url);
             }
         });
         // fail fast on invalid values: resolve everything once
@@ -111,7 +117,8 @@ public record AggregatorProperties(
             Duration readTimeout,
             Duration attemptTimeout,
             RetryOverride retry,
-            CircuitBreakerOverride circuitBreaker) {
+            CircuitBreakerOverride circuitBreaker,
+            Long maxRecordsPerPartition) {
 
         ResilienceSettings over(ResilienceSettings base) {
             return new ResilienceSettings(
@@ -119,7 +126,8 @@ public record AggregatorProperties(
                     or(readTimeout, base.readTimeout()),
                     or(attemptTimeout, base.attemptTimeout()),
                     retry == null ? base.retry() : retry.over(base.retry()),
-                    circuitBreaker == null ? base.circuitBreaker() : circuitBreaker.over(base.circuitBreaker()));
+                    circuitBreaker == null ? base.circuitBreaker() : circuitBreaker.over(base.circuitBreaker()),
+                    or(maxRecordsPerPartition, base.maxRecordsPerPartition()));
         }
     }
 

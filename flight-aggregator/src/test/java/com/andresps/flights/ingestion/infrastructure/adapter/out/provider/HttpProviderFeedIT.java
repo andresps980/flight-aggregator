@@ -298,10 +298,15 @@ class HttpProviderFeedIT {
     }
 
     @Test
-    @DisplayName("AC-16: after open-wait, half-open probes that succeed close the breaker again")
-    void recoversThroughHalfOpen() throws InterruptedException {
+    @DisplayName("AC-16: after the open wait (on a controllable clock), half-open probes that succeed close it again")
+    void recoversThroughHalfOpen() {
+        MutableClock clock = new MutableClock();
+        HttpProviderFeed feed = new HttpProviderFeed(
+                new GammaCsvParser(),
+                URI.create(server.baseUrl()),
+                SCALED,
+                ResiliencePolicies.circuitBreaker("mock-gamma", SCALED.circuitBreaker(), clock));
         always(aResponse().withStatus(503));
-        HttpProviderFeed feed = feed(SCALED);
         for (int i = 0; i < 4; i++) {
             failure(feed);
         }
@@ -309,7 +314,7 @@ class HttpProviderFeedIT {
 
         server.resetAll();
         always(csv(BODY));
-        Thread.sleep(SCALED.circuitBreaker().openWait().plusMillis(200).toMillis());
+        clock.advance(SCALED.circuitBreaker().openWait().plusMillis(1));
 
         feed.fetch(DAY);
         assertThat(feed.circuitState()).isEqualTo(CircuitState.HALF_OPEN);
@@ -332,7 +337,7 @@ class HttpProviderFeedIT {
     }
 
     @Test
-    @DisplayName("AC-13: an interrupted fetch (run deadline) stops at once: the request is aborted and not retried")
+    @DisplayName("AC-13: an interrupted fetch (run deadline) stops at once as RUN_TIMEOUT: aborted and not retried")
     void interruptionAbortsFetch() throws InterruptedException {
         ResilienceSettings patient = new ResilienceSettings(
                 SCALED.connectTimeout(),
@@ -344,22 +349,82 @@ class HttpProviderFeedIT {
         HttpProviderFeed feed = feed(patient);
         AtomicReference<Throwable> outcome = new AtomicReference<>();
 
-        Thread fetching = Thread.ofVirtual().start(() -> {
-            try {
-                feed.fetch(DAY);
-            } catch (RuntimeException e) {
-                outcome.set(e);
-            }
-        });
-        Thread.sleep(300);
+        Thread fetching = startFetching(feed, outcome);
+        awaitRequests(1); // the request is in flight
         long interruptedAt = System.nanoTime();
         fetching.interrupt();
         fetching.join(Duration.ofSeconds(2));
 
         assertThat(fetching.isAlive()).isFalse();
         assertThat(Duration.ofNanos(System.nanoTime() - interruptedAt)).isLessThan(Duration.ofSeconds(1));
-        assertThat(outcome.get()).isInstanceOf(PartitionFetchException.class);
+        assertThat(outcome.get())
+                .isInstanceOfSatisfying(
+                        PartitionFetchException.class, e -> assertThat(e.kind()).isEqualTo(FailureKind.RUN_TIMEOUT));
         assertThat(requests()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("AC-13: interrupted while waiting between attempts, the fetch reports RUN_TIMEOUT, not the last 500")
+    void interruptionDuringBackoff() throws InterruptedException {
+        ResilienceSettings slowBackoff = new ResilienceSettings(
+                SCALED.connectTimeout(),
+                SCALED.readTimeout(),
+                SCALED.attemptTimeout(),
+                new RetrySettings(3, Duration.ofSeconds(5), 2.0, 0.0),
+                SCALED.circuitBreaker());
+        always(aResponse().withStatus(500));
+        AtomicReference<Throwable> outcome = new AtomicReference<>();
+
+        Thread fetching = startFetching(feed(slowBackoff), outcome);
+        awaitRequests(1); // first attempt failed; now waiting 5 s before the second
+        fetching.interrupt();
+        fetching.join(Duration.ofSeconds(2));
+
+        assertThat(fetching.isAlive()).isFalse();
+        assertThat(outcome.get()).isInstanceOfSatisfying(PartitionFetchException.class, e -> {
+            assertThat(e.kind()).isEqualTo(FailureKind.RUN_TIMEOUT);
+            assertThat(e.attempts()).isEqualTo(1);
+        });
+        assertThat(requests()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("AC-5/ADR-0015: a partition with more records than max-records-per-partition fails the attempt")
+    void recordLimitPerPartition() {
+        ResilienceSettings capped = new ResilienceSettings(
+                SCALED.connectTimeout(),
+                SCALED.readTimeout(),
+                SCALED.attemptTimeout(),
+                SCALED.retry(),
+                SCALED.circuitBreaker(),
+                2);
+        always(csv(BODY));
+
+        PartitionFetchException failure = failure(feed(capped));
+
+        assertThat(failure.kind()).isEqualTo(FailureKind.MALFORMED_DOCUMENT);
+        assertThat(failure.getMessage()).contains("more than 2 records");
+    }
+
+    private static Thread startFetching(HttpProviderFeed feed, AtomicReference<Throwable> outcome) {
+        return Thread.ofVirtual().start(() -> {
+            try {
+                feed.fetch(DAY);
+            } catch (RuntimeException e) {
+                outcome.set(e);
+            }
+        });
+    }
+
+    /** Polls WireMock (no blind sleep): returns once {@code count} requests were received, or fails after 5 s. */
+    private static void awaitRequests(int count) throws InterruptedException {
+        long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+        while (requests() < count) {
+            if (System.nanoTime() > deadline) {
+                throw new AssertionError("WireMock did not receive " + count + " request(s) within 5 s");
+            }
+            Thread.sleep(10);
+        }
     }
 
     @Test

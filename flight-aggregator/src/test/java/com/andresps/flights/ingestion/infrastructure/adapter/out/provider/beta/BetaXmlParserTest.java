@@ -167,6 +167,41 @@ class BetaXmlParserTest {
     }
 
     @Test
+    @DisplayName(
+            "AC-6: an element with an unexpected child where text is expected is one INVALID_RECORD, not a broken feed")
+    void nestedElementInTextField() {
+        String nested = valid().replace("<carrier>IB</carrier>", "<carrier>IB<x/></carrier>");
+        String nestedAmount = valid().replace(">131.40<", "><amount>131.40</amount><");
+
+        PartitionBuffer buffer = parse(parser, document(valid(), nested, nestedAmount, valid()));
+
+        assertThat(buffer.malformed())
+                .containsOnly(org.assertj.core.api.Assertions.entry(MalformedReason.INVALID_RECORD, 2L));
+        assertThat(buffer.offers()).hasSize(2);
+    }
+
+    @Test
+    @DisplayName("AC-6: more than 16 segments in one itinerary is an INVALID_RECORD (bounded memory)")
+    void tooManySegments() {
+        String segment = segment("IB", "345", "MAD", "2026-11-10T09:00:00+01:00", "BCN", "2026-11-10T10:25:00+01:00");
+        String huge =
+                itinerary("99.00", java.util.Collections.nCopies(17, segment).toArray(String[]::new));
+
+        PartitionBuffer buffer = parse(parser, document(huge, valid()));
+
+        assertThat(buffer.malformed()).containsOnlyKeys(MalformedReason.INVALID_RECORD);
+        assertThat(buffer.offers()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("AC-5/AC-7: a text longer than 64 KiB fails the document instead of growing memory without bound")
+    void rejectsHugeText() {
+        String huge = valid().replace("<carrier>IB</carrier>", "<carrier>" + "I".repeat(70_000) + "</carrier>");
+
+        assertThatThrownBy(() -> parse(parser, document(huge))).isInstanceOf(MalformedDocumentException.class);
+    }
+
+    @Test
     @DisplayName("AC-6: one reason per record, the first failing field in document order")
     void firstFailingFieldWins() {
         String twoFaults = valid().replace(">131.40<", ">-1.00<").replace("airport=\"MAD\"", "airport=\"M4D\"");

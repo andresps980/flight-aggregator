@@ -23,7 +23,10 @@ We will make an attempt the unit of delivery:
   buffer lives only from its attempt's start until it has been fed.
 
 Memory: a buffer holds one day partition of one provider. At 1,000,000 itineraries that is ≈ 88,000 offers,
-estimated at 45–90 MB; at most `max-concurrent-partitions` per provider are in flight. This is measured in this PR.
+estimated at 45–90 MB; at most `max-concurrent-partitions` per provider are in flight. It was not measured on its
+own: the measured figure is the whole working set, about 250 MB per day in flight at 1M (SOLUTION.md), which
+includes the buffers. A buffer holds at most `max-records-per-partition` records (500,000 by default), so a provider
+that streams without end fails the attempt instead of exhausting the heap.
 
 ## Alternatives considered
 

@@ -17,6 +17,7 @@ import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import java.time.Clock;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -63,7 +64,7 @@ class IngestionConfiguration {
                         (a, b) -> {
                             throw new IllegalArgumentException("Two adapters for provider " + a.provider());
                         },
-                        java.util.TreeMap::new)); // providers in id order, in feeds and reports
+                        TreeMap::new)); // providers in id order, in feeds and reports
         properties.providers().keySet().forEach(id -> {
             if (!adapters.containsKey(id)) {
                 throw new IllegalArgumentException(
@@ -83,6 +84,8 @@ class IngestionConfiguration {
                             settings,
                             providerCircuitBreakers.circuitBreaker(
                                     id,
+                                    // wall clock on purpose: tests fix the application Clock, which would freeze the
+                                    // open wait
                                     ResiliencePolicies.circuitBreakerConfig(
                                             settings.circuitBreaker(), Clock.systemUTC())));
                 })

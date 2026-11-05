@@ -11,12 +11,15 @@ import java.util.function.Predicate;
 /** Resilience4j policies (core modules only, no Spring integration) built from our settings (ADR-0014). */
 public final class ResiliencePolicies {
 
-    /** Provider failures: retried and recorded by the breaker. Anything else (4xx, cancellation) is neither. */
+    /** Provider failures: retried and recorded by the breaker. */
     private static final Predicate<Throwable> PROVIDER_FAILURE =
             e -> e instanceof AttemptFailedException failure && failure.retryable();
 
-    private static final Predicate<Throwable> NOT_A_PROVIDER_FAILURE =
-            e -> e instanceof AttemptFailedException failure && !failure.retryable();
+    /**
+     * Anything else (4xx, cancellation, a bug, an {@code Error}) is ignored by the breaker: neither a failure nor a
+     * success, so it can't skew the window either way.
+     */
+    private static final Predicate<Throwable> NOT_A_PROVIDER_FAILURE = PROVIDER_FAILURE.negate();
 
     private ResiliencePolicies() {}
 

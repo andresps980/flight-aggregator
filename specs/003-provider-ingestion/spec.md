@@ -1,6 +1,6 @@
 # Spec 003: Provider ingestion
 
-- **Status:** Approved
+- **Status:** Implemented
 - **Branch:** feat/003-provider-ingestion
 - **Related ADRs:** [ADR-0006](../../docs/adr/0006-scheduled-pre-ingestion.md),
   [ADR-0011](../../docs/adr/0011-incremental-deduplication.md), [ADR-0012](../../docs/adr/0012-single-gds-mock-application.md),
@@ -110,7 +110,8 @@ same itinerary served under two days would be produced twice (one per day): a du
 - **AC-13** — Given a body that keeps trickling bytes (never stalling for `read-timeout`) past `attempt-timeout`,
   then the attempt is aborted as `TIMEOUT` and retried. Given a run still going after `run-timeout`, then every
   unfinished partition is cancelled and fails as `RUN_TIMEOUT`, days are completed with the partitions they have,
-  and the run returns its report; no request outlives the run.
+  and the run returns its report. Cancelled requests are aborted at once (their sockets closed); none starts after
+  the deadline, and none outlives the run by more than one `read-timeout`.
 - **AC-14** — Given a `5xx`, a timeout, an I/O error (including a connection reset mid-body) or a malformed
   document, then the attempt is retried up to `max-attempts` in total, waiting an exponential backoff with jitter
   between attempts. Given a `4xx`, then the partition fails at once as `CLIENT_ERROR`, with no retry.
@@ -162,7 +163,7 @@ same itinerary served under two days would be produced twice (one per day): a du
 
 | Property | Default | Why |
 |---|---|---|
-| `aggregator.providers.<id>.base-url` | `http://localhost:8081` (`http://gds-mock:8081` in compose) | gds-mock serves the three providers |
+| `aggregator.providers.<id>.base-url` | `http://localhost:8081` | gds-mock serves the three providers (compose will set `http://gds-mock:8081` when the aggregator joins it, next spec) |
 | `aggregator.ingestion.horizon-days` | `7` | Same horizon as gds-mock; a day outside it gets `400` |
 | `aggregator.ingestion.markup-percentage` | `5` | Spec 001 / ADR-0010 |
 | `aggregator.ingestion.max-concurrent-days` | `2` | Memory is bounded by the days in flight (see *Memory*); 7 days ⇒ 4 rounds × ≈ 3.8 s (mean of the slowest of 3 latencies) ≈ 15 s per run |
@@ -171,6 +172,7 @@ same itinerary served under two days would be produced twice (one per day): a du
 | `…resilience.default.connect-timeout` | `1s` | Local network; a refused connection should fail fast |
 | `…resilience.default.read-timeout` | `6s` | Above the mock's 5,000 ms maximum latency: ingestion runs in the background, and a shorter timeout would retry ~40 % of calls; also the max gap while streaming the body |
 | `…resilience.default.attempt-timeout` | `60s` | Total time per attempt: about 10× a normal one (≤ 5 s latency + ≈ 1.5 s for the largest 1M-volume day partition, Beta) |
+| `…resilience.default.max-records-per-partition` | `500000` | About 5× the largest provider-day partition at 1M itineraries (≈ 90,000): bounds one attempt's buffer if a provider streams without end (added after review) |
 | `…resilience.default.retry.max-attempts` | `3` | At a 10 % error rate a partition fails all 3 with p ≈ 0.1 %, vs 10 % without retries; 21 partitions ⇒ ≈ 2 % of runs miss one partition |
 | `…resilience.default.retry.initial-backoff` / `multiplier` / `jitter` | `500ms` / `2` / `0.5` | 0.5 s then 1 s (± 50 %): spreads retries of parallel partitions, small next to the latency |
 | `…resilience.default.circuit-breaker.sliding-window` / `minimum-calls` | `10` / `10` attempts | A `503` outage answers at once, so 10 attempts take ≈ 3 s; the rest of the provider's partitions are short-circuited |
@@ -206,8 +208,9 @@ Worst case per partition ≈ 3 × 60 s + 1.5 s backoff; the run deadline caps th
   Amends spec 001's note "flight numbers are compared as given".
 - `AggregationStatistics` gains `empty()` and `plus(other)` (counter-wise sum), as spec 001 anticipated for
   partitioned aggregators.
-- New application types: `IngestionReport`, `ProviderReport`, `DayReport`, `PartitionFailure`, `IngestionStatus`,
-  `FailureKind`, `MalformedReason`, `CircuitState`, `ProviderPartition`, `DayAggregation`.
+- New types of the ingestion feature, in `com.andresps.flights.ingestion.domain` (plain Java): `IngestionReport`,
+  `ProviderReport`, `DayReport`, `PartitionFailure`, `IngestionStatus`, `FailureKind`, `MalformedReason`,
+  `CircuitState`, `ProviderPartition`, `DayAggregation`.
 
 ## Non-functional requirements
 

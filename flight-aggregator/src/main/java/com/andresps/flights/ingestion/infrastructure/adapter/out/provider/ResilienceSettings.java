@@ -10,13 +10,18 @@ import java.util.Objects;
  * @param connectTimeout time to open the TCP connection
  * @param readTimeout max wait for the first byte and between body bytes
  * @param attemptTimeout total deadline of one attempt (request + whole body), so a trickling body can't hang a run
+ * @param maxRecordsPerPartition records one attempt may buffer, so a runaway feed can't exhaust the heap (ADR-0015)
  */
 public record ResilienceSettings(
         Duration connectTimeout,
         Duration readTimeout,
         Duration attemptTimeout,
         RetrySettings retry,
-        CircuitBreakerSettings circuitBreaker) {
+        CircuitBreakerSettings circuitBreaker,
+        long maxRecordsPerPartition) {
+
+    /** About 5× the largest day partition of one provider at 1,000,000 itineraries (≈ 90,000 records). */
+    public static final long DEFAULT_MAX_RECORDS_PER_PARTITION = 500_000;
 
     public ResilienceSettings {
         requirePositive(connectTimeout, "connect-timeout");
@@ -28,6 +33,20 @@ public record ResilienceSettings(
         }
         Objects.requireNonNull(retry, "retry");
         Objects.requireNonNull(circuitBreaker, "circuit-breaker");
+        if (maxRecordsPerPartition < 1) {
+            throw new IllegalArgumentException(
+                    "max-records-per-partition must be at least 1, got " + maxRecordsPerPartition);
+        }
+    }
+
+    /** With the default record limit. */
+    public ResilienceSettings(
+            Duration connectTimeout,
+            Duration readTimeout,
+            Duration attemptTimeout,
+            RetrySettings retry,
+            CircuitBreakerSettings circuitBreaker) {
+        this(connectTimeout, readTimeout, attemptTimeout, retry, circuitBreaker, DEFAULT_MAX_RECORDS_PER_PARTITION);
     }
 
     public static ResilienceSettings defaults() {

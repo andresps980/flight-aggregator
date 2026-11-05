@@ -2,6 +2,7 @@ package com.andresps.flights.ingestion.infrastructure.adapter.out.provider.alpha
 
 import com.andresps.flights.aggregation.domain.model.AirportCode;
 import com.andresps.flights.aggregation.domain.model.FlightNumber;
+import com.andresps.flights.aggregation.domain.model.FlightOffer;
 import com.andresps.flights.aggregation.domain.model.Money;
 import com.andresps.flights.aggregation.domain.model.ProviderId;
 import com.andresps.flights.aggregation.domain.model.Segment;
@@ -16,11 +17,15 @@ import java.io.InputStream;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.JsonParser;
 import tools.jackson.core.JsonToken;
 import tools.jackson.core.ObjectReadContext;
+import tools.jackson.core.StreamReadConstraints;
 import tools.jackson.core.StreamReadFeature;
 import tools.jackson.core.exc.JacksonIOException;
 import tools.jackson.core.json.JsonFactory;
@@ -34,8 +39,19 @@ public final class AlphaJsonParser implements FeedParser {
 
     public static final ProviderId PROVIDER = new ProviderId("mock-alpha");
 
+    static final int MAX_LEGS = 16;
+    static final int MAX_STRING_LENGTH = 64 * 1024;
+
+    private static final Set<String> RECORD_FIELDS = Set.of("totFare", "cur", "legs");
+    private static final Set<String> LEG_FIELDS = Set.of("fltNum", "org", "dst", "depTs", "arrTs");
+
+    /** Tight limits: a broken or hostile feed fails the document instead of growing memory without bound. */
     private static final JsonFactory FACTORY = JsonFactory.builder()
             .disable(StreamReadFeature.AUTO_CLOSE_SOURCE) // the caller owns the body
+            .streamReadConstraints(StreamReadConstraints.builder()
+                    .maxStringLength(MAX_STRING_LENGTH)
+                    .maxNestingDepth(32)
+                    .build())
             .build();
 
     @Override
@@ -72,7 +88,7 @@ public final class AlphaJsonParser implements FeedParser {
             buffer.addMalformed(MalformedReason.INVALID_RECORD);
             return;
         }
-        List<Field> fields = readObject(json, true);
+        List<Field> fields = readObject(json, RECORD_FIELDS);
         try {
             buffer.addOffer(toOffer(fields));
         } catch (MalformedRecordException e) {
@@ -80,36 +96,49 @@ public final class AlphaJsonParser implements FeedParser {
         }
     }
 
-    /** Reads the current object's fields; nested values are kept only for {@code legs} (when {@code withLegs}). */
-    private static List<Field> readObject(JsonParser json, boolean withLegs) {
-        List<Field> fields = new ArrayList<>();
+    /**
+     * Reads the current object, keeping only the fields the format uses ({@code known}), in document order (a repeated
+     * field keeps its first position and its last value). Other values are skipped without being materialised.
+     */
+    private static List<Field> readObject(JsonParser json, Set<String> known) {
+        Map<String, Field> fields = new LinkedHashMap<>();
         JsonToken token = json.nextToken();
         for (; token == JsonToken.PROPERTY_NAME; token = json.nextToken()) {
             String name = json.currentName();
             JsonToken value = requirePresent(json.nextToken());
-            if (withLegs && "legs".equals(name) && value == JsonToken.START_ARRAY) {
-                fields.add(Field.legs(readLegs(json)));
+            if (!known.contains(name)) {
+                json.skipChildren(); // no-op for scalars
+            } else if ("legs".equals(name) && value == JsonToken.START_ARRAY) {
+                fields.put(name, Field.legs(readLegs(json)));
             } else if (value.isStructStart()) {
                 json.skipChildren();
-                fields.add(new Field(name, value, null, null));
+                fields.put(name, new Field(name, value, null, null));
             } else {
-                fields.add(new Field(name, value, json.getString(), null));
+                fields.put(name, new Field(name, value, json.getString(), null));
             }
         }
         if (token != JsonToken.END_OBJECT) {
             throw new MalformedDocumentException("Mock-Alpha feed ended inside a record");
         }
-        return fields;
+        return new ArrayList<>(fields.values());
     }
 
-    /** {@code null} entries stand for array elements that are not objects. */
+    /**
+     * {@code null} entries stand for elements that are not objects; after {@link #MAX_LEGS} legs one {@code null} is
+     * added and the rest are skipped, so the record is invalid and memory stays bounded.
+     */
     private static List<List<Field>> readLegs(JsonParser json) {
         List<List<Field>> legs = new ArrayList<>();
         for (JsonToken token = requirePresent(json.nextToken());
                 token != JsonToken.END_ARRAY;
                 token = requirePresent(json.nextToken())) {
-            if (token == JsonToken.START_OBJECT) {
-                legs.add(readObject(json, false));
+            if (legs.size() > MAX_LEGS) {
+                json.skipChildren();
+            } else if (legs.size() == MAX_LEGS) {
+                json.skipChildren();
+                legs.add(null);
+            } else if (token == JsonToken.START_OBJECT) {
+                legs.add(readObject(json, LEG_FIELDS));
             } else {
                 json.skipChildren();
                 legs.add(null);
@@ -118,7 +147,7 @@ public final class AlphaJsonParser implements FeedParser {
         return legs;
     }
 
-    private static com.andresps.flights.aggregation.domain.model.FlightOffer toOffer(List<Field> fields) {
+    private static FlightOffer toOffer(List<Field> fields) {
         Money price = null;
         boolean eur = false;
         List<Segment> segments = null;
@@ -148,7 +177,7 @@ public final class AlphaJsonParser implements FeedParser {
         List<Segment> segments = new ArrayList<>(field.legs().size());
         for (List<Field> leg : field.legs()) {
             if (leg == null) {
-                throw RecordValues.invalid("a leg must be an object");
+                throw RecordValues.invalid("a leg must be an object (and at most " + MAX_LEGS + " legs)");
             }
             segments.add(toSegment(leg));
         }

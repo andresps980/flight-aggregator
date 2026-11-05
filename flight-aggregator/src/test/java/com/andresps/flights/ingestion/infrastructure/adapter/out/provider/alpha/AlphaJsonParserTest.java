@@ -162,6 +162,28 @@ class AlphaJsonParserTest {
     }
 
     @Test
+    @DisplayName("AC-6: more than 16 legs in one record is an INVALID_RECORD (bounded memory)")
+    void tooManyLegs() {
+        String leg =
+                "{\"fltNum\":\"IB345\",\"org\":\"MAD\",\"dst\":\"BCN\",\"depTs\":1794297600000,\"arrTs\":1794302700000}";
+        String huge = "{\"totFare\":10.00,\"cur\":\"EUR\",\"legs\":["
+                + String.join(",", java.util.Collections.nCopies(40, leg)) + "]}";
+
+        PartitionBuffer buffer = parse(parser, "[" + huge + "," + valid() + "]");
+
+        assertThat(buffer.malformed()).containsOnlyKeys(MalformedReason.INVALID_RECORD);
+        assertThat(buffer.offers()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("AC-5/AC-7: a string longer than 64 KiB fails the document instead of growing memory without bound")
+    void rejectsHugeString() {
+        String huge = valid().replace("\"IB345\"", "\"" + "I".repeat(70_000) + "\"");
+
+        assertThatThrownBy(() -> parse(parser, "[" + huge + "]")).isInstanceOf(MalformedDocumentException.class);
+    }
+
+    @Test
     @DisplayName("AC-6: one reason per record, the first failing field in document order")
     void firstFailingFieldWins() {
         String twoFaults = direct("\"IB345\"", "\"M4D\"", "-1.00", "1794297600000");

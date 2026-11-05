@@ -10,6 +10,7 @@ import com.andresps.flights.ingestion.application.port.in.IngestFlightsUseCase;
 import com.andresps.flights.ingestion.application.port.out.DayAggregationSink;
 import com.andresps.flights.ingestion.application.port.out.PartitionFetchException;
 import com.andresps.flights.ingestion.application.port.out.ProviderFeed;
+import com.andresps.flights.ingestion.domain.CircuitState;
 import com.andresps.flights.ingestion.domain.DayAggregation;
 import com.andresps.flights.ingestion.domain.DayReport;
 import com.andresps.flights.ingestion.domain.FailureKind;
@@ -24,6 +25,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -142,7 +144,9 @@ public final class IngestionService implements IngestFlightsUseCase {
             this.partitionsPerProvider = partitionsPerProvider;
             this.validator = validator;
             this.deadline = System.nanoTime() + settings.runTimeout().toNanos();
-            this.dayPermits = new Semaphore(settings.maxConcurrentDays());
+            // fair (FIFO), so days start roughly in horizon order and the nearest days are the likeliest to beat the
+            // deadline
+            this.dayPermits = new Semaphore(settings.maxConcurrentDays(), true);
             for (ProviderFeed feed : feeds) {
                 providerPermits.put(feed.provider(), new Semaphore(settings.maxConcurrentPartitions()));
                 tallies.put(feed.provider(), new ProviderTally());
@@ -215,27 +219,52 @@ public final class IngestionService implements IngestFlightsUseCase {
             while (!inFlight.isEmpty()) {
                 PartitionOutcome outcome = completed.poll(remainingNanos(), TimeUnit.NANOSECONDS);
                 if (outcome == null) {
+                    // Outcomes delivered right at the deadline still count; only what is still running is cancelled.
+                    List<PartitionOutcome> delivered = new ArrayList<>();
+                    completed.drainTo(delivered);
+                    delivered.forEach(late -> consume(late, inFlight, aggregator, contributing, missing));
                     cancel(day, inFlight, missing);
                     break;
                 }
-                inFlight.remove(outcome.provider());
-                tallies.get(outcome.provider()).record(outcome);
-                if (outcome.partition() != null) {
-                    // Single consumer: only this coordinator touches the day's aggregator. The partition's
-                    // buffer becomes garbage as soon as it has been fed.
-                    outcome.partition().offers().forEach(aggregator::accept);
-                    contributing.add(outcome.provider());
-                } else {
-                    missing.add(outcome.provider());
-                }
+                consume(outcome, inFlight, aggregator, contributing, missing);
             }
 
             AggregationResult result = aggregator.result();
-            boolean published = !contributing.isEmpty();
-            if (published) {
-                sink.publish(new DayAggregation(day, result, contributing, missing));
-            }
+            boolean published = !contributing.isEmpty() && publish(day, result, contributing, missing);
             return new DayReport(day, contributing, missing, published, result.statistics());
+        }
+
+        private void consume(
+                PartitionOutcome outcome,
+                Map<ProviderId, Future<?>> inFlight,
+                OfferAggregator aggregator,
+                SortedSet<ProviderId> contributing,
+                SortedSet<ProviderId> missing) {
+            inFlight.remove(outcome.provider());
+            tallies.get(outcome.provider()).record(outcome);
+            if (outcome.partition() != null) {
+                // Single consumer: only this coordinator touches the day's aggregator. The partition's buffer
+                // becomes garbage as soon as it has been fed.
+                outcome.partition().offers().forEach(aggregator::accept);
+                contributing.add(outcome.provider());
+            } else {
+                missing.add(outcome.provider());
+            }
+        }
+
+        /** A sink failure loses that day's publication, not the run: the day is reported as not published. */
+        private boolean publish(
+                LocalDate day,
+                AggregationResult result,
+                SortedSet<ProviderId> contributing,
+                SortedSet<ProviderId> missing) {
+            try {
+                sink.publish(new DayAggregation(day, result, contributing, missing));
+                return true;
+            } catch (RuntimeException e) {
+                LOG.error("Publishing {} failed; the day is reported as not published", day, e);
+                return false;
+            }
         }
 
         /** Run deadline: interrupt what is still running for the day and report it as RUN_TIMEOUT. */
@@ -352,11 +381,10 @@ public final class IngestionService implements IngestFlightsUseCase {
             }
         }
 
-        synchronized ProviderReport report(
-                ProviderId provider, int requested, com.andresps.flights.ingestion.domain.CircuitState circuitState) {
+        synchronized ProviderReport report(ProviderId provider, int requested, CircuitState circuitState) {
             Duration duration = firstStart <= lastEnd ? Duration.ofNanos(lastEnd - firstStart) : Duration.ZERO;
             List<PartitionFailure> byDay = failures.stream()
-                    .sorted(java.util.Comparator.comparing(PartitionFailure::day))
+                    .sorted(Comparator.comparing(PartitionFailure::day))
                     .toList();
             return new ProviderReport(
                     provider, requested, succeeded, byDay, attempts, duration, circuitState, offers, malformed);

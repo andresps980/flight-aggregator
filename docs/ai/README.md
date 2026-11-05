@@ -22,3 +22,4 @@ The guardrails (rules, skills, agents, hooks) are versioned in the repository an
 | [002](002-guard-git-push-match.md) | Fix false positive in the git guard hook, add hook tests to CI | `fix/guard-git-push-match` |
 | [003](003-core-domain.md) | Core domain: validation, deduplication, markup (spec 001), review findings | `feat/001-itinerary-aggregation` |
 | [004](004-gds-mock.md) | gds-mock: three providers, seeded world, stats, chaos (spec 002), review findings | `feat/002-gds-mock` |
+| [005](005-provider-ingestion.md) | Provider ingestion: streaming parsers, resilience, per-day aggregation (spec 003), memory at 1M, review findings | `feat/003-provider-ingestion` |

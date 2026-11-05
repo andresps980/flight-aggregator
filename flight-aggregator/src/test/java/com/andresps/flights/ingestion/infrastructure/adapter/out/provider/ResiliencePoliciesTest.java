@@ -201,29 +201,20 @@ class ResiliencePoliciesTest {
         assertThat(breaker.getState()).isEqualTo(CircuitBreaker.State.OPEN);
     }
 
-    /** A clock the test moves by hand, so the real open wait is used without sleeping. */
-    private static final class MutableClock extends java.time.Clock {
+    @Test
+    @DisplayName("AC-16: a bug (not a provider failure) is ignored by the breaker, not counted as a success")
+    void bugsAreIgnoredByTheBreaker() {
+        CircuitBreaker breaker = ResiliencePolicies.circuitBreaker("p", DEFAULTS.circuitBreaker());
 
-        private java.time.Instant now = java.time.Instant.parse("2026-11-05T12:00:00Z");
+        IntStream.range(0, 9).forEach(i -> call(breaker, FailureKind.SERVER_ERROR));
+        assertThatThrownBy(() -> breaker.executeSupplier(() -> {
+                    throw new IllegalStateException("adapter bug");
+                }))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(breaker.getMetrics().getNumberOfBufferedCalls()).isEqualTo(9);
 
-        void advance(Duration duration) {
-            now = now.plus(duration);
-        }
-
-        @Override
-        public java.time.ZoneId getZone() {
-            return java.time.ZoneOffset.UTC;
-        }
-
-        @Override
-        public java.time.Clock withZone(java.time.ZoneId zone) {
-            return this;
-        }
-
-        @Override
-        public java.time.Instant instant() {
-            return now;
-        }
+        call(breaker, FailureKind.SERVER_ERROR);
+        assertThat(breaker.getState()).isEqualTo(CircuitBreaker.State.OPEN);
     }
 
     private static void call(CircuitBreaker breaker, FailureKind failure) {

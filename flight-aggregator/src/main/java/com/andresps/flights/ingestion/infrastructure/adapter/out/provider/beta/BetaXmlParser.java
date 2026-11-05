@@ -29,6 +29,8 @@ import javax.xml.stream.XMLStreamReader;
 public final class BetaXmlParser implements FeedParser {
 
     public static final ProviderId PROVIDER = new ProviderId("mock-beta");
+    static final int MAX_TEXT_LENGTH = 64 * 1024;
+    static final int MAX_SEGMENTS = 16;
 
     private static final XMLInputFactory FACTORY = secureFactory();
 
@@ -68,7 +70,7 @@ public final class BetaXmlParser implements FeedParser {
             if (io != null) {
                 throw io;
             }
-            throw new MalformedDocumentException("Mock-Beta feed is not well-formed XML: " + e.getMessage(), e);
+            throw new MalformedDocumentException("Mock-Beta feed is not valid XML: " + e.getMessage(), e);
         } finally {
             close(xml);
         }
@@ -100,7 +102,7 @@ public final class BetaXmlParser implements FeedParser {
                 switch (xml.getLocalName()) {
                     case "totalAmount" -> {
                         String currency = xml.getAttributeValue(null, "currency");
-                        String amount = xml.getElementText();
+                        String amount = readText(xml);
                         itinerary.check(() -> {
                             RecordValues.requireEur(currency);
                             itinerary.price = RecordValues.price(amount);
@@ -112,7 +114,12 @@ public final class BetaXmlParser implements FeedParser {
                     }
                     case "segment" -> {
                         RawSegment segment = readSegment(xml);
-                        itinerary.check(() -> itinerary.segments.add(segment.toSegment()));
+                        itinerary.check(() -> {
+                            if (itinerary.segments.size() >= MAX_SEGMENTS) {
+                                throw RecordValues.invalid("more than " + MAX_SEGMENTS + " segments");
+                            }
+                            itinerary.segments.add(segment.toSegment());
+                        });
                     }
                     default -> depth++;
                 }
@@ -133,8 +140,8 @@ public final class BetaXmlParser implements FeedParser {
         RawSegment segment = new RawSegment();
         while (nextTag(xml) == XMLStreamConstants.START_ELEMENT) {
             switch (xml.getLocalName()) {
-                case "carrier" -> segment.carrier = xml.getElementText();
-                case "flightNumber" -> segment.number = xml.getElementText();
+                case "carrier" -> segment.carrier = readText(xml);
+                case "flightNumber" -> segment.number = readText(xml);
                 case "departure" -> {
                     segment.from = xml.getAttributeValue(null, "airport");
                     segment.departure = xml.getAttributeValue(null, "dateTime");
@@ -149,6 +156,42 @@ public final class BetaXmlParser implements FeedParser {
             }
         }
         return segment;
+    }
+
+    /**
+     * The text of a text-only element (positioned on its start tag), up to its end tag. Returns {@code null} if the
+     * element contains child elements: treated as a missing value, so the record is an {@code INVALID_RECORD} and the
+     * document is still fine; text longer than
+     * {@link #MAX_TEXT_LENGTH} fails the document, so a broken feed can't grow memory without bound.
+     */
+    private static String readText(XMLStreamReader xml) throws XMLStreamException {
+        StringBuilder text = new StringBuilder();
+        boolean nested = false;
+        int depth = 1;
+        while (depth > 0) {
+            int event = xml.next();
+            rejectDoctype(event);
+            switch (event) {
+                case XMLStreamConstants.START_ELEMENT -> {
+                    nested = true;
+                    depth++;
+                }
+                case XMLStreamConstants.END_ELEMENT -> depth--;
+                case XMLStreamConstants.CHARACTERS, XMLStreamConstants.CDATA, XMLStreamConstants.SPACE -> {
+                    if (!nested) {
+                        text.append(xml.getTextCharacters(), xml.getTextStart(), xml.getTextLength());
+                        if (text.length() > MAX_TEXT_LENGTH) {
+                            throw new MalformedDocumentException(
+                                    "Mock-Beta feed has a text longer than " + MAX_TEXT_LENGTH + " characters");
+                        }
+                    }
+                }
+                default -> {
+                    // comments and processing instructions carry no text
+                }
+            }
+        }
+        return nested ? null : text.toString();
     }
 
     /** Like {@link XMLStreamReader#nextTag()}, but a DOCTYPE is a malformed document, never processed. */

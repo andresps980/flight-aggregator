@@ -431,6 +431,67 @@ class IngestionServiceTest {
             assertThat(sink.published()).containsExactlyInAnyOrder(DAY1, DAY2, DAY3);
             assertThat(sink.day(DAY1).missing()).containsExactly(BETA);
         }
+
+        @Test
+        @DisplayName(
+                "AC-13: days still waiting for a day permit at run-timeout never start: RUN_TIMEOUT, not published")
+        void daysThatNeverStarted() {
+            alpha.byDefault(blocksUntilInterrupted());
+            IngestionSettings oneDayAtATime = new IngestionSettings(3, 1, 3, Duration.ofMillis(300));
+
+            IngestionReport report = ingest(oneDayAtATime, alpha, beta, gamma);
+
+            List<DayReport> started =
+                    report.days().stream().filter(DayReport::published).toList();
+            List<DayReport> notStarted =
+                    report.days().stream().filter(d -> !d.published()).toList();
+            assertThat(started)
+                    .singleElement()
+                    .satisfies(d -> assertThat(d.missing()).containsExactly(ALPHA));
+            assertThat(notStarted).hasSize(2).allSatisfy(d -> {
+                assertThat(d.contributing()).isEmpty();
+                assertThat(d.missing()).containsExactly(ALPHA, BETA, GAMMA);
+            });
+            assertThat(report.provider(ALPHA).failures())
+                    .extracting(PartitionFailure::kind)
+                    .containsOnly(FailureKind.RUN_TIMEOUT)
+                    .hasSize(3);
+            assertThat(report.provider(BETA).partitionsSucceeded()).isEqualTo(1);
+            assertThat(beta.totalCalls())
+                    .as("no request for days that never started")
+                    .isEqualTo(1);
+            assertThat(sink.published()).hasSize(1);
+        }
+    }
+
+    @Nested
+    class SinkFailure {
+
+        @Test
+        @DisplayName(
+                "AC-11/AC-21: a failing sink loses that day's publication, not the run: the report is still returned")
+        void sinkFailureIsReportedNotThrown() {
+            DayAggregationSink failingOnDay2 = day -> {
+                if (day.day().equals(DAY2)) {
+                    throw new IllegalStateException("database down (test)");
+                }
+                sink.publish(day);
+            };
+
+            IngestionReport report = new IngestionService(
+                            List.of(alpha, beta, gamma),
+                            failingOnDay2,
+                            PercentageMarkupPolicy.defaultPolicy(),
+                            CLOCK,
+                            SETTINGS)
+                    .ingest();
+
+            assertThat(report.day(DAY2).published()).isFalse();
+            assertThat(report.day(DAY1).published()).isTrue();
+            assertThat(report.day(DAY3).published()).isTrue();
+            assertThat(sink.published()).containsExactlyInAnyOrder(DAY1, DAY3);
+            assertThat(report.status()).isEqualTo(IngestionStatus.COMPLETED);
+        }
     }
 
     @Nested

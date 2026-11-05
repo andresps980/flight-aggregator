@@ -39,6 +39,7 @@ aggregator:
       connect-timeout: 1s
       read-timeout: 6s
       attempt-timeout: 60s
+      max-records-per-partition: 500000
       retry:
         max-attempts: 3
         initial-backoff: 500ms

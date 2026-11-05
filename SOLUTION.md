@@ -100,7 +100,7 @@ produces a report. The flow diagram is in [architecture.md](docs/architecture.md
 | Decision | Where |
 |---|---|
 | Use case `IngestionService` (plain Java) depends on two outbound ports: `ProviderFeed` (one per provider) and `DayAggregationSink`. A new provider is a new `FeedParser` + `aggregator.providers.<id>.base-url`; the use case doesn't change. | [spec 003](specs/003-provider-ingestion/spec.md) |
-| Streaming parsers: Jackson 3 token stream, StAX cursor (DTDs refused, so XXE-safe), a line reader that refuses unterminated or > 64 KiB lines. Only one record is held at a time. | adapters `alpha`, `beta`, `gamma` |
+| Streaming parsers: Jackson 3 token stream, StAX cursor (DTDs refused, so XXE-safe), a line reader. Records are parsed one at a time into the attempt's buffer, never the whole document. Hostile input is bounded: 64 KiB per string, text or line, 16 legs or segments per record, `max-records-per-partition` (500,000) per attempt. | adapters `alpha`, `beta`, `gamma` |
 | Resilience lives in infrastructure: read timeout 6 s, attempt deadline 60 s, Resilience4j circuit breaker per provider (≥ 80 % of the last 10 attempts, 30 s open), retry 3× with 500 ms / 1 s ± 50 % backoff; run deadline 10 min. | [ADR-0014](docs/adr/0014-provider-resilience.md) |
 | Partition atomicity: each attempt parses into its own buffer; only a completed attempt's buffer reaches the aggregator. | [ADR-0015](docs/adr/0015-atomic-partition-buffers.md) |
 | One `OfferAggregator` per day, fed by a single consumer (the day's coordinator), statistics summed. Valid because the identity includes departure instants and providers partition by UTC date of first departure. | [ADR-0016](docs/adr/0016-day-partitioned-aggregation.md) |
@@ -121,8 +121,9 @@ least one provider delivered it, naming the missing providers, so the persistenc
 
 **Reconciliation.** With no failures, every figure of the report equals gds-mock's `/admin/world/stats`, for the run
 and for each day: records and malformed records per reason per provider, offers received, discards per reason,
-duplicates merged and itineraries produced. It is checked against recorded feeds in the build (`IngestionIT`) and
-against a running mock by the `e2e` test, at 100,000 itineraries and at 1,000,000.
+duplicates merged and itineraries produced. The build checks it against recorded feeds (`IngestionIT`). The `e2e`
+test checks it against a running mock; it was run by hand for this PR at 100,000 and 1,000,000 itineraries, and the
+CI smoke job will run it in a later PR.
 
 **Found while implementing:**
 - The attempt deadline first interrupted the *calling* thread. That only aborts a blocked socket read on a virtual
@@ -257,8 +258,12 @@ Ingestion (spec 003):
 - A `RUN_TIMEOUT` partition reports 0 attempts: the attempts of a cancelled request aren't counted.
 - `HttpURLConnection` silently re-sends a GET once when a connection resets before the response. A single reset never
   reaches our retry, and that extra request isn't counted in the report's attempts.
-- An attempt aborted by its deadline frees its virtual thread once the socket closes. The caller waits at most one
-  read timeout for that, then moves on.
+- An attempt aborted by a deadline frees its virtual thread once the socket closes. The caller waits at most one
+  read timeout for that (logged at WARN if exceeded), so a run can overrun its deadline by that much at worst.
+- Any non-2xx status that isn't 5xx (4xx, but also an unexpected 1xx or an unfollowed 3xx) is a `CLIENT_ERROR`: not
+  retried, not a breaker failure.
+- Gamma is read as UTF-8: invalid bytes become U+FFFD (so the record is usually malformed), and a byte-order mark
+  makes the header check fail the document.
 - With too little heap for the days in flight, the run degrades rather than crashes: GC pauses cause read timeouts,
   and the report is `PARTIAL`. With far too little, it runs out of memory; affected partitions are reported as
   `UNEXPECTED_ERROR` and the error is rethrown.

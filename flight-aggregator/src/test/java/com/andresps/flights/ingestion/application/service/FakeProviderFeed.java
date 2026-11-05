@@ -11,8 +11,12 @@ import com.andresps.flights.ingestion.domain.ProviderPartition;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.BrokenBarrierException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /** Scriptable {@link ProviderFeed} for use-case tests. Unscripted days return an empty partition. */
@@ -133,12 +137,12 @@ final class FakeProviderFeed implements ProviderFeed {
         };
     }
 
-    /** Waits for {@code latch} (all parties must be fetching at once), then returns an empty partition. */
-    static Behaviour awaits(java.util.concurrent.CyclicBarrier barrier) {
+    /** Waits at {@code barrier} (all parties must be fetching at once), then returns an empty partition. */
+    static Behaviour awaits(CyclicBarrier barrier) {
         return (provider, day) -> {
             try {
-                barrier.await(5, java.util.concurrent.TimeUnit.SECONDS);
-            } catch (java.util.concurrent.BrokenBarrierException | java.util.concurrent.TimeoutException e) {
+                barrier.await(5, TimeUnit.SECONDS);
+            } catch (BrokenBarrierException | TimeoutException e) {
                 throw new PartitionFetchException(FailureKind.TIMEOUT, 1, "barrier not reached: not parallel", e);
             }
             return partition(provider, day, List.of());

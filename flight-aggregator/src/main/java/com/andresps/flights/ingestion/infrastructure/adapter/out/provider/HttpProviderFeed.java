@@ -95,15 +95,21 @@ public final class HttpProviderFeed implements ProviderFeed {
                 });
             });
             return buffer.toPartition(provider(), day, attempts.get());
-        } catch (AttemptFailedException e) {
-            throw new PartitionFetchException(e.kind(), attempts.get(), e.getMessage(), e);
-        } catch (CallNotPermittedException e) {
-            throw new PartitionFetchException(
-                    FailureKind.CIRCUIT_OPEN, attempts.get(), "circuit breaker of " + provider() + " is open", e);
         } catch (RuntimeException e) {
             if (Thread.currentThread().isInterrupted()) {
-                // e.g. interrupted while waiting between attempts (Resilience4j re-sets the flag and throws)
+                // Cancelled (run deadline). Interrupted during the backoff, Resilience4j re-sets the flag and rethrows
+                // the previous attempt's failure, which must not be reported as that failure.
                 throw new PartitionFetchException(FailureKind.RUN_TIMEOUT, attempts.get(), "fetch cancelled", e);
+            }
+            if (e instanceof AttemptFailedException failure) {
+                throw new PartitionFetchException(failure.kind(), attempts.get(), failure.getMessage(), failure);
+            }
+            if (e instanceof CallNotPermittedException open) {
+                throw new PartitionFetchException(
+                        FailureKind.CIRCUIT_OPEN,
+                        attempts.get(),
+                        "circuit breaker of " + provider() + " is open",
+                        open);
             }
             throw e;
         }
@@ -118,6 +124,9 @@ public final class HttpProviderFeed implements ProviderFeed {
             return exchange.get(settings.attemptTimeout().toNanos(), TimeUnit.NANOSECONDS);
         } catch (TimeoutException e) {
             abort(exchange, worker);
+            if (Thread.currentThread().isInterrupted()) {
+                throw cancelled(e); // cancelled while aborting: not the provider's fault
+            }
             throw failed(
                     new AttemptFailedException(
                             FailureKind.TIMEOUT, "attempt deadline of " + settings.attemptTimeout() + " exceeded", e),
@@ -131,11 +140,16 @@ public final class HttpProviderFeed implements ProviderFeed {
         }
     }
 
-    /** Interrupts the worker (closing its socket) and waits briefly for it, so no request outlives its attempt. */
+    /**
+     * Interrupts the worker (closing its socket) and waits for it for at most one read timeout, so a request outlives
+     * its attempt by that much at worst.
+     */
     private void abort(FutureTask<PartitionBuffer> exchange, Thread worker) {
         exchange.cancel(true);
         try {
-            worker.join(settings.readTimeout());
+            if (!worker.join(settings.readTimeout())) {
+                LOG.warn("Aborted attempt for {} still running after {}", provider(), settings.readTimeout());
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
@@ -156,7 +170,7 @@ public final class HttpProviderFeed implements ProviderFeed {
     /** Parses the body into a fresh buffer and closes it, whatever the outcome (spec 003, AC-5). */
     PartitionBuffer read(InputStream body) throws IOException {
         try (body) {
-            PartitionBuffer buffer = new PartitionBuffer();
+            PartitionBuffer buffer = new PartitionBuffer(settings.maxRecordsPerPartition());
             parser.parse(body, buffer);
             return buffer;
         }

@@ -32,7 +32,9 @@ We will make each attempt (one request plus parsing its whole body) go through, 
    ± 50 % jitter, only for retryable failures. `4xx` and an open breaker (`CallNotPermittedException`) are not
    retried.
 4. **Run deadline** (`10m`, in the use case as plain Java): unfinished partitions are cancelled (their virtual
-   threads interrupted, which closes blocked sockets) and reported as `RUN_TIMEOUT`.
+   threads interrupted, which closes blocked sockets) and reported as `RUN_TIMEOUT`. No partition starts a request
+   after the deadline. Each attempt runs on its own virtual thread, and an aborted one is awaited for at most one
+   read timeout, so a run can overrun its deadline by that much at worst.
 
 We use the framework-free Resilience4j 2.4.0 core modules (`resilience4j-circuitbreaker`, `resilience4j-retry`; their
 only dependency is `slf4j-api`), configured from our own properties in `infrastructure/config`. HTTP goes through
