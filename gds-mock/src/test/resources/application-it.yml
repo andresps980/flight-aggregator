@@ -1,0 +1,9 @@
+# Integration tests run with the `deterministic` and `it` profiles: no chaos, a fixed reference date and a small
+# world with high fractions, so every kind of duplicate, invalid and malformed record shows up.
+gds:
+  world:
+    volume: 2000
+    reference-date: 2026-11-05
+    invalid-fraction: 0.10
+    malformed-fraction: 0.05
+    same-provider-duplicate-fraction: 0.05
