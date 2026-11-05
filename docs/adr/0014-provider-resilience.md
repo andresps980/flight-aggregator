@@ -24,7 +24,10 @@ We will make each attempt (one request plus parsing its whole body) go through, 
    calls, opens at ≥ 80 % failures, `30s` open, 2 half-open probes). Failures are `5xx`, timeouts, I/O errors and
    malformed documents; `4xx` is ignored (our request, not the provider's health). With 10 % random errors,
    8 of 10 failures has p ≈ 4 × 10⁻⁷, so the breaker opens on outages, not on normal noise. Breakers are singletons
-   and keep their state across runs.
+   and keep their state across runs. The **open wait (30 s) is well below the 15 min ingestion interval**
+   (ADR-0006): it covers the rest of the run that detected the outage, so that run stops calling the provider, but
+   the next scheduled run always finds the breaker ready to probe (half-open) instead of skipping a recovered
+   provider. Two successful probes close it; a failed probe reopens it for another 30 s.
 3. **Retry** (Resilience4j `Retry`) around the breaker: 3 attempts in total, exponential backoff 500 ms × 2 with
    ± 50 % jitter, only for retryable failures. `4xx` and an open breaker (`CallNotPermittedException`) are not
    retried.

@@ -64,7 +64,7 @@ same itinerary served under two days would be produced twice (one per day): a du
   with the provider's id, its segments in order, airports, a EUR base price and instants: Alpha
   `Instant.ofEpochMilli`, Beta ISO-8601 offset date-time, Gamma local date-time + IANA zone.
 - **AC-2** — Given a Gamma itinerary whose connection crosses time zones (e.g. `OPO 12:55 Europe/Lisbon` →
-  `BOS 12:15 America/New_York`), then the instants are correct (a 6 h 20 min flight) and the same itinerary from
+  `BOS 12:15 America/New_York`), then the instants are correct (a 4 h 20 min flight) and the same itinerary from
   the three providers yields the same `ItineraryKey`.
 - **AC-3** — Flight numbers are canonical: carrier + number without leading zeros. `FlightNumber` strips them when
   built, so Alpha `VY1`, Beta `<carrier>VY</carrier><flightNumber>0001</flightNumber>` and Gamma `VY0001` are all

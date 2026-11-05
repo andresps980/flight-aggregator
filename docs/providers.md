@@ -79,7 +79,10 @@ A zero offset is written `+00:00` (never `Z`).
 ### Mock-Gamma — comma-separated stream
 
 A header line, then one itinerary per line: `REF,PRICE_EUR,SEGMENTS`. Lines end with `\n` (not RFC 4180's CRLF),
-as many legacy feeds do, and no field is quoted (no value contains a comma). Segments are separated by `|`; each segment
+as many legacy feeds do, and no field is quoted (no value contains a comma). The aggregator's parser also accepts CRLF line
+endings and skips blank lines (neither counts as a record), but every line, including the last, must be terminated:
+a last line without its line ending means the body was truncated, and the partition fails (spec 003). A line longer
+than 64 KiB also fails the partition, so a broken feed can't grow memory without bound. Segments are separated by `|`; each segment
 has 7 `~`-separated sub-fields: `flight~origin~localDeparture~originZone~destination~localArrival~destinationZone`.
 
 ```text
@@ -88,7 +91,7 @@ GAM-20261106-000001-0,459.15,VY0001~DUB~2026-11-06T03:05~Europe/Dublin~EZE~2026-
 ```
 
 Local times only make sense with their zone: in the same feed, `OPO 2026-11-06T12:55 Europe/Lisbon` →
-`BOS 2026-11-06T12:15 America/New_York` "lands before it takes off" in local time but is a 6 h 20 min flight.
+`BOS 2026-11-06T12:15 America/New_York` "lands before it takes off" in local time but is a 4 h 20 min flight (Lisbon is UTC+0 and New York UTC−5 in November, after the US DST change on 1 November).
 
 ## Normalisation the adapters must do
 

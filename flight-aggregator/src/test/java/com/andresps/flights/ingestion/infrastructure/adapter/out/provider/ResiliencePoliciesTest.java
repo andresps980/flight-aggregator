@@ -169,6 +169,63 @@ class ResiliencePoliciesTest {
         assertThat(breaker.getMetrics().getNumberOfFailedCalls()).isZero();
     }
 
+    @Test
+    @DisplayName("AC-16: with the default 30 s open wait (well below the 15 min interval), half-open probes close it")
+    void halfOpenRecoveryWithDefaultOpenWait() {
+        MutableClock clock = new MutableClock();
+        CircuitBreaker breaker = ResiliencePolicies.circuitBreaker("p", DEFAULTS.circuitBreaker(), clock);
+        IntStream.range(0, 10).forEach(i -> call(breaker, FailureKind.SERVER_ERROR));
+        assertThat(breaker.getState()).isEqualTo(CircuitBreaker.State.OPEN);
+
+        clock.advance(Duration.ofSeconds(29));
+        assertThatThrownBy(() -> breaker.executeSupplier(() -> "x")).isInstanceOf(CallNotPermittedException.class);
+
+        clock.advance(Duration.ofSeconds(1).plusMillis(1)); // just past the 30 s open wait
+        call(breaker, null);
+        assertThat(breaker.getState()).isEqualTo(CircuitBreaker.State.HALF_OPEN);
+        call(breaker, null);
+        assertThat(breaker.getState()).isEqualTo(CircuitBreaker.State.CLOSED);
+    }
+
+    @Test
+    @DisplayName("AC-16: a failed half-open probe reopens the breaker for another open wait")
+    void failedProbeReopens() {
+        MutableClock clock = new MutableClock();
+        CircuitBreaker breaker = ResiliencePolicies.circuitBreaker("p", DEFAULTS.circuitBreaker(), clock);
+        IntStream.range(0, 10).forEach(i -> call(breaker, FailureKind.SERVER_ERROR));
+        clock.advance(Duration.ofSeconds(30).plusMillis(1));
+
+        call(breaker, FailureKind.SERVER_ERROR);
+        call(breaker, FailureKind.SERVER_ERROR);
+
+        assertThat(breaker.getState()).isEqualTo(CircuitBreaker.State.OPEN);
+    }
+
+    /** A clock the test moves by hand, so the real open wait is used without sleeping. */
+    private static final class MutableClock extends java.time.Clock {
+
+        private java.time.Instant now = java.time.Instant.parse("2026-11-05T12:00:00Z");
+
+        void advance(Duration duration) {
+            now = now.plus(duration);
+        }
+
+        @Override
+        public java.time.ZoneId getZone() {
+            return java.time.ZoneOffset.UTC;
+        }
+
+        @Override
+        public java.time.Clock withZone(java.time.ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public java.time.Instant instant() {
+            return now;
+        }
+    }
+
     private static void call(CircuitBreaker breaker, FailureKind failure) {
         try {
             breaker.executeSupplier(() -> {

@@ -32,8 +32,9 @@ import org.springframework.test.context.DynamicPropertySource;
 
 /**
  * AC-9: the providers of a day are queried at the same time. One horizon day, three providers answering after fixed
- * latencies of 1.5 s, 1 s and 0.5 s: the run takes about the slowest (1.5 s), not the sum (3 s). The bounds are
- * deliberately loose (≥ slowest, < sum − 0.5 s) to stay deterministic on a slow CI machine.
+ * latencies of 2 s, 1.5 s and 1 s: the run takes about the slowest (2 s), not the sum (4.5 s). The upper bound is
+ * loose (3.5 s) to stay deterministic on a slow CI machine; the barrier tests in IngestionServiceTest prove the
+ * concurrency itself.
  */
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.NONE,
@@ -45,7 +46,7 @@ import org.springframework.test.context.DynamicPropertySource;
         })
 class IngestionParallelismIT {
 
-    private static final Map<String, Integer> LATENCY_MS = Map.of(ALPHA, 1500, BETA, 1000, GAMMA, 500);
+    private static final Map<String, Integer> LATENCY_MS = Map.of(ALPHA, 2000, BETA, 1500, GAMMA, 1000);
     private static final WireMockServer SERVER = startServer();
 
     private static WireMockServer startServer() {
@@ -80,13 +81,13 @@ class IngestionParallelismIT {
     private IngestFlightsUseCase ingestion;
 
     @Test
-    @DisplayName("AC-9: three providers with 1.5 s / 1 s / 0.5 s latency take about the slowest, not the 3 s sum")
+    @DisplayName("AC-9: three providers with 2 s / 1.5 s / 1 s latency take about the slowest, not the 4.5 s sum")
     void providersRunInParallel() {
         long start = System.nanoTime();
         IngestionReport report = ingestion.ingest();
         Duration elapsed = Duration.ofNanos(System.nanoTime() - start);
 
         assertThat(report.status()).isEqualTo(IngestionStatus.COMPLETED);
-        assertThat(elapsed).isGreaterThanOrEqualTo(Duration.ofMillis(1500)).isLessThan(Duration.ofMillis(2500));
+        assertThat(elapsed).isGreaterThanOrEqualTo(Duration.ofMillis(2000)).isLessThan(Duration.ofMillis(3500));
     }
 }

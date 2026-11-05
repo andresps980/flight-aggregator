@@ -61,7 +61,7 @@ class GammaCsvParserTest {
     }
 
     @Test
-    @DisplayName("AC-2: a flight across zones that 'lands before it takes off' in local time is a 6 h 20 min flight")
+    @DisplayName("AC-2: a flight across zones that 'lands before it takes off' in local time is a 4 h 20 min flight")
     void convertsAcrossZones() {
         String line = "GAM-2,300.00,TP0201~OPO~2026-11-06T12:55~Europe/Lisbon~BOS~2026-11-06T12:15~America/New_York\n";
 
@@ -74,7 +74,7 @@ class GammaCsvParserTest {
 
         assertThat(segment.departure()).isEqualTo(utc("2026-11-06T12:55:00Z"));
         assertThat(segment.arrival()).isEqualTo(utc("2026-11-06T17:15:00Z"));
-        assertThat(Duration.between(segment.departure(), segment.arrival())).isEqualTo(Duration.ofMinutes(380));
+        assertThat(Duration.between(segment.departure(), segment.arrival())).isEqualTo(Duration.ofMinutes(260));
     }
 
     @Test

@@ -14,3 +14,39 @@ management:
     health:
       probes:
         enabled: true
+
+# Provider ingestion (spec 003, ADR-0014..0016). Defaults are justified in the spec against the mock's 100-5000 ms
+# latency and 10 % error rate; docs/usage.md lists every property.
+aggregator:
+  providers:
+    mock-alpha:
+      base-url: http://localhost:8081
+    mock-beta:
+      base-url: http://localhost:8081
+    mock-gamma:
+      base-url: http://localhost:8081
+      # Any resilience setting can be overridden per provider, e.g.:
+      # resilience:
+      #   read-timeout: 9s
+  ingestion:
+    horizon-days: 7
+    markup-percentage: 5
+    max-concurrent-days: 2
+    max-concurrent-partitions: 2
+    run-timeout: 10m
+  resilience:
+    default:
+      connect-timeout: 1s
+      read-timeout: 6s
+      attempt-timeout: 60s
+      retry:
+        max-attempts: 3
+        initial-backoff: 500ms
+        multiplier: 2
+        jitter: 0.5
+      circuit-breaker:
+        sliding-window: 10
+        minimum-calls: 10
+        failure-rate-threshold: 80
+        open-wait: 30s
+        half-open-calls: 2

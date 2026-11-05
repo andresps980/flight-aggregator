@@ -92,7 +92,12 @@ contracts (LSP).
 ## Testing conventions
 
 - Unit tests: `*Test.java` (Surefire). No Spring context. Mock ports with Mockito.
-- Integration tests: `*IT.java` (Failsafe). `@SpringBootTest(webEnvironment = RANDOM_PORT)` and real HTTP calls.
+- Integration tests: `*IT.java` (Failsafe), real I/O.
+  - End-to-end flows: `@SpringBootTest` (`webEnvironment = RANDOM_PORT` with real HTTP calls when there is an
+    endpoint, `NONE` for flows without one).
+  - Adapter-level ITs may build the adapter directly against a real server (e.g. WireMock) without a Spring context,
+    as the composition root would build it; keeps many resilience scenarios fast.
+- Tests tagged `slow` or `e2e` are excluded by default (`-Pslow-tests`, `-Pe2e-tests`).
 - Each acceptance criterion in the spec maps to at least one test; reference it in the test name or `@DisplayName`.
 - Coverage gate: 80% lines / 70% branches on merged unit + IT coverage. Don't game it with trivial tests.
 - AssertJ for assertions, given/when/then structure.

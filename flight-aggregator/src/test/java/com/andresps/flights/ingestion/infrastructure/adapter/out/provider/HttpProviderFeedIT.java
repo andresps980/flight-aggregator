@@ -24,8 +24,6 @@ import java.net.ServerSocket;
 import java.net.URI;
 import java.time.Duration;
 import java.time.LocalDate;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
@@ -57,19 +55,16 @@ class HttpProviderFeedIT {
             new CircuitBreakerSettings(10, 10, 80f, Duration.ofMillis(400), 2));
 
     private static WireMockServer server;
-    private static ScheduledExecutorService watchdog;
 
     @BeforeAll
     static void startServer() {
         server = new WireMockServer(options().dynamicPort());
         server.start();
-        watchdog = Executors.newSingleThreadScheduledExecutor();
     }
 
     @AfterAll
     static void stopServer() {
         server.stop();
-        watchdog.shutdownNow();
     }
 
     @BeforeEach
@@ -91,8 +86,7 @@ class HttpProviderFeedIT {
                 new GammaCsvParser(),
                 baseUrl,
                 settings,
-                ResiliencePolicies.circuitBreaker("mock-gamma", settings.circuitBreaker()),
-                watchdog);
+                ResiliencePolicies.circuitBreaker("mock-gamma", settings.circuitBreaker()));
     }
 
     private static ResponseDefinitionBuilder csv(String body) {
@@ -209,11 +203,16 @@ class HttpProviderFeedIT {
     }
 
     @Test
-    @DisplayName("AC-14: a connection reset is an I/O error and is retried")
-    void connectionResetThenSuccess() {
-        firstThen(aResponse().withFault(Fault.CONNECTION_RESET_BY_PEER), csv(BODY));
+    @DisplayName("AC-14: a connection reset is an I/O error, retried up to max-attempts")
+    void connectionReset() {
+        // HttpURLConnection itself re-sends a GET once after a reset, so a single reset never reaches our retry
+        // (SOLUTION.md); a persistent one does.
+        always(aResponse().withFault(Fault.CONNECTION_RESET_BY_PEER));
 
-        assertThat(feed(SCALED).fetch(DAY).attempts()).isEqualTo(2);
+        PartitionFetchException failure = failure(feed(SCALED));
+
+        assertThat(failure.kind()).isEqualTo(FailureKind.IO_ERROR);
+        assertThat(failure.attempts()).isEqualTo(3);
     }
 
     @Test
@@ -367,7 +366,7 @@ class HttpProviderFeedIT {
     @DisplayName("AC-23: a feed is named after its parser's provider")
     void providerComesFromParser() {
         assertThat(feed(SCALED).provider()).isEqualTo(new ProviderId("mock-gamma"));
-        assertThatThrownBy(() -> new HttpProviderFeed(new GammaCsvParser(), null, SCALED, null, watchdog))
+        assertThatThrownBy(() -> new HttpProviderFeed(new GammaCsvParser(), null, SCALED, null))
                 .isInstanceOf(NullPointerException.class);
     }
 }

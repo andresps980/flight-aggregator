@@ -355,7 +355,7 @@ class IngestionServiceTest {
                     .containsExactlyInAnyOrderEntriesOf(
                             Map.of(MalformedReason.BAD_AIRPORT_CODE, 3L, MalformedReason.UNPARSEABLE_TIME, 1L));
             assertThat(report.recordsReceived()).isEqualTo(7);
-            assertThat(report.duration()).isNotNegative();
+            assertThat(report.duration()).isGreaterThanOrEqualTo(Duration.ZERO);
         }
 
         @Test
@@ -392,7 +392,8 @@ class IngestionServiceTest {
         @DisplayName(
                 "AC-13: at run-timeout unfinished partitions are cancelled as RUN_TIMEOUT and the report is returned")
         void cancelsUnfinishedPartitions() {
-            beta.on(DAY1, blocksUntilInterrupted());
+            // One permit for Beta: whichever day gets it blocks; the other two wait and must never start a request.
+            beta.byDefault(blocksUntilInterrupted());
             IngestionSettings settings = new IngestionSettings(3, 3, 1, Duration.ofMillis(300));
             long start = System.nanoTime();
 
