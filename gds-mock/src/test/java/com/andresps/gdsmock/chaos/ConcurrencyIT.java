@@ -50,6 +50,8 @@ class ConcurrencyIT {
         }
         Duration elapsed = Duration.ofNanos(System.nanoTime() - start);
 
-        assertThat(elapsed).isGreaterThanOrEqualTo(Duration.ofMillis(900)).isLessThan(Duration.ofMillis(1_500));
+        assertThat(elapsed)
+                .isGreaterThanOrEqualTo(Duration.ofMillis(900))
+                .isLessThan(Duration.ofMillis(1_800)); // sequential would take at least the sum, 1.8 s
     }
 }

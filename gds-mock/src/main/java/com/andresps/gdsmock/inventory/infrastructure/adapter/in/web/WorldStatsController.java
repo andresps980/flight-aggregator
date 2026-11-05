@@ -1,6 +1,7 @@
 package com.andresps.gdsmock.inventory.infrastructure.adapter.in.web;
 
 import com.andresps.gdsmock.inventory.domain.generator.WorldGenerator;
+import com.andresps.gdsmock.inventory.domain.model.Horizon;
 import java.time.LocalDate;
 import java.util.Optional;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -24,7 +25,8 @@ public class WorldStatsController {
 
     @GetMapping("/admin/world/stats")
     public WorldStatsResponse stats(@RequestParam(required = false) String date) {
-        Optional<LocalDate> day = resolver.resolveDate(date);
-        return WorldStatsResponse.from(generator.horizon(), day.orElse(null), statistics.get(day));
+        Horizon horizon = generator.horizon(); // read once, so the labels and the figures describe the same world
+        Optional<LocalDate> day = resolver.resolveDate(date, horizon);
+        return WorldStatsResponse.from(horizon, day.orElse(null), statistics.get(horizon, day));
     }
 }

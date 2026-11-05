@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
+import org.springframework.web.util.DisconnectedClientHelper;
 
 /**
  * {@code GET /{providerId}/flights[?date=]}: streams one provider's records in its format while they are generated.
@@ -37,15 +38,20 @@ public class ProviderFeedController {
             @PathVariable String providerId, @RequestParam(required = false) String date) {
         FeedRequest request = resolver.resolve(providerId, date);
         ProviderFormat format = formats.get(request.provider());
+        // Built here, on the request thread, so the horizon is checked before the response starts (the stream is lazy)
+        Stream<ProviderRecord> feed = request.date()
+                .map(day -> generator.records(request.provider(), day))
+                .orElseGet(() -> generator.records(request.provider()));
         StreamingResponseBody body = out -> {
-            try (Stream<ProviderRecord> records = request.date()
-                    .map(day -> generator.records(request.provider(), day))
-                    .orElseGet(() -> generator.records(request.provider()))) {
+            try (Stream<ProviderRecord> records = feed) {
                 format.write(records.iterator(), out);
             } catch (IOException e) {
-                // Writing to the response only fails when the connection is gone: the client hung up (or timed out).
-                // Generation stops with the stream; it is the client's choice, not a server error.
-                log.debug("Client disconnected from {} feed: {}", request.provider(), e.getMessage());
+                if (DisconnectedClientHelper.isClientDisconnectedException(e)) {
+                    // The client hung up: generation stops with the stream. Its choice, not a server error.
+                    log.debug("Client disconnected from {} feed: {}", request.provider(), e.getMessage());
+                } else {
+                    log.warn("Writing the {} feed failed; the response is truncated", request.provider(), e);
+                }
             }
         };
         return ResponseEntity.ok().contentType(format.mediaType()).body(body);

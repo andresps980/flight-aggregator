@@ -21,14 +21,20 @@ import java.util.SplittableRandom;
 final class ScheduleFactory {
 
     private static final int STEP_MINUTES = 5;
+    private static final int SLOTS_PER_DAY = 24 * 60 / STEP_MINUTES;
 
     /**
-     * @param firstAirline airline of the first segment (unique per day together with {@code firstFlightNumber})
+     * @param partitionDay the horizon day the itinerary belongs to
+     * @param dayIndex position of {@code partitionDay} in the horizon (0-based)
+     * @param horizonDays number of horizon days
      * @param referenceDate departure day of {@code ALREADY_DEPARTED} itineraries is the day before it
+     * @param firstAirline airline of the first segment (unique per day together with {@code firstFlightNumber})
      */
     List<ScheduledSegment> build(
             SplittableRandom random,
             LocalDate partitionDay,
+            int dayIndex,
+            int horizonDays,
             LocalDate referenceDate,
             String firstAirline,
             int firstFlightNumber,
@@ -61,7 +67,7 @@ final class ScheduleFactory {
             case ALREADY_DEPARTED ->
                 chain(
                         random,
-                        departureWithin(random, referenceDate.minusDays(1)),
+                        departedSlot(random, referenceDate.minusDays(1), dayIndex, horizonDays),
                         firstAirline,
                         firstFlightNumber,
                         distinctAirports(random, segmentCount(random)));
@@ -167,7 +173,17 @@ final class ScheduleFactory {
     }
 
     private static Instant departureWithin(SplittableRandom random, LocalDate day) {
-        return day.atStartOfDay(ZoneOffset.UTC).toInstant().plus(minutes(STEP_MINUTES * random.nextInt(288)));
+        return day.atStartOfDay(ZoneOffset.UTC).toInstant().plus(minutes(STEP_MINUTES * random.nextInt(SLOTS_PER_DAY)));
+    }
+
+    /**
+     * A departure on {@code day} whose 5-minute slot {@code k} satisfies {@code k mod horizonDays == dayIndex}.
+     * Departed itineraries of every partition share one day; this keeps two of them with the same index (same first
+     * airline and flight number) from also sharing a departure instant, so identities stay unique across the world.
+     */
+    private static Instant departedSlot(SplittableRandom random, LocalDate day, int dayIndex, int horizonDays) {
+        int slot = horizonDays * random.nextInt(SLOTS_PER_DAY / horizonDays) + dayIndex;
+        return day.atStartOfDay(ZoneOffset.UTC).toInstant().plus(minutes((long) STEP_MINUTES * slot));
     }
 
     /** {@code segments + 1} distinct airports (partial Fisher–Yates over the catalog). */

@@ -10,7 +10,9 @@ import com.andresps.gdsmock.inventory.infrastructure.adapter.in.web.ProviderForm
 import com.andresps.gdsmock.shared.domain.ProviderId;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.stream.Collectors;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
@@ -27,6 +29,15 @@ public class ChaosConfig {
 
     @Bean
     ChaosPolicy chaosPolicy(ChaosProperties properties, ProviderFormats formats, OutageRegistry outages) {
+        Set<String> known = formats.ids().stream().map(ProviderId::value).collect(Collectors.toSet());
+        properties.providers().keySet().stream()
+                .filter(id -> !known.contains(id))
+                .findFirst()
+                .ifPresent(id -> {
+                    // Also catches environment variables, which drop the dash in map keys (MOCK_BETA -> "mockbeta")
+                    throw new IllegalArgumentException(
+                            "gds.chaos.providers.%s: unknown provider (known: %s)".formatted(id, formats.ids()));
+                });
         Map<ProviderId, ChaosSettings> settings = new LinkedHashMap<>();
         formats.ids().forEach(id -> settings.put(id, properties.settingsFor(id.value())));
         return new ChaosPolicy(settings, outages, ThreadLocalRandom::current);

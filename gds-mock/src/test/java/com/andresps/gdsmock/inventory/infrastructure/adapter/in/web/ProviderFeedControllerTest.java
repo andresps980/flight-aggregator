@@ -66,6 +66,33 @@ class ProviderFeedControllerTest {
     }
 
     @Test
+    @DisplayName("AC-12: an output failure that is not a disconnect is logged as a warning (truncated feed)")
+    void otherOutputFailureIsWarned(CapturedOutput output) {
+        var response = controller.flights("mock-beta", null);
+        OutputStream failing = new OutputStream() {
+            @Override
+            public void write(int b) throws IOException {
+                throw new IOException("No space left on device");
+            }
+
+            @Override
+            public void write(byte[] b, int off, int len) throws IOException {
+                throw new IOException("No space left on device");
+            }
+        };
+
+        assertThatCode(() -> response.getBody().writeTo(failing)).doesNotThrowAnyException();
+        assertThat(output.getAll()).contains("WARN").contains("mock-beta feed failed");
+    }
+
+    @Test
+    @DisplayName("AC-14 (error): a date outside the horizon is rejected before any streaming starts")
+    void dateCheckedOnRequestThread() {
+        assertThatThrownBy(() -> controller.flights("mock-alpha", "2026-11-05"))
+                .isInstanceOf(com.andresps.gdsmock.inventory.domain.generator.DateOutsideHorizonException.class);
+    }
+
+    @Test
     @DisplayName("AC-14 (error): an unknown provider is rejected before any streaming starts")
     void unknownProvider() {
         assertThatThrownBy(() -> controller.flights("mock-delta", null)).isInstanceOf(UnknownProviderException.class);

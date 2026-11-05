@@ -19,18 +19,20 @@ COPY gds-mock/src gds-mock/src
 # Tests, coverage and formatting run in CI and in `./mvnw verify`, not in the image build
 RUN --mount=type=cache,target=/root/.m2 ./mvnw -B -ntp -q -pl gds-mock -am package \
         -DskipTests -Djacoco.skip=true -Dspotless.check.skip=true \
-    && cp gds-mock/target/gds-mock-*.jar /workspace/app.jar
+    && java -Djarmode=tools -jar gds-mock/target/gds-mock-*.jar extract --layers --launcher --destination /workspace/extracted
 
-# --- Runtime: JRE only, non-root -------------------------------------------------------------------------------------
+# --- Runtime: JRE only, numeric non-root user, one layer per Spring Boot jar layer -----------------------------------
 FROM eclipse-temurin:21-jre-alpine
-RUN addgroup -S app && adduser -S app -G app
+RUN addgroup -S -g 10001 app && adduser -S -u 10001 -G app app
 WORKDIR /app
-COPY --from=build /workspace/app.jar app.jar
-USER app
+# Least to most frequently changing, so a code change only rebuilds the last (small) layer
+COPY --from=build /workspace/extracted/dependencies/ ./
+COPY --from=build /workspace/extracted/spring-boot-loader/ ./
+COPY --from=build /workspace/extracted/snapshot-dependencies/ ./
+COPY --from=build /workspace/extracted/application/ ./
+USER 10001:10001
 
 EXPOSE 8081
 ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75"
-# busybox wget ships with the Alpine base image
-HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=5 \
-    CMD wget -qO- http://localhost:8081/actuator/health/readiness || exit 1
-ENTRYPOINT ["java", "-jar", "/app/app.jar"]
+# The healthcheck lives in docker-compose.yml (busybox wget ships with the Alpine base image)
+ENTRYPOINT ["java", "org.springframework.boot.loader.launch.JarLauncher"]

@@ -68,6 +68,36 @@ class AlphaJsonFormatTest extends ProviderFormatContractTest {
     }
 
     @Test
+    @DisplayName(
+            "AC-12: a feed interrupted by an exception stays truncated (invalid JSON), never closed into a valid array")
+    void interruptedFeedIsNotClosed() {
+        var out = new java.io.ByteArrayOutputStream();
+        java.util.Iterator<com.andresps.gdsmock.inventory.domain.model.ProviderRecord> failing =
+                new java.util.Iterator<>() {
+                    private int produced;
+
+                    @Override
+                    public boolean hasNext() {
+                        return true;
+                    }
+
+                    @Override
+                    public com.andresps.gdsmock.inventory.domain.model.ProviderRecord next() {
+                        if (produced++ == 3) {
+                            throw new IllegalStateException("generator bug");
+                        }
+                        return direct();
+                    }
+                };
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> format.write(failing, out))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(out.toString(StandardCharsets.UTF_8)).doesNotEndWith("]");
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> ProviderPayloads.parseAlpha(out.toByteArray()))
+                .isInstanceOf(tools.jackson.core.JacksonException.class);
+    }
+
+    @Test
     @DisplayName("AC-7: an unparseable time is the string \"TBD\" in a numeric field")
     void unparseableTime() {
         String body = new String(write(List.of(malformed(MalformationKind.UNPARSEABLE_TIME))), StandardCharsets.UTF_8);

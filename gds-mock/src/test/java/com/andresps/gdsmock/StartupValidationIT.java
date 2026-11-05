@@ -16,12 +16,14 @@ class StartupValidationIT {
 
     @ParameterizedTest(name = "{0} -> {1}")
     @CsvSource({
-        "gds.world.volume=0, volume",
-        "gds.world.volume=1000001, volume",
-        "gds.world.horizon-days=31, horizon-days",
-        "gds.world.invalid-fraction=1.5, invalid-fraction",
+        "gds.world.volume=0, gds.world.volume",
+        "gds.world.volume=1000001, gds.world.volume",
+        "gds.world.horizon-days=31, gds.world.horizon-days",
+        "gds.world.invalid-fraction=1.5, gds.world.invalid-fraction",
         "gds.chaos.default.error-rate=2, error-rate",
-        "gds.chaos.providers.mock-beta.latency-min=9s, latency"
+        "gds.chaos.providers.mock-beta.latency-min=9s, providers.mock-beta",
+        "gds.chaos.providers.mock-btea.error-rate=0.5, unknown provider",
+        "gds.chaos.providers.mockbeta.error-rate=0.5, gds.chaos.providers.mockbeta"
     })
     @DisplayName("AC-3 (error): invalid settings fail the startup with a message naming the setting")
     void invalidSettingsFailStartup(String property, String named) {

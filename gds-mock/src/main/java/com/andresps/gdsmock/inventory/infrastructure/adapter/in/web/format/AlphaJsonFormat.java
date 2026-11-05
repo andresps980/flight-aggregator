@@ -27,6 +27,8 @@ public final class AlphaJsonFormat implements ProviderFormat {
     private static final String UNPARSEABLE_TIME = "TBD";
     private static final JsonFactory FACTORY = JsonFactory.builder()
             .disable(StreamWriteFeature.AUTO_CLOSE_TARGET)
+            // A feed interrupted by an exception must stay truncated (invalid JSON), not be closed into a valid array
+            .disable(StreamWriteFeature.AUTO_CLOSE_CONTENT)
             .enable(StreamWriteFeature.WRITE_BIGDECIMAL_AS_PLAIN)
             .build();
 
@@ -49,7 +51,10 @@ public final class AlphaJsonFormat implements ProviderFormat {
             }
             json.writeEndArray();
         } catch (JacksonIOException e) {
-            throw e.getCause() instanceof IOException io ? io : new IOException(e);
+            if (e.getCause() instanceof IOException io) {
+                throw io;
+            }
+            throw new IllegalStateException("Mock-Alpha serialization failed", e);
         }
     }
 

@@ -8,3 +8,5 @@
 **/*.iml
 docs
 specs
+flight-aggregator/src
+frontend

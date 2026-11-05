@@ -64,8 +64,11 @@ public final class BetaXmlFormat implements ProviderFormat {
             xml.flush();
             xml.close(); // StAX does not close the underlying stream
         } catch (XMLStreamException e) {
-            // The JDK writer wraps output failures; nothing else can fail while writing well-formed elements.
-            throw e.getCause() instanceof IOException io ? io : new IOException(e);
+            // The JDK writer wraps output failures; anything else is a bug in this serializer, not a disconnect.
+            if (e.getCause() instanceof IOException io) {
+                throw io;
+            }
+            throw new IllegalStateException("Mock-Beta serialization failed", e);
         }
     }
 

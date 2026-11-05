@@ -209,6 +209,39 @@ class WorldGeneratorTest {
         }
 
         @Test
+        @DisplayName("AC-3: identities stay unique when every itinerary departs the same day (all ALREADY_DEPARTED)")
+        void departedItinerariesStayUnique() {
+            // Invalid fraction 1 gives ~1/7 ALREADY_DEPARTED itineraries, all departing the day before the reference
+            // date; indexes repeat across partition days, so only the departure slot keeps them apart.
+            var departed = generator(settings(7L, 210_000, 1.0, 0.0, 0.0))
+                    .itineraries()
+                    .filter(i -> i.invalidKind().equals(java.util.Optional.of(InvalidKind.ALREADY_DEPARTED)))
+                    .map(i -> identity(i.segments()))
+                    .toList();
+
+            assertThat(departed).hasSizeGreaterThan(25_000).doesNotHaveDuplicates();
+        }
+
+        @Test
+        @DisplayName("AC-3: a day at the per-day limit (239,976) uses every airline up to flight 9999, all distinct")
+        void perDayLimit() {
+            var settings = new WorldSettings(7, 239_976, 1, REFERENCE_DATE, 0.0, 0.0, 0.0);
+
+            var firstSegments = generator(settings)
+                    .itineraries()
+                    .map(i -> i.segments().getFirst())
+                    .toList();
+
+            assertThat(firstSegments).hasSize(239_976);
+            assertThat(firstSegments.getLast().airline()).isEqualTo("NH");
+            assertThat(firstSegments.getLast().flightNumber()).isEqualTo(9_999);
+            assertThat(firstSegments.stream()
+                            .map(s -> s.airline() + s.flightNumber())
+                            .distinct())
+                    .hasSize(239_976);
+        }
+
+        @Test
         @DisplayName("AC-3: a single-itinerary world works")
         void singleItinerary() {
             assertThat(generator(settings(1)).itineraries()).hasSize(1);

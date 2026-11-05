@@ -46,14 +46,14 @@ class ChaosIT {
     }
 
     @Test
-    @DisplayName("AC-15: a provider with a 300 ms latency answers no sooner than 300 ms")
+    @DisplayName("AC-15: a provider with a 300 ms latency answers in 300 ms, latency applied once (not on re-dispatch)")
     void latency() {
         long start = System.nanoTime();
         var gamma = http.get("/mock-gamma/flights?date=2026-11-06");
         Duration elapsed = Duration.ofNanos(System.nanoTime() - start);
 
         assertThat(gamma.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(elapsed).isGreaterThanOrEqualTo(Duration.ofMillis(300));
+        assertThat(elapsed).isGreaterThanOrEqualTo(Duration.ofMillis(300)).isLessThan(Duration.ofMillis(600));
     }
 
     @Test

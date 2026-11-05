@@ -15,14 +15,19 @@ public record WorldProperties(
         double malformedFraction,
         double sameProviderDuplicateFraction) {
 
+    /** @throws IllegalArgumentException naming the full property, e.g. {@code gds.world.volume must be ...} */
     WorldSettings toSettings() {
-        return new WorldSettings(
-                seed,
-                volume,
-                horizonDays,
-                referenceDate,
-                invalidFraction,
-                malformedFraction,
-                sameProviderDuplicateFraction);
+        try {
+            return new WorldSettings(
+                    seed,
+                    volume,
+                    horizonDays,
+                    referenceDate,
+                    invalidFraction,
+                    malformedFraction,
+                    sameProviderDuplicateFraction);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("gds.world." + e.getMessage(), e);
+        }
     }
 }

@@ -56,6 +56,8 @@ public class InventoryConfig {
 
     @Bean
     WorldStatisticsCache worldStatisticsCache(WorldGenerator generator) {
-        return new WorldStatisticsCache(generator, new WorldStatisticsCalculator(generator.providers()));
+        WorldStatisticsCalculator calculator = new WorldStatisticsCalculator(generator.providers());
+        return new WorldStatisticsCache((horizon, day) -> calculator.calculate(
+                day.map(d -> generator.itineraries(horizon, d)).orElseGet(() -> generator.itineraries(horizon))));
     }
 }

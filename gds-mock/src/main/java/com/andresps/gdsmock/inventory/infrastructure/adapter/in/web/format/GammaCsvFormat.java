@@ -69,10 +69,19 @@ public final class GammaCsvFormat implements ProviderFormat {
             if (i > 0) {
                 line.append('|');
             }
-            line.append(segment.airline()).append("%04d".formatted(segment.flightNumber()));
+            line.append(segment.airline());
+            appendZeroPadded(line, segment.flightNumber());
             endpoint(line, segment.origin(), segment.departure(), i == unparseable ? UNPARSEABLE_TIME : LOCAL_TIME);
             endpoint(line, segment.destination(), segment.arrival(), LOCAL_TIME);
         }
+    }
+
+    /** Flight number on 4 digits ({@code 7} → {@code 0007}); {@code String.format} is too slow per segment at 1M. */
+    private static void appendZeroPadded(StringBuilder line, int flightNumber) {
+        for (int limit = 1000; limit > 1 && flightNumber < limit; limit /= 10) {
+            line.append('0');
+        }
+        line.append(flightNumber);
     }
 
     private static void endpoint(StringBuilder line, Airport airport, Instant time, DateTimeFormatter formatter) {

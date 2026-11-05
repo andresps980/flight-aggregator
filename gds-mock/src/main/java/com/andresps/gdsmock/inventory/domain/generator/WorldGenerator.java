@@ -25,7 +25,9 @@ import java.util.stream.Stream;
  * <p>Itinerary {@code i} of partition day {@code d} is built from its own {@code SplittableRandom} seeded with
  * {@code (seed, d, i)}: it doesn't depend on any other itinerary, so a day or a provider can be generated on its own
  * and every provider sees the same itinerary. Within a day, index {@code i} maps one-to-one to the first segment's
- * (airline, flight number), which makes identities unique by construction. Nothing is cached: memory doesn't grow
+ * (airline, flight number), which makes identities unique by construction: across days the departure dates differ,
+ * and departed itineraries (which all depart the day before the reference date) use partition-specific departure
+ * slots. Nothing is cached: memory doesn't grow
  * with the volume.
  */
 public final class WorldGenerator {
@@ -63,13 +65,21 @@ public final class WorldGenerator {
 
     /** The whole world, day by day, in generation order. */
     public Stream<WorldItinerary> itineraries() {
-        Horizon horizon = horizon();
+        return itineraries(horizon());
+    }
+
+    /** The whole world of a horizon the caller already read. */
+    public Stream<WorldItinerary> itineraries(Horizon horizon) {
         return horizon.days().stream().flatMap(day -> day(horizon, day));
     }
 
     /** One partition day of the world. */
     public Stream<WorldItinerary> itineraries(LocalDate day) {
-        Horizon horizon = horizon();
+        return itineraries(horizon(), day);
+    }
+
+    /** One partition day of a horizon the caller already read. */
+    public Stream<WorldItinerary> itineraries(Horizon horizon, LocalDate day) {
         if (!horizon.contains(day)) {
             throw new DateOutsideHorizonException(day, horizon);
         }
@@ -108,17 +118,18 @@ public final class WorldGenerator {
         int dayIndex = (int) (day.toEpochDay() - horizon.from().toEpochDay());
         int count = settings.volume() / settings.horizonDays()
                 + (dayIndex < settings.volume() % settings.horizonDays() ? 1 : 0);
-        return IntStream.range(0, count).mapToObj(index -> itinerary(horizon.referenceDate(), day, index));
+        return IntStream.range(0, count).mapToObj(index -> itinerary(horizon.referenceDate(), day, dayIndex, index));
     }
 
-    private WorldItinerary itinerary(LocalDate referenceDate, LocalDate day, int index) {
+    private WorldItinerary itinerary(LocalDate referenceDate, LocalDate day, int dayIndex, int index) {
         SplittableRandom random = new SplittableRandom(seed(day, index));
         String airline = Catalog.AIRLINES.get(index % Catalog.AIRLINES.size());
         int flightNumber = index / Catalog.AIRLINES.size() + 1;
         Optional<InvalidKind> kind = random.nextDouble() < settings.invalidFraction()
                 ? Optional.of(INVALID_KINDS[random.nextInt(INVALID_KINDS.length)])
                 : Optional.empty();
-        List<ScheduledSegment> segments = schedules.build(random, day, referenceDate, airline, flightNumber, kind);
+        List<ScheduledSegment> segments = schedules.build(
+                random, day, dayIndex, settings.horizonDays(), referenceDate, airline, flightNumber, kind);
         BigDecimal baseFare = BigDecimal.valueOf(3_000L + random.nextInt(40_000) + 6_000L * (segments.size() - 1), 2);
         String ref = "%s-%06d".formatted(DAY.format(day), index);
         return new WorldItinerary(

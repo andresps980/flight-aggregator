@@ -39,6 +39,11 @@ public final class FeedRequestResolver {
 
     /** Validates an optional date parameter; {@code null} means the whole horizon. */
     public Optional<LocalDate> resolveDate(String date) {
+        return resolveDate(date, horizon.get());
+    }
+
+    /** As {@link #resolveDate(String)}, against a horizon the caller already read (one read per request). */
+    public Optional<LocalDate> resolveDate(String date, Horizon current) {
         if (date == null) {
             return Optional.empty();
         }
@@ -48,7 +53,6 @@ public final class FeedRequestResolver {
         } catch (DateTimeParseException e) {
             throw new InvalidDateException(date);
         }
-        Horizon current = horizon.get();
         if (!current.contains(day)) {
             throw new DateOutsideHorizonException(day, current);
         }

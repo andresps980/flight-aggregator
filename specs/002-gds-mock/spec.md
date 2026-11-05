@@ -1,6 +1,6 @@
 # Spec 002: GDS mock providers
 
-- **Status:** Approved
+- **Status:** Implemented
 - **Branch:** feat/002-gds-mock
 - **Related ADRs:** [ADR-0012](../../docs/adr/0012-single-gds-mock-application.md),
   [ADR-0013](../../docs/adr/0013-stateless-seeded-streamed-generation.md),
@@ -57,7 +57,8 @@ spec can reconcile its counts.
 - **AC-2** — Given the default settings, when the world is generated, then every itinerary belongs to one of the 7
   horizon days, and every itinerary except `ALREADY_DEPARTED` ones departs (first segment) within its partition day
   (UTC).
-- **AC-3** — Given `volume` V, then the world contains exactly V distinct identities. Default 100,000; allowed
+- **AC-3** — Given `volume` V, then the world contains exactly V distinct identities (unique by construction, also
+  among `ALREADY_DEPARTED` itineraries, which all depart the same day). Default 100,000; allowed
   1..1,000,000, with `horizon-days` 1..30 and at most 239,976 itineraries per day (24 airlines × 9,999 flight
   numbers). Settings out of range fail the startup with a message naming the property.
 - **AC-4** — Each itinerary is offered by 1, 2 or 3 providers (about 40 / 35 / 25 %), with identical schedules and
@@ -97,7 +98,8 @@ spec can reconcile its counts.
 - **AC-13** — Given `?date=YYYY-MM-DD` inside the horizon, then only itineraries of that partition day are returned;
   the partitions are disjoint and their union is the unfiltered response.
 - **AC-14 (error)** — A `date` outside the horizon or not in `YYYY-MM-DD` ⇒ `400`; an unknown provider ⇒ `404`. Both
-  as RFC 9457 Problem Details, without latency or errors applied.
+  as RFC 9457 Problem Details, without latency or errors applied. Request validation comes first: a bad request to a
+  provider in outage gets `400`/`404`, not `503`.
 
 **Chaos** (provider endpoints only)
 - **AC-15** — Given a latency range [min, max] for a provider (default 100–5000 ms), then each request waits a

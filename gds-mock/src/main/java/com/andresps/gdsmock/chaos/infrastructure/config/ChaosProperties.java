@@ -21,12 +21,20 @@ public record ChaosProperties(@Name("default") Values defaults, Map<String, Valu
         providers = providers == null ? Map.of() : Map.copyOf(providers);
     }
 
+    /** @throws IllegalArgumentException naming the provider and the setting, e.g. {@code gds.chaos (mock-beta): ...} */
     ChaosSettings settingsFor(String providerId) {
         Values override = providers.getOrDefault(providerId, new Values(null, null, null));
-        return new ChaosSettings(
-                first(override.latencyMin(), defaults.latencyMin(), Duration.ZERO),
-                first(override.latencyMax(), defaults.latencyMax(), Duration.ZERO),
-                first(override.errorRate(), defaults.errorRate(), 0.0));
+        try {
+            return new ChaosSettings(
+                    first(override.latencyMin(), defaults.latencyMin(), Duration.ZERO),
+                    first(override.latencyMax(), defaults.latencyMax(), Duration.ZERO),
+                    first(override.errorRate(), defaults.errorRate(), 0.0));
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(
+                    "gds.chaos settings for %s (default + providers.%s): %s"
+                            .formatted(providerId, providerId, e.getMessage()),
+                    e);
+        }
     }
 
     private static <T> T first(T override, T defaultValue, T fallback) {
