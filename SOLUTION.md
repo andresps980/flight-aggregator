@@ -163,6 +163,12 @@ Known from the accepted decisions:
   in generation order, not shuffled.
 - gds-mock's admin API is unauthenticated (a mock on an internal network), and the three providers share one JVM, so
   a GC pause or a crash affects all of them at once. Real providers fail more independently.
+- gds-mock has no rate limiting: a full 1M feed keeps a CPU core busy for a few seconds (up to the 30 min async
+  timeout for a very slow client), so anyone who can reach it can load it. That is acceptable for a mock on an
+  internal network, next to the unauthenticated admin API.
+- gds-mock has no catch-all exception handler. Unexpected errors use Spring Boot's default error response. A
+  catch-all would also capture framework exceptions (unknown path, wrong method) and client disconnects, turning
+  them into 500s or ERROR logs.
 - gds-mock doesn't simulate failures in the middle of a stream (truncated responses), gzip or slow trickling. Failures
   happen before the first byte only.
 - Changing the generator code changes the data for a given seed. Determinism holds per version of the mock.

@@ -139,8 +139,11 @@ cached until the reference date changes.
 
 ### Configuration
 
-Every property can be set as an environment variable (`gds.world.volume` → `GDS_WORLD_VOLUME`) or a command-line
-argument. Out-of-range values stop the startup with a message naming the property.
+Every property can be set as a command-line argument, and every property except per-provider chaos overrides as an
+environment variable (`gds.world.volume` → `GDS_WORLD_VOLUME`). Environment variables drop the dash in map keys
+(`MOCK_BETA` binds to `mockbeta`), so per-provider overrides need an argument or `SPRING_APPLICATION_JSON`, e.g.
+`SPRING_APPLICATION_JSON='{"gds":{"chaos":{"providers":{"mock-beta":{"error-rate":0.5}}}}}'`. Out-of-range values and
+unknown provider ids stop the startup with a message naming the property.
 
 | Property | Default | Meaning |
 |---|---|---|

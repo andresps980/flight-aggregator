@@ -78,7 +78,8 @@ A zero offset is written `+00:00` (never `Z`).
 
 ### Mock-Gamma — comma-separated stream
 
-A header line, then one itinerary per line: `REF,PRICE_EUR,SEGMENTS`. Segments are separated by `|`; each segment
+A header line, then one itinerary per line: `REF,PRICE_EUR,SEGMENTS`. Lines end with `\n` (not RFC 4180's CRLF),
+as many legacy feeds do, and no field is quoted (no value contains a comma). Segments are separated by `|`; each segment
 has 7 `~`-separated sub-fields: `flight~origin~localDeparture~originZone~destination~localArrival~destinationZone`.
 
 ```text
