@@ -20,7 +20,7 @@ Maven multi-module build; the parent `pom.xml` and `./mvnw` live at the reposito
 | Module | Purpose | Base package |
 |---|---|---|
 | `flight-aggregator/` | Ingestion, deduplication and search API | `com.andresps.flights` |
-| `gds-mock/` | Mock GDS providers (Mock-Alpha JSON, Mock-Beta XML, Mock-Gamma CSV) — placeholder, no code yet | to be defined with its first spec |
+| `gds-mock/` | Mock GDS providers (Mock-Alpha JSON, Mock-Beta XML, Mock-Gamma CSV) with chaos; test double, must not depend on `flight-aggregator` | `com.andresps.gdsmock` |
 | `frontend/` | React + TypeScript dashboard (planned, ADR-0009) | — |
 
 Shared plugin configuration (Spotless, JaCoCo, Failsafe) lives in the parent `pluginManagement`; each module
@@ -33,6 +33,8 @@ activates it in its own `<build><plugins>`, so formatting, the coverage gate and
 | Format code | `./mvnw spotless:apply` (one module: `-pl <module>`) |
 | Unit tests only | `./mvnw test` (one module: `./mvnw -pl <module> test`) |
 | Full build, all modules (unit + IT + coverage gate + format check) | `./mvnw verify` |
+| Also run tests tagged `slow` (1M-record volume tests, excluded by default) | `./mvnw verify -Pslow-tests` |
+| Run the mock providers | `docker compose up --build` or `./mvnw -pl gds-mock spring-boot:run` |
 | Run the aggregator | `./mvnw -pl flight-aggregator spring-boot:run` |
 | Coverage report | `<module>/target/site/jacoco/index.html` (after `verify`) |
 
@@ -63,6 +65,8 @@ Rules:
 - Constructor injection only. No field injection, no `System.out`, no generic exceptions.
 - Errors go out as RFC 9457 `ProblemDetail` via `GlobalExceptionHandler`.
 - Features must not have cyclic dependencies on each other.
+- `gds-mock` has no `application/` layer (no use cases or driven ports): `domain` + `infrastructure` only, and it
+  must never depend on `com.andresps.flights` (its own `ArchitectureTest` enforces both).
 
 SOLID in practice here: one use case per interface (SRP/ISP), new behaviour through new adapters/implementations rather
 than editing existing ones (OCP), ports as abstractions owned by the application (DIP), implementations honour port

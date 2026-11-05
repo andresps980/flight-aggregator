@@ -7,6 +7,10 @@
 Each backend module (`flight-aggregator`, `gds-mock`) follows **hexagonal architecture** (ports & adapters), organised **by feature** first and by layer
 second. The rationale is in [ADR-0002](adr/0002-hexagonal-architecture.md).
 
+`gds-mock` uses only `domain` and `infrastructure`. It has no use-case orchestration and no driven ports, so an
+`application` layer would be single-implementation ceremony. Its `ArchitectureTest` keeps the domain framework-free,
+keeps chaos out of the feeds, and forbids any dependency on the aggregator.
+
 ```mermaid
 flowchart LR
     client([HTTP client]) --> rest

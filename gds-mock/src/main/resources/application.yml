@@ -1,0 +1,43 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: gds-mock
+  threads:
+    virtual:
+      enabled: true # latency is simulated by sleeping: virtual threads make it cheap
+  mvc:
+    problemdetails:
+      enabled: true
+    async:
+      request-timeout: 30m # a 1,000,000-itinerary feed streams for a while
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+# Spec 002. Every value can be overridden with an environment variable, e.g. GDS_WORLD_VOLUME=1000000.
+gds:
+  world:
+    seed: 42
+    volume: 100000                          # distinct itineraries over the whole horizon, 1..1,000,000
+    horizon-days: 7                         # UTC days after the reference date, 1..30
+    # reference-date: 2026-11-05            # unset = today (UTC)
+    invalid-fraction: 0.05                  # business-invalid itineraries
+    malformed-fraction: 0.01                # malformed provider records
+    same-provider-duplicate-fraction: 0.005 # records repeated by the same provider
+  chaos:
+    default:
+      latency-min: 100ms
+      latency-max: 5000ms
+      error-rate: 0.10
+    # providers:                            # per-provider overrides of any default value
+    #   mock-beta:
+    #     error-rate: 0.5

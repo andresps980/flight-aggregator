@@ -14,11 +14,27 @@
     <name>gds-mock</name>
     <description>Mock GDS providers (Mock-Alpha JSON, Mock-Beta XML, Mock-Gamma CSV) with artificial latency and errors</description>
 
-    <!--
-        Placeholder module: no sources yet. Runtime dependencies, spring-boot-maven-plugin and the ArchUnit
-        architecture test are added together with the first code (the repackage goal needs a main class).
-    -->
     <dependencies>
+        <!-- Runtime: no dependency on flight-aggregator (the mock is a test double of external systems) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webmvc</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
+        <!-- Test -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>com.tngtech.archunit</groupId>
             <artifactId>archunit-junit5</artifactId>
@@ -28,6 +44,10 @@
 
     <build>
         <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
             <!-- Quality tooling configured in the parent pluginManagement -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
