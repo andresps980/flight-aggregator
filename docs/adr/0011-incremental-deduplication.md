@@ -45,7 +45,10 @@ We will:
   output is deterministic; the key doubles as a natural unique key for persistence. Because selection is a "minimum"
   and statistics are counters, disjoint partitions by key hash can be aggregated in parallel and their results
   concatenated, with statistics added.
-- **Negative / trade-offs:** at 1M distinct itineraries the accumulator holds ~1M entries in the heap (order of a few
-  hundred MB with the key strings); the accumulator is single-threaded by design. The readable key is longer than a hash.
-- **Follow-ups:** partitioning and parallel aggregation in the ingestion spec if measurements require it; key hashing
-  and the unique index in the persistence spec.
+- **Negative / trade-offs:** at 1M distinct itineraries the accumulator holds ~1M entries in the heap. Each entry is a
+  full object graph (key string, offer, itinerary, segments with their value objects, provider set): an unmeasured
+  estimate of ~1–1.5 KB per two-segment entry, i.e. **~1–1.5 GB at 1M**, with a higher peak while `result()` builds
+  the output. The accumulator is single-threaded by design. The readable key is longer than a hash.
+- **Follow-ups:** measure the footprint (JOL / heap histogram) in the ingestion spec; if needed, partition by key
+  hash, intern low-cardinality value objects (airports, airlines, providers), use a lighter provider set, or fall back
+  to the database upsert. Key hashing and the unique index belong to the persistence spec.

@@ -38,7 +38,8 @@ parsed from any provider format and store its output. ADR-0010 fixes the busines
 
 ## Acceptance criteria
 
-Times below are absolute instants (UTC). `now` is the instant of the injected `java.time.Clock`. Amounts are EUR.
+Times below are absolute instants (UTC). `now` is the instant of the injected `java.time.Clock`, read **once** when the
+aggregation's validator is created, so every offer of a run is judged against the same instant. Amounts are EUR.
 
 **Identity**
 - **AC-1** — Given two offers from different providers whose itineraries have the same airline, the same ordered flight
@@ -103,9 +104,11 @@ takes part in deduplication.
 
 **Model invariants** — malformed values are rejected at construction with a domain validation error.
 - **AC-24 (error)** — Airport codes must be 3 letters A–Z; airline codes 2 characters A–Z/0–9; flight numbers an airline
-  code plus 1–4 digits; provider ids non-blank; money non-negative, EUR only; a segment's origin must differ from its
-  destination; an itinerary needs at least one segment; an offer's base price must be greater than zero. Lower-case
-  input is normalised to upper case; surrounding spaces are trimmed.
+  code plus 1–4 digits; provider ids non-blank; money non-negative, EUR only, below 1,000,000,000 and with at most 10 significant decimals
+  (so malformed input such as `1E999999999` fails fast); a segment's origin must differ from its
+  destination; an itinerary needs at least one segment; an offer's base price must be greater than zero. Airport,
+  airline and flight-number codes are normalised to upper case; all identifiers are trimmed (provider ids keep their
+  case).
 
 ## API contract
 
@@ -147,6 +150,10 @@ Feature package `com.andresps.flights.aggregation.domain`, sub-packages `model`,
 - "Already departed" is evaluated at aggregation time. Data is up to one ingestion interval old (ADR-0006), so the
   **search spec must also exclude departed flights at query time**.
 - The result's list of itineraries has no guaranteed order; search sorts by price.
+- Flight numbers are compared as given (`IB0123` ≠ `IB123`); provider adapters must agree on one format (e.g. strip
+  leading zeros) in the ingestion spec.
+- This spec **refines ADR-0010**: equal arrival and departure is also invalid, `MIXED_AIRLINES` is a discard reason
+  (not only an assumption), `REVISITED_AIRPORT` is added, and the evaluation order is fixed (AC-20).
 
 ## Open questions
 
