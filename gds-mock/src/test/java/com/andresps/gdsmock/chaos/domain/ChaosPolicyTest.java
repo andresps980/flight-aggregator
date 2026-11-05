@@ -95,7 +95,7 @@ class ChaosPolicyTest {
                     failures++;
                     yield f.latency();
                 }
-                case Outage o -> throw new AssertionError("no outage expected");
+                case Outage() -> throw new AssertionError("no outage expected");
             };
             assertThat(latency).isBetween(Duration.ofMillis(100), Duration.ofMillis(5_000));
         }

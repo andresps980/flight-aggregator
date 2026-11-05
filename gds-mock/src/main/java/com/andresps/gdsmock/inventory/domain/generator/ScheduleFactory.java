@@ -20,8 +20,10 @@ import java.util.SplittableRandom;
  */
 final class ScheduleFactory {
 
-    private static final int STEP_MINUTES = 5;
-    private static final int SLOTS_PER_DAY = 24 * 60 / STEP_MINUTES;
+    /** {@code long} so that every {@code STEP_MINUTES * n} is computed in {@code long} (no int arithmetic to widen). */
+    private static final long STEP_MINUTES = 5;
+
+    private static final int SLOTS_PER_DAY = (int) (24 * 60 / STEP_MINUTES);
 
     /**
      * @param partitionDay the horizon day the itinerary belongs to
@@ -183,7 +185,7 @@ final class ScheduleFactory {
      */
     private static Instant departedSlot(SplittableRandom random, LocalDate day, int dayIndex, int horizonDays) {
         int slot = horizonDays * random.nextInt(SLOTS_PER_DAY / horizonDays) + dayIndex;
-        return day.atStartOfDay(ZoneOffset.UTC).toInstant().plus(minutes((long) STEP_MINUTES * slot));
+        return day.atStartOfDay(ZoneOffset.UTC).toInstant().plus(minutes(STEP_MINUTES * slot));
     }
 
     /** {@code segments + 1} distinct airports (partial Fisher–Yates over the catalog). */

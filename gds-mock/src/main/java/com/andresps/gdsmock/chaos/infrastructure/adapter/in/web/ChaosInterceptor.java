@@ -53,7 +53,7 @@ public class ChaosInterceptor implements HandlerInterceptor {
         }
         ProviderId provider = feed.provider();
         switch (policy.decide(provider)) {
-            case ChaosDecision.Outage outage -> throw new ProviderOutageException(provider);
+            case ChaosDecision.Outage() -> throw new ProviderOutageException(provider);
             case ChaosDecision.Fail fail -> {
                 await(provider, fail.latency());
                 throw new InjectedProviderErrorException(provider);
