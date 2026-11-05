@@ -54,7 +54,8 @@ flowchart LR
 
 - **S**ingle responsibility: one use case per inbound port; controllers only translate HTTP ↔ use case.
 - **O**pen/closed: new behaviour comes as new adapters/use cases; existing ones are not modified to add variants.
-- **L**iskov substitution: any `GreetingTemplateProvider` implementation can replace another (contract in the port's Javadoc), which is what lets tests use mocks.
+- **L**iskov substitution: implementations honour the contract written in their interface's Javadoc (e.g. any
+  `ItineraryRule` returns empty or one `DiscardReason` and never throws), so they are interchangeable and mockable.
 - **I**nterface segregation: small, use-case-specific ports instead of broad "service" interfaces.
 - **D**ependency inversion: the application owns its ports; infrastructure implements them and the composition root
   (`infrastructure/config`) wires concrete classes.
