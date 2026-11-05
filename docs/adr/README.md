@@ -16,3 +16,5 @@ New ADR: copy [`0000-template.md`](0000-template.md) or run `/adr` in Claude Cod
 | [0009](0009-react-frontend.md) | Minimal React + TypeScript + Vite frontend served by nginx | Accepted |
 | [0010](0010-domain-assumptions.md) | Domain assumptions for itineraries, deduplication and pricing | Accepted |
 | [0011](0011-incremental-deduplication.md) | Incremental deduplication keyed by a deterministic itinerary key | Accepted |
+| [0012](0012-single-gds-mock-application.md) | One gds-mock application exposing the three providers | Accepted |
+| [0013](0013-stateless-seeded-streamed-generation.md) | Stateless, index-seeded, streamed mock data generation | Accepted |
