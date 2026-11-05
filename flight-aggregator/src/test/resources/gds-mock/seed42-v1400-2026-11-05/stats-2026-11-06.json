@@ -1,0 +1,81 @@
+{
+    "referenceDate": "2026-11-05",
+    "horizon": {
+        "from": "2026-11-06",
+        "to": "2026-11-12"
+    },
+    "date": "2026-11-06",
+    "distinctItineraries": 200,
+    "invalidItineraries": {
+        "ALREADY_DEPARTED": 0,
+        "ARRIVAL_NOT_AFTER_DEPARTURE": 2,
+        "CONNECTION_TOO_SHORT": 2,
+        "LAYOVER_TOO_LONG": 1,
+        "MIXED_AIRLINES": 1,
+        "REVISITED_AIRPORT": 2,
+        "SEGMENTS_NOT_CHAINED": 3
+    },
+    "crossProviderDuplicates": 172,
+    "providers": {
+        "mock-alpha": {
+            "records": 123,
+            "sameProviderDuplicates": 0,
+            "fullyMalformedItineraries": 1,
+            "malformed": {
+                "BAD_AIRPORT_CODE": 1,
+                "NON_POSITIVE_PRICE": 0,
+                "UNPARSEABLE_TIME": 0
+            }
+        },
+        "mock-beta": {
+            "records": 121,
+            "sameProviderDuplicates": 1,
+            "fullyMalformedItineraries": 0,
+            "malformed": {
+                "BAD_AIRPORT_CODE": 0,
+                "NON_POSITIVE_PRICE": 0,
+                "UNPARSEABLE_TIME": 0
+            }
+        },
+        "mock-gamma": {
+            "records": 129,
+            "sameProviderDuplicates": 0,
+            "fullyMalformedItineraries": 0,
+            "malformed": {
+                "BAD_AIRPORT_CODE": 0,
+                "NON_POSITIVE_PRICE": 0,
+                "UNPARSEABLE_TIME": 0
+            }
+        }
+    },
+    "fullyMalformedItineraries": {
+        "total": 0,
+        "byInvalidKind": {
+            "ALREADY_DEPARTED": 0,
+            "ARRIVAL_NOT_AFTER_DEPARTURE": 0,
+            "CONNECTION_TOO_SHORT": 0,
+            "LAYOVER_TOO_LONG": 0,
+            "MIXED_AIRLINES": 0,
+            "REVISITED_AIRPORT": 0,
+            "SEGMENTS_NOT_CHAINED": 0
+        }
+    },
+    "expectedAggregation": {
+        "offersReceived": {
+            "mock-alpha": 122,
+            "mock-beta": 121,
+            "mock-gamma": 129
+        },
+        "discarded": {
+            "ALREADY_DEPARTED": 0,
+            "ARRIVAL_NOT_AFTER_DEPARTURE": 6,
+            "CONNECTION_TOO_SHORT": 4,
+            "LAYOVER_TOO_LONG": 1,
+            "MIXED_AIRLINES": 1,
+            "REVISITED_AIRPORT": 4,
+            "SEGMENTS_NOT_CHAINED": 4
+        },
+        "duplicatesMerged": 163,
+        "itinerariesProduced": 189
+    }
+}

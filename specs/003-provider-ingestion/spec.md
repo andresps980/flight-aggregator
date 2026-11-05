@@ -138,7 +138,8 @@ same itinerary served under two days would be produced twice (one per day): a du
 **Report and reconciliation**
 - **AC-21** — The report contains: run id, start/end instants and duration, overall status; per provider: status,
   partitions requested / succeeded / failed (each failed one with its day and failure kind: `TIMEOUT`,
-  `SERVER_ERROR`, `CLIENT_ERROR`, `IO_ERROR`, `MALFORMED_DOCUMENT`, `CIRCUIT_OPEN`, `RUN_TIMEOUT`), total attempts,
+  `SERVER_ERROR`, `CLIENT_ERROR`, `IO_ERROR`, `MALFORMED_DOCUMENT`, `CIRCUIT_OPEN`, `RUN_TIMEOUT`, or
+  `UNEXPECTED_ERROR` for a bug in an adapter, which also fails only its partition), total attempts,
   duration, the circuit breaker state at the end of the run, records received, offers received and malformed
   records per reason; per day: contributing and missing providers, published or not, and its statistics; and the
   summed spec 001 `AggregationStatistics`. Per provider, `records received = offers received + Σ malformed`, and
