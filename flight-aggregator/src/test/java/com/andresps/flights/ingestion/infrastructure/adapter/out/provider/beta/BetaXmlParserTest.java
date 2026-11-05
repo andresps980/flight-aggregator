@@ -151,10 +151,10 @@ class BetaXmlParserTest {
 
         PartitionBuffer buffer = parse(parser, document(broken, valid()));
 
-        assertThat(buffer.malformed()).containsOnlyKeys(reason);
-        assertThat(buffer.malformed(reason)).isEqualTo(1);
-        assertThat(buffer.offers()).hasSize(1);
-        assertThat(buffer.recordsReceived()).isEqualTo(2);
+        assertThat(buffer.malformed()).as(name).containsOnlyKeys(reason);
+        assertThat(buffer.malformed(reason)).as(name).isEqualTo(1);
+        assertThat(buffer.offers()).as(name).hasSize(1);
+        assertThat(buffer.recordsReceived()).as(name).isEqualTo(2);
     }
 
     @Test
@@ -223,7 +223,7 @@ class BetaXmlParserTest {
     void rejectsBrokenDocument(String name, String template) {
         String body = template.contains("%s") ? template.formatted(HEAD + "<itineraries>" + valid()) : template;
 
-        assertThatThrownBy(() -> parse(parser, body)).isInstanceOf(MalformedDocumentException.class);
+        assertThatThrownBy(() -> parse(parser, body)).as(name).isInstanceOf(MalformedDocumentException.class);
     }
 
     @Test

@@ -235,6 +235,9 @@ Worst case per partition ≈ 3 × 60 s + 1.5 s backoff; the run deadline caps th
   data for that day: the store keeps that provider's last successful offers for the day (and marks them as such)
   until a run fetches the provider again. The day result carries the contributing and missing providers for this.
 - Until then, the in-memory adapter simply replaces a day's snapshot on each publication.
+- Revisit the container heap (`-Xmx1536m` in `flight-aggregator/Dockerfile`) once PostgreSQL replaces the in-memory
+  store. 1.5 GB is sized for an in-memory store holding the whole 1M world; the ingestion itself needs about 512 MB
+  with 2 days in flight (SOLUTION.md).
 
 ## Open questions
 

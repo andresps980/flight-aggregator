@@ -102,6 +102,13 @@ Local times only make sense with their zone: in the same feed, `OPO 2026-11-06T1
 
 Without this, the same flight from two providers produces two different itinerary keys (spec 001).
 
+**Time-zone rules.** Local times (Gamma) and offsets (Beta) only convert back to the right instant if the provider and
+the aggregator use the same tzdata rules. A zone whose rules changed between versions shifts instants silently: tzdata
+2026 moved `Africa/Casablanca` from UTC+1 to UTC+0. As a mitigation, the mock's airport catalog only uses zones with
+stable rules: fixed offsets, or annual DST rules untouched since 2016 (checked by `CatalogTimeZonesTest`). Casablanca
+(CMN), Mexico City (MEX), São Paulo (GRU) and Istanbul (IST) were replaced in place by Nairobi (NBO), Lima (LIM),
+Panama (PTY) and Athens (ATH), so only the itineraries using them changed.
+
 ## Malformed records
 
 About 1 % of records (default) are malformed in exactly one field. The rest of the record and the document stay

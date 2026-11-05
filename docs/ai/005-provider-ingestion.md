@@ -136,6 +136,24 @@ Go ahead with the implementation, with these additions:
    (Dockerfile JVM options) accordingly, and record the numbers in SOLUTION.md.
 ````
 
+### 4. CI and code scanning follow-up
+
+````text
+1. Code scanning: yes, apply the .as(name) fix for #12–#18.
+2. Time zones: the tzdata guard makes the suite fail on any JDK 21 with older tzdata —
+   including a reviewer's machine. Instead, make the tests independent of the JVM's tzdata:
+   remove zones with recently changed or politically volatile rules (Africa/Casablanca and
+   any similar ones, e.g. zones that changed DST rules since 2022) from gds-mock's catalog,
+   re-record the fixtures, and replace the guard with a test asserting the catalog only uses
+   zones whose rules are stable across tzdata versions over the horizon (or simply document
+   the selection). Keep the limitation in SOLUTION.md (provider and aggregator with
+   different tz rules silently shift instants) and mention the mitigation in docs/providers.md.
+3. AC-10 untested and breakers on the wall clock: accepted, keep them documented as is.
+4. Note for the persistence PR (record it in the spec follow-ups): once the in-memory store
+   is replaced by PostgreSQL, revisit -Xmx1536m in the Dockerfile.
+5. In future, ask me before downloading or installing tools.
+````
+
 ## Clarifications (open questions of the spec)
 
 The agent's proposal is in bold.
@@ -197,10 +215,16 @@ lock) and required breaker thresholds that never open at the mock's normal 10 % 
 - **CI found a time-zone database mismatch** (after the PR was opened). The recorded fixtures came from a gds-mock
   running on the local JDK (Corretto 21.0.6, tzdata 2024b), while CI uses Temurin 21.0.13 (tzdata 2026e), in which
   `Africa/Casablanca` moves from UTC+1 to UTC+0. Gamma's local times then converted to different instants, and two
-  itineraries reconciled differently. The agent found it by downloading CI's JDK and diffing every mock zone's
-  offsets for the fixture week. The fixtures were re-recorded with that JDK: only Beta and Gamma representations
-  changed, and the stats were identical. A guard now fails fast on a JVM with older tzdata. The production lesson
-  is in SOLUTION.md.
+  itineraries reconciled differently.
+  - The agent found it by downloading CI's JDK and diffing every mock zone's offsets for the fixture week. It did not
+    ask before downloading, and the author asked to be consulted first in future (prompt 4).
+  - First fix: re-record the fixtures with that JDK and fail fast on older tzdata. The author rejected it, because it
+    made the suite fail on any reviewer's older JDK 21.
+  - Final fix: the tests no longer depend on tzdata. gds-mock only uses zones with stable rules
+    (`CatalogTimeZonesTest`, which flags exactly Casablanca, Mexico City, São Paulo and Istanbul). Those four were
+    replaced in place, so the providers.md examples are unchanged. The fixtures were re-recorded on the *old* local
+    JDK, and the guard was removed.
+  - The production lesson stays in SOLUTION.md.
 - **A memory surprise:** too little heap degrades into `PARTIAL` runs (GC pauses cause read timeouts) before it
   causes out-of-memory errors. That is now recorded as a limitation.
 
@@ -261,3 +285,14 @@ one test; the defaults match the spec. Acted on:
   breakers use the wall clock on purpose (commented).
 - *Raise the parallelism IT bound above 3.5 s.* The author fixed it at 3.5 s, and the barrier tests prove the
   concurrency.
+
+## CI and code scanning findings on the PR
+
+The first CI run failed: 5 reconciliation ITs, caused by the tzdata mismatch described above. After the fix, every
+check passed (build, tests and coverage; Spotless; dependency review; CodeQL).
+
+CodeQL left 7 notes. The agent classified them and the author approved the table before any change.
+
+| Alerts | Rule | Where | Decision |
+|---|---|---|---|
+| #12–#18 | `java/unused-parameter` | the `name` column of 7 parameterised parser tests | **Fixed.** The parameter only fed the display name (`@ParameterizedTest(name = "{0}")`), which CodeQL doesn't see. It is now the assertion description (`.as(name)`), so a failure also names the case. |

@@ -124,10 +124,10 @@ class AlphaJsonParserTest {
             String name, String fltNum, String org, String totFare, String depTs, MalformedReason reason) {
         PartitionBuffer buffer = parse(parser, "[" + direct(fltNum, org, totFare, depTs) + "," + valid() + "]");
 
-        assertThat(buffer.malformed()).containsOnlyKeys(reason);
-        assertThat(buffer.malformed(reason)).isEqualTo(1);
-        assertThat(buffer.offers()).hasSize(1);
-        assertThat(buffer.recordsReceived()).isEqualTo(2);
+        assertThat(buffer.malformed()).as(name).containsOnlyKeys(reason);
+        assertThat(buffer.malformed(reason)).as(name).isEqualTo(1);
+        assertThat(buffer.offers()).as(name).hasSize(1);
+        assertThat(buffer.recordsReceived()).as(name).isEqualTo(2);
     }
 
     @ParameterizedTest(name = "{0}")
@@ -148,8 +148,8 @@ class AlphaJsonParserTest {
 
         PartitionBuffer buffer = parse(parser, "[" + broken + "," + valid() + "]");
 
-        assertThat(buffer.malformed()).containsOnlyKeys(MalformedReason.INVALID_RECORD);
-        assertThat(buffer.offers()).hasSize(1);
+        assertThat(buffer.malformed()).as(name).containsOnlyKeys(MalformedReason.INVALID_RECORD);
+        assertThat(buffer.offers()).as(name).hasSize(1);
     }
 
     @Test
@@ -208,6 +208,6 @@ class AlphaJsonParserTest {
     void rejectsBrokenDocument(String name, String template) {
         String body = template.formatted(valid());
 
-        assertThatThrownBy(() -> parse(parser, body)).isInstanceOf(MalformedDocumentException.class);
+        assertThatThrownBy(() -> parse(parser, body)).as(name).isInstanceOf(MalformedDocumentException.class);
     }
 }
