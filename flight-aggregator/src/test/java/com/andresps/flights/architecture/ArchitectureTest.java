@@ -57,6 +57,25 @@ class ArchitectureTest {
             .because("use cases are wired in infrastructure.config; see ADR-0002");
 
     @ArchTest
+    static final ArchRule io_and_resilience_stay_in_infrastructure = noClasses()
+            .that()
+            .resideInAnyPackage("..domain..", "..application..")
+            .should()
+            .dependOnClassesThat()
+            .resideInAnyPackage(
+                    "io.github.resilience4j..", "javax.xml..", "java.net..", "tools.jackson..", "com.fasterxml..")
+            .because("parsing, HTTP and resilience are adapter concerns (ADR-0002, ADR-0014)");
+
+    @ArchTest
+    static final ArchRule provider_adapters_do_not_use_the_use_case = noClasses()
+            .that()
+            .resideInAPackage("..infrastructure.adapter.out..")
+            .should()
+            .dependOnClassesThat()
+            .resideInAnyPackage("..application.service..", "..application.port.in..")
+            .because("driven adapters implement outbound ports only");
+
+    @ArchTest
     static final ArchRule controllers_live_in_inbound_adapters = classes()
             .that()
             .areAnnotatedWith(RestController.class)

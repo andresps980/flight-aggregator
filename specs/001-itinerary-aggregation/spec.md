@@ -152,6 +152,8 @@ Feature package `com.andresps.flights.aggregation.domain`, sub-packages `model`,
 - The result's list of itineraries has no guaranteed order; search sorts by price.
 - Flight numbers are compared as given (`IB0123` ≠ `IB123`); provider adapters must agree on one format (e.g. strip
   leading zeros) in the ingestion spec.
+  *Amended by [spec 003](../003-provider-ingestion/spec.md) (AC-3): `FlightNumber` strips leading zeros, so
+  `IB0123` = `IB123`.*
 - This spec **refines ADR-0010**: equal arrival and departure is also invalid, `MIXED_AIRLINES` is a discard reason
   (not only an assumption), `REVISITED_AIRPORT` is added, and the evaluation order is fixed (AC-20).
 

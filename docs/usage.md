@@ -1,9 +1,9 @@
 # Usage
 
 > The aggregator exposes no business API yet: the core aggregation domain ([spec 001](../specs/001-itinerary-aggregation/spec.md))
-> is plain Java with no HTTP surface, and the ingestion and search APIs will be documented here as they are
-> implemented. The mock GDS providers ([spec 002](../specs/002-gds-mock/spec.md)) are documented
-> [below](#gds-mock-mock-gds-providers).
+> and the provider ingestion ([spec 003](../specs/003-provider-ingestion/spec.md)) have no HTTP surface; the ingestion
+> trigger and the search API will be documented here as they are implemented. The mock GDS providers
+> ([spec 002](../specs/002-gds-mock/spec.md)) are documented [below](#gds-mock-mock-gds-providers).
 
 ## Build and test
 
@@ -11,6 +11,7 @@
 |---|---|
 | Full build (unit + IT + coverage gate + format check, both modules) | `./mvnw verify` |
 | Also run the slow volume tests (tagged `slow`: 1,000,000-record generation and streaming) | `./mvnw verify -Pslow-tests` |
+| Also run the end-to-end ingestion test (tagged `e2e`, needs gds-mock running in the `deterministic` profile) | `./mvnw -pl flight-aggregator verify -Pe2e-tests` |
 | Start the stack (currently only gds-mock) | `docker compose up --build` |
 
 ## flight-aggregator
@@ -56,10 +57,62 @@ How offers become sellable itineraries. This is the behaviour the future ingesti
 | Pricing | Final price = base × (1 + markup), 5% by default, EUR, 2 decimals, `HALF_EVEN`. |
 | Statistics | Received per provider, discarded per reason, duplicates merged, itineraries produced; received = discarded + merged + produced. |
 
+### Provider ingestion (spec 003)
+
+An ingestion run fetches every (provider, day) partition of the horizon (the 7 UTC days after today) from the three
+providers, aggregates each day with the rules above and publishes it. It has no trigger yet: scheduling and
+`POST /api/v1/ingestions` come with persistence in the next spec, so today it runs from the integration tests and the
+`e2e` test below. Results are kept in memory.
+
+| Behaviour | Rule |
+|---|---|
+| Parsing | Streamed (Jackson 3 parser, StAX, line reader). Times become UTC instants; flight numbers lose leading zeros (`VY0001` = `VY1`). |
+| Malformed record | Skipped and counted per provider under one reason (first failing field): `BAD_AIRPORT_CODE`, `BAD_FLIGHT_NUMBER`, `NON_POSITIVE_PRICE`, `UNPARSEABLE_TIME`, `INVALID_RECORD`. Never stops the feed. |
+| Broken document | Invalid or truncated JSON/XML/CSV, a wrong root or header, any XML `DOCTYPE` (XXE-safe): the attempt fails as `MALFORMED_DOCUMENT` and leaves nothing behind. |
+| Retries | `5xx`, timeouts, I/O errors and broken documents: up to 3 attempts, 500 ms then 1 s (±50 % jitter). `4xx` (and any other non-2xx status): no retry. |
+| Circuit breaker | Per provider, opens when ≥ 80 % of the last 10 attempts failed; then calls fail at once as `CIRCUIT_OPEN` for 30 s, after which 2 probes decide. Survives across runs. |
+| Deadlines | 6 s without data (first byte or mid-body), 60 s per attempt, 10 min per run (`RUN_TIMEOUT`). |
+| Partial results | A failed partition never fails the run. Provider: `COMPLETED` / `PARTIAL` / `FAILED` by its partitions; run: `FAILED` only if every provider failed. A day is published if at least one provider delivered it, naming the missing ones. |
+| Report | Per provider: partitions, failures (day, kind, attempts), attempts, duration, breaker state, records, offers, malformed per reason. Per day: contributing/missing providers, published, statistics. Plus the summed spec 001 statistics. |
+
+Run the end-to-end check against a real mock (it reconciles every figure with `/admin/world/stats`):
+
+```bash
+./mvnw -pl gds-mock spring-boot:run -Dspring-boot.run.profiles=deterministic   # terminal 1 (or docker compose up)
+./mvnw -pl flight-aggregator verify -Pe2e-tests                                # terminal 2; -De2e.gds-mock.url=… to change
+```
+
 ### Configuration
 
-No application-specific properties yet. The markup percentage becomes configurable when the ingestion use case is
-wired (later spec).
+All under `aggregator.*` (defaults in `application.yml`, reasons in [spec 003](../specs/003-provider-ingestion/spec.md)
+and [ADR-0014](adr/0014-provider-resilience.md)). Invalid values stop the startup with a message naming the property.
+As in gds-mock, per-provider keys contain a dash, so override them with command-line arguments or
+`SPRING_APPLICATION_JSON` rather than plain environment variables.
+
+| Property | Default | Meaning |
+|---|---|---|
+| `aggregator.providers.<id>.base-url` | `http://localhost:8081` | Where provider `<id>` (`mock-alpha`, `mock-beta`, `mock-gamma`) is served; every provider with an adapter needs one |
+| `aggregator.providers.<id>.resilience.*` | — | Per-provider override of any `aggregator.resilience.default.*` value |
+| `aggregator.ingestion.horizon-days` | `7` | UTC days after today to ingest, 1..30 (must match the mock's horizon) |
+| `aggregator.ingestion.markup-percentage` | `5` | OTA markup on the selected base price |
+| `aggregator.ingestion.max-concurrent-days` | `2` | Days aggregated at the same time; memory grows with it (see SOLUTION.md) |
+| `aggregator.ingestion.max-concurrent-partitions` | `2` | Requests in flight per provider |
+| `aggregator.ingestion.run-timeout` | `10m` | Deadline of a whole run (below the 15 min schedule) |
+| `aggregator.resilience.default.connect-timeout` | `1s` | TCP connect timeout |
+| `aggregator.resilience.default.read-timeout` | `6s` | Max wait for the first byte and between body bytes (above the 5 s max latency) |
+| `aggregator.resilience.default.attempt-timeout` | `60s` | Total time per attempt; must be greater than `read-timeout` |
+| `aggregator.resilience.default.max-records-per-partition` | `500000` | Records one attempt may buffer; more fails the attempt as `MALFORMED_DOCUMENT` (protects the heap from a runaway feed) |
+| `aggregator.resilience.default.retry.max-attempts` | `3` | Attempts per partition, first one included |
+| `aggregator.resilience.default.retry.initial-backoff` / `multiplier` / `jitter` | `500ms` / `2` / `0.5` | Wait before attempt n+1: `initial × multiplier^(n-1) × (1 ± jitter)` |
+| `aggregator.resilience.default.circuit-breaker.sliding-window` / `minimum-calls` | `10` / `10` | Attempts considered, and needed before deciding |
+| `aggregator.resilience.default.circuit-breaker.failure-rate-threshold` | `80` | Percentage of failed attempts that opens the breaker |
+| `aggregator.resilience.default.circuit-breaker.open-wait` | `30s` | Time open before half-open probes |
+| `aggregator.resilience.default.circuit-breaker.half-open-calls` | `2` | Probes that decide whether it closes |
+
+```bash
+./mvnw -pl flight-aggregator spring-boot:run \
+  -Dspring-boot.run.arguments="--aggregator.providers.mock-beta.resilience.read-timeout=9s --aggregator.ingestion.max-concurrent-days=1"
+```
 
 ## gds-mock (mock GDS providers)
 

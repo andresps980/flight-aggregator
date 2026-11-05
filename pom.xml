@@ -36,8 +36,12 @@
         <jacoco.line.minimum>0.80</jacoco.line.minimum>
         <jacoco.branch.minimum>0.70</jacoco.branch.minimum>
 
-        <!-- JUnit tags excluded by default (long-running volume tests); -Pslow-tests runs everything -->
-        <test.excludedGroups>slow</test.excludedGroups>
+        <!-- Runtime libraries -->
+        <resilience4j.version>2.4.0</resilience4j.version>
+        <wiremock.version>3.13.2</wiremock.version>
+        <!-- JUnit tags excluded by default: "slow" (long-running volume tests) and "e2e" (needs a running gds-mock).
+             -Pslow-tests adds the slow ones, -Pe2e-tests adds the e2e ones. -->
+        <test.excludedGroups>slow,e2e</test.excludedGroups>
     </properties>
 
     <dependencyManagement>
@@ -46,6 +50,21 @@
                 <groupId>com.tngtech.archunit</groupId>
                 <artifactId>archunit-junit5</artifactId>
                 <version>${archunit.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.github.resilience4j</groupId>
+                <artifactId>resilience4j-circuitbreaker</artifactId>
+                <version>${resilience4j.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.github.resilience4j</groupId>
+                <artifactId>resilience4j-retry</artifactId>
+                <version>${resilience4j.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.wiremock</groupId>
+                <artifactId>wiremock-standalone</artifactId>
+                <version>${wiremock.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
@@ -202,7 +221,15 @@
         <profile>
             <id>slow-tests</id>
             <properties>
-                <test.excludedGroups></test.excludedGroups>
+                <test.excludedGroups>e2e</test.excludedGroups>
+            </properties>
+        </profile>
+        <!-- ./mvnw -pl flight-aggregator verify -Pe2e-tests: also run tests tagged "e2e" against a running gds-mock
+             (deterministic profile on localhost:8081, or -De2e.gds-mock.url=...) -->
+        <profile>
+            <id>e2e-tests</id>
+            <properties>
+                <test.excludedGroups>slow</test.excludedGroups>
             </properties>
         </profile>
     </profiles>

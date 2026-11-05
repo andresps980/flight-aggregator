@@ -12,3 +12,4 @@ starts here.
 |---|---|---|
 | [001](001-itinerary-aggregation/spec.md) | Itinerary aggregation core domain | Implemented |
 | [002](002-gds-mock/spec.md) | GDS mock providers (Alpha JSON, Beta XML, Gamma CSV) with chaos | Implemented |
+| [003](003-provider-ingestion/spec.md) | Provider ingestion: streaming adapters, parallel resilient ingestion, report | Implemented |

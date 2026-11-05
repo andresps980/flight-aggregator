@@ -79,6 +79,22 @@ class IdentifiersTest {
         void rejectsNullAirline() {
             assertThatThrownBy(() -> new FlightNumber(null, "123")).isInstanceOf(InvalidFlightDataException.class);
         }
+
+        @ParameterizedTest
+        @CsvSource({"VY0001,VY1", "VY1,VY1", "IB0345,IB345", "IB3450,IB3450", "VY0000,VY0", "VY0,VY0"})
+        @DisplayName("Spec 003 AC-3: leading zeros are stripped, so zero-padded and plain numbers are the same flight")
+        void stripsLeadingZeros(String raw, String canonical) {
+            FlightNumber flightNumber = FlightNumber.parse(raw);
+
+            assertThat(flightNumber).hasToString(canonical);
+            assertThat(flightNumber).isEqualTo(FlightNumber.parse(canonical));
+        }
+
+        @Test
+        @DisplayName("Spec 003 AC-3: the constructor canonicalises too (Beta sends carrier and number separately)")
+        void constructorStripsLeadingZeros() {
+            assertThat(new FlightNumber(new AirlineCode("VY"), "0001")).isEqualTo(FlightNumber.parse("VY1"));
+        }
     }
 
     @Nested

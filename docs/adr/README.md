@@ -18,3 +18,6 @@ New ADR: copy [`0000-template.md`](0000-template.md) or run `/adr` in Claude Cod
 | [0011](0011-incremental-deduplication.md) | Incremental deduplication keyed by a deterministic itinerary key | Accepted |
 | [0012](0012-single-gds-mock-application.md) | One gds-mock application exposing the three providers | Accepted |
 | [0013](0013-stateless-seeded-streamed-generation.md) | Stateless, index-seeded, streamed mock data generation | Accepted |
+| [0014](0014-provider-resilience.md) | Provider resilience with Resilience4j core, deadlines and per-provider breakers | Accepted |
+| [0015](0015-atomic-partition-buffers.md) | Atomic partitions through a per-attempt buffer | Accepted |
+| [0016](0016-day-partitioned-aggregation.md) | Aggregate one horizon day at a time, with summed statistics | Accepted |

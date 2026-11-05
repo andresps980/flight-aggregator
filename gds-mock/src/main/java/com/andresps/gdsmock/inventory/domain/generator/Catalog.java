@@ -4,7 +4,12 @@ import com.andresps.gdsmock.inventory.domain.model.Airport;
 import java.time.ZoneId;
 import java.util.List;
 
-/** Airports (with their IANA time zones) and airlines the generator draws from. */
+/**
+ * Airports (with their IANA time zones) and airlines the generator draws from. Only zones whose rules are stable across
+ * tzdata versions are used (fixed offsets or recurring annual DST untouched for a decade), so feeds convert back to the
+ * same instants on any JVM (checked by {@code CatalogTimeZonesTest}). Order matters: the generator draws by index, so
+ * replacing an airport in place only changes the itineraries that use it.
+ */
 final class Catalog {
 
     static final int MAX_FLIGHT_NUMBER = 9_999;
@@ -31,17 +36,17 @@ final class Catalog {
             airport("ZRH", "Europe/Zurich"),
             airport("VIE", "Europe/Vienna"),
             airport("CPH", "Europe/Copenhagen"),
-            airport("IST", "Europe/Istanbul"),
+            airport("ATH", "Europe/Athens"),
             airport("JFK", "America/New_York"),
             airport("BOS", "America/New_York"),
             airport("MIA", "America/New_York"),
             airport("ORD", "America/Chicago"),
             airport("LAX", "America/Los_Angeles"),
-            airport("MEX", "America/Mexico_City"),
+            airport("LIM", "America/Lima"),
             airport("BOG", "America/Bogota"),
-            airport("GRU", "America/Sao_Paulo"),
+            airport("PTY", "America/Panama"),
             airport("EZE", "America/Argentina/Buenos_Aires"),
-            airport("CMN", "Africa/Casablanca"),
+            airport("NBO", "Africa/Nairobi"),
             airport("JNB", "Africa/Johannesburg"),
             airport("DXB", "Asia/Dubai"),
             airport("DOH", "Asia/Qatar"),
