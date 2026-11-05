@@ -5,10 +5,6 @@ spring:
     problemdetails:
       enabled: true
 
-app:
-  greeting:
-    template: "Hello, %s!"
-
 management:
   endpoints:
     web:

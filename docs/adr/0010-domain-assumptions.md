@@ -2,7 +2,9 @@
 
 - **Status:** Accepted
 - **Date:** 2026-11-04
-- **Related spec:** to be written (aggregation, search)
+- **Related spec:** [specs/001-itinerary-aggregation](../../specs/001-itinerary-aggregation/spec.md) (refines the rule
+  list: equal arrival/departure is invalid, `MIXED_AIRLINES` and `REVISITED_AIRPORT` are discard reasons, fixed
+  evaluation order); search to be written
 
 ## Context
 

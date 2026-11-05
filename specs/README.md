@@ -10,4 +10,4 @@ starts here.
 
 | # | Feature | Status |
 |---|---|---|
-| [000](000-example-greeting/spec.md) | Example greeting endpoint | Implemented |
+| [001](001-itinerary-aggregation/spec.md) | Itinerary aggregation core domain | Implemented |

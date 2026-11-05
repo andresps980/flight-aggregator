@@ -11,8 +11,9 @@ that boots with `docker compose up --build`.
 
 Full statement: [docs/exercise.md](docs/exercise.md). Design write-up: [SOLUTION.md](SOLUTION.md).
 
-> **Status:** project setup. The repository has the multi-module build, quality gates and agreed design decisions
-> (ADRs). The only code so far is the template's example `greeting` endpoint. Each functional feature lands in its own PR.
+> **Status:** core domain. The repository has the multi-module build, quality gates, agreed design decisions (ADRs)
+> and the framework-free aggregation domain ([spec 001](specs/001-itinerary-aggregation/spec.md)): validation,
+> deduplication and markup. Ingestion, search and the frontend land in their own PRs.
 
 ## Components
 
