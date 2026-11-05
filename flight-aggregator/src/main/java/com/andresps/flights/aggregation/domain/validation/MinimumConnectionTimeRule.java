@@ -13,7 +13,10 @@ public final class MinimumConnectionTimeRule implements ItineraryRule {
     private final Duration minimum;
 
     public MinimumConnectionTimeRule(Duration minimum) {
-        this.minimum = Objects.requireNonNull(minimum, "minimum");
+        if (Objects.requireNonNull(minimum, "minimum").isNegative()) {
+            throw new IllegalArgumentException("minimum must not be negative, got " + minimum);
+        }
+        this.minimum = minimum;
     }
 
     @Override

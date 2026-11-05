@@ -6,12 +6,17 @@ import java.util.Currency;
 
 /**
  * Non-negative EUR amount, always at scale 2. Inputs with more decimals are rounded {@code HALF_EVEN} (ADR-0010), so
- * amounts that differ only beyond the cent are equal.
+ * amounts that differ only beyond the cent are equal. Magnitudes are bounded so that malformed provider input such as
+ * {@code 1E999999999} fails fast instead of triggering huge {@link BigDecimal} arithmetic.
  */
 public record Money(BigDecimal amount, Currency currency) implements Comparable<Money> {
 
     public static final Currency EUR = Currency.getInstance("EUR");
     private static final int SCALE = 2;
+    /** Bounds that keep arithmetic cheap on untrusted input: below 1,000,000,000 and at most 10 significant decimals. */
+    private static final int MAX_INTEGER_DIGITS = 9;
+
+    private static final int MAX_DECIMALS = 10;
 
     public Money {
         InvalidFlightDataException.requireField(amount, "Amount");
@@ -21,6 +26,11 @@ public record Money(BigDecimal amount, Currency currency) implements Comparable<
         }
         if (amount.signum() < 0) {
             throw new InvalidFlightDataException("Amount must not be negative, got " + amount.toPlainString());
+        }
+        BigDecimal significant = amount.stripTrailingZeros();
+        if (significant.precision() - significant.scale() > MAX_INTEGER_DIGITS || significant.scale() > MAX_DECIMALS) {
+            throw new InvalidFlightDataException("Amount out of range (max " + MAX_INTEGER_DIGITS + " integer digits, "
+                    + MAX_DECIMALS + " decimals): " + amount.toString());
         }
         amount = amount.setScale(SCALE, RoundingMode.HALF_EVEN);
     }

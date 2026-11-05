@@ -21,6 +21,7 @@ public record AggregatedItinerary(
         Objects.requireNonNull(key, "key");
         Objects.requireNonNull(selectedOffer, "selectedOffer");
         Objects.requireNonNull(finalPrice, "finalPrice");
+        Objects.requireNonNull(providers, "providers");
         providers = Collections.unmodifiableSortedSet(new TreeSet<>(providers));
     }
 

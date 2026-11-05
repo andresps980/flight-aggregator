@@ -12,6 +12,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.andresps.flights.aggregation.domain.model.FlightOffer;
 import com.andresps.flights.aggregation.domain.model.Itinerary;
 import java.util.Comparator;
+import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -50,7 +51,35 @@ class OfferPreferenceTest {
     }
 
     @Test
-    @DisplayName("AC-7: the canonical representation is the final tie-break, so the order is total")
+    @DisplayName(
+            "AC-4..8: the preference is a consistent total order (antisymmetric, transitive, 0 only for equal offers)")
+    void isAConsistentTotalOrder() {
+        List<FlightOffer> pool = List.of(
+                offer(ALPHA, "99.90", madBcnLhr()),
+                offer(BETA, "99.90", madBcnLhr()),
+                offer(ALPHA, "99.904", madBcnLhrLaterFirstArrival()),
+                offer(ALPHA, "100.00", madBcnLhr()),
+                offer(BETA, "50.00", direct()),
+                offer(ALPHA, "50.00", direct()),
+                offer(ALPHA, "50.00", direct()));
+
+        for (FlightOffer a : pool) {
+            for (FlightOffer b : pool) {
+                assertThat(Integer.signum(preference.compare(a, b)))
+                        .isEqualTo(-Integer.signum(preference.compare(b, a)));
+                assertThat(preference.compare(a, b) == 0).isEqualTo(a.equals(b));
+                for (FlightOffer c : pool) {
+                    if (preference.compare(a, b) <= 0 && preference.compare(b, c) <= 0) {
+                        assertThat(preference.compare(a, c)).isLessThanOrEqualTo(0);
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    @DisplayName(
+            "total order: the canonical representation is the final tie-break (only decisive across different keys)")
     void canonicalFormIsTheLastTieBreak() {
         Itinerary otherFlightSameTimes =
                 itinerary(segment("IB1000", "MAD", "LHR", "2026-11-10T07:00", "2026-11-10T09:30"));

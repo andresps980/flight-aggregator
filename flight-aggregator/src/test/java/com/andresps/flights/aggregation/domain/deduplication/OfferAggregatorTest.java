@@ -20,7 +20,9 @@ import com.andresps.flights.aggregation.domain.pricing.PercentageMarkupPolicy;
 import com.andresps.flights.aggregation.domain.validation.DiscardReason;
 import com.andresps.flights.aggregation.domain.validation.ItineraryValidator;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Random;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -232,6 +234,61 @@ class OfferAggregatorTest {
             assertThat(result.statistics().discarded(DiscardReason.ARRIVAL_NOT_AFTER_DEPARTURE))
                     .isEqualTo(1);
             assertThat(result.statistics().duplicatesMerged()).isZero();
+        }
+    }
+
+    /** Mixed data set: 3 providers, duplicates within and across providers, two invalid offers. */
+    private static List<FlightOffer> mixedOffers() {
+        Itinerary departed = itinerary(segment("IB9", "MAD", "BCN", "2026-11-01T08:00", "2026-11-01T09:15"));
+        Itinerary mixed = itinerary(
+                segment("IB3456", "MAD", "BCN", "2026-11-10T08:00", "2026-11-10T09:15"),
+                segment("VY1234", "BCN", "LHR", "2026-11-10T10:30", "2026-11-10T12:30"));
+        return List.of(
+                offer(ALPHA, "100.00", madBcnLhr()),
+                offer(ALPHA, "80.00", direct()),
+                offer(ALPHA, "30.00", departed),
+                offer(BETA, "95.00", madBcnLhr()),
+                offer(BETA, "60.00", mixed),
+                offer(GAMMA, "97.00", madBcnLhr()),
+                offer(GAMMA, "82.00", direct()));
+    }
+
+    @Nested
+    class Determinism {
+
+        @Test
+        @DisplayName("NFR: the whole result (itineraries, providers, prices, statistics) is independent of input order")
+        void wholeResultIsOrderIndependent() {
+            AggregationResult reference = aggregate(mixedOffers());
+            Random random = new Random(42);
+
+            for (int i = 0; i < 50; i++) {
+                List<FlightOffer> shuffled = new ArrayList<>(mixedOffers());
+                Collections.shuffle(shuffled, random);
+                AggregationResult result = aggregate(shuffled);
+
+                assertThat(result.itineraries()).containsExactlyInAnyOrderElementsOf(reference.itineraries());
+                assertThat(result.statistics()).isEqualTo(reference.statistics());
+            }
+        }
+
+        @Test
+        @DisplayName("result() is a snapshot: later offers do not change a result already produced")
+        void resultIsASnapshot() {
+            var aggregator = new OfferAggregator(
+                    ItineraryValidator.withDefaultRules(CLOCK), PercentageMarkupPolicy.defaultPolicy());
+            aggregator.accept(offer(ALPHA, "100.00", madBcnLhr()));
+            AggregationResult first = aggregator.result();
+
+            aggregator.accept(offer(BETA, "90.00", madBcnLhr()));
+            aggregator.accept(offer(BETA, "50.00", direct()));
+
+            assertThat(first.itineraries()).singleElement().satisfies(itinerary -> {
+                assertThat(itinerary.providers()).containsExactly(ALPHA);
+                assertThat(itinerary.basePrice()).isEqualTo(Money.eur("100.00"));
+            });
+            assertThat(first.statistics().totalReceived()).isEqualTo(1);
+            assertThat(aggregator.result().itineraries()).hasSize(2);
         }
     }
 

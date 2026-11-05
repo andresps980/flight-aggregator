@@ -7,9 +7,14 @@ import static com.andresps.flights.aggregation.domain.FlightFixtures.itinerary;
 import static com.andresps.flights.aggregation.domain.FlightFixtures.segment;
 import static com.andresps.flights.aggregation.domain.FlightFixtures.twoLegsWithConnection;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.andresps.flights.aggregation.domain.model.Itinerary;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -19,10 +24,45 @@ import org.junit.jupiter.params.provider.ValueSource;
 /** Rules on connection times and departure time (AC-17 – AC-19). */
 class TimingRulesTest {
 
+    /** A real-looking clock whose time moves forward on demand. */
+    private static final class AdvancingClock extends Clock {
+        private Instant now;
+
+        AdvancingClock(Instant start) {
+            this.now = start;
+        }
+
+        void advance(Duration duration) {
+            now = now.plus(duration);
+        }
+
+        @Override
+        public Instant instant() {
+            return now;
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return this;
+        }
+    }
+
     @Nested
     class MinimumConnectionTimeRuleTest {
 
         private final ItineraryRule rule = new MinimumConnectionTimeRule(MinimumConnectionTimeRule.DEFAULT_MINIMUM);
+
+        @Test
+        @DisplayName("a negative minimum is a configuration error")
+        void rejectsNegativeMinimum() {
+            assertThatThrownBy(() -> new MinimumConnectionTimeRule(Duration.ofMinutes(-1)))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
 
         @Test
         @DisplayName("AC-17: the default minimum connection time is 45 minutes")
@@ -30,12 +70,12 @@ class TimingRulesTest {
             assertThat(MinimumConnectionTimeRule.DEFAULT_MINIMUM).isEqualTo(Duration.ofMinutes(45));
         }
 
-        @ParameterizedTest(name = "connection of {0} min")
-        @ValueSource(longs = {44, 30, 1, 0, -30})
+        @ParameterizedTest(name = "connection of {0}")
+        @ValueSource(strings = {"PT44M59S", "PT44M", "PT1M", "PT0S", "PT-30M"})
         @DisplayName(
                 "AC-17: a connection shorter than 45 minutes (including negative) is discarded with CONNECTION_TOO_SHORT")
-        void discardsShortConnections(long minutes) {
-            Itinerary itinerary = twoLegsWithConnection(Duration.ofMinutes(minutes));
+        void discardsShortConnections(String connection) {
+            Itinerary itinerary = twoLegsWithConnection(Duration.parse(connection));
 
             assertThat(rule.check(itinerary)).contains(DiscardReason.CONNECTION_TOO_SHORT);
         }
@@ -72,16 +112,23 @@ class TimingRulesTest {
         private final ItineraryRule rule = new MaximumLayoverRule(MaximumLayoverRule.DEFAULT_MAXIMUM);
 
         @Test
+        @DisplayName("a negative maximum is a configuration error")
+        void rejectsNegativeMaximum() {
+            assertThatThrownBy(() -> new MaximumLayoverRule(Duration.ofMinutes(-1)))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+
+        @Test
         @DisplayName("AC-18: the default maximum layover is 24 hours")
         void defaultIs24Hours() {
             assertThat(MaximumLayoverRule.DEFAULT_MAXIMUM).isEqualTo(Duration.ofHours(24));
         }
 
-        @ParameterizedTest(name = "layover of {0} min")
-        @ValueSource(longs = {24 * 60 + 1, 48 * 60})
+        @ParameterizedTest(name = "layover of {0}")
+        @ValueSource(strings = {"PT24H0M1S", "PT24H1M", "PT48H"})
         @DisplayName("AC-18: a layover longer than 24 hours is discarded with LAYOVER_TOO_LONG")
-        void discardsLongLayovers(long minutes) {
-            Itinerary itinerary = twoLegsWithConnection(Duration.ofMinutes(minutes));
+        void discardsLongLayovers(String layover) {
+            Itinerary itinerary = twoLegsWithConnection(Duration.parse(layover));
 
             assertThat(rule.check(itinerary)).contains(DiscardReason.LAYOVER_TOO_LONG);
         }
@@ -115,6 +162,22 @@ class TimingRulesTest {
                     itinerary(segment("IB1", "MAD", "BCN", departure, departure.plus(Duration.ofHours(1))));
 
             assertThat(rule.check(itinerary)).contains(DiscardReason.ALREADY_DEPARTED);
+        }
+
+        @Test
+        @DisplayName(
+                "AC-19: now is read once, when the rule is created, so a run's result never depends on offer order")
+        void readsNowOnce() {
+            var clock = new AdvancingClock(NOW);
+            ItineraryRule snapshotRule = new NotDepartedRule(clock);
+            var departure = NOW.plusSeconds(60);
+            Itinerary departsInOneMinute =
+                    itinerary(segment("IB1", "MAD", "BCN", departure, departure.plus(Duration.ofHours(1))));
+
+            clock.advance(Duration.ofHours(1));
+
+            assertThat(snapshotRule.check(departsInOneMinute)).isEmpty();
+            assertThat(new NotDepartedRule(clock).check(departsInOneMinute)).contains(DiscardReason.ALREADY_DEPARTED);
         }
 
         @ParameterizedTest(name = "first departure {0} s from now")

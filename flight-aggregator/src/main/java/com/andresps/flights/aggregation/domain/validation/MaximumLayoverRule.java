@@ -13,7 +13,10 @@ public final class MaximumLayoverRule implements ItineraryRule {
     private final Duration maximum;
 
     public MaximumLayoverRule(Duration maximum) {
-        this.maximum = Objects.requireNonNull(maximum, "maximum");
+        if (Objects.requireNonNull(maximum, "maximum").isNegative()) {
+            throw new IllegalArgumentException("maximum must not be negative, got " + maximum);
+        }
+        this.maximum = maximum;
     }
 
     @Override

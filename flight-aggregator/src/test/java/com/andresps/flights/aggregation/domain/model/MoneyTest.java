@@ -2,13 +2,16 @@ package com.andresps.flights.aggregation.domain.model;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.util.Currency;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class MoneyTest {
 
@@ -41,6 +44,22 @@ class MoneyTest {
     void rejectsNonNumeric() {
         assertThatThrownBy(() -> Money.eur("12,50")).isInstanceOf(InvalidFlightDataException.class);
         assertThatThrownBy(() -> Money.eur((String) null)).isInstanceOf(InvalidFlightDataException.class);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"1E999999999", "1E-999999999", "1000000000.00", "0.12345678901"})
+    @DisplayName("AC-24: rejects amounts with more than 9 integer digits or 10 decimals, without expensive arithmetic")
+    void rejectsUnreasonableMagnitudes(String raw) {
+        assertTimeoutPreemptively(
+                Duration.ofSeconds(1),
+                () -> assertThatThrownBy(() -> Money.eur(raw)).isInstanceOf(InvalidFlightDataException.class));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"999999999.99,999999999.99", "1.0000000000,1.00", "12.500000000000000,12.50"})
+    @DisplayName("AC-24: accepts the largest amount and trailing zeros beyond 10 decimals")
+    void acceptsBoundaries(String raw, String expected) {
+        assertThat(Money.eur(raw).amount()).isEqualTo(new BigDecimal(expected));
     }
 
     @Test

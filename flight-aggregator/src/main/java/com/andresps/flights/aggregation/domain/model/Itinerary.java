@@ -3,6 +3,7 @@ package com.andresps.flights.aggregation.domain.model;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
@@ -49,7 +50,7 @@ public record Itinerary(List<Segment> segments) {
             connections.add(Duration.between(
                     segments.get(i - 1).arrival(), segments.get(i).departure()));
         }
-        return connections;
+        return Collections.unmodifiableList(connections);
     }
 
     /** The first origin followed by every segment destination, in travel order. */
@@ -57,7 +58,7 @@ public record Itinerary(List<Segment> segments) {
         List<AirportCode> airports = new ArrayList<>(segments.size() + 1);
         airports.add(segments.getFirst().origin());
         segments.forEach(segment -> airports.add(segment.destination()));
-        return airports;
+        return Collections.unmodifiableList(airports);
     }
 
     private static String identityOf(Segment segment) {

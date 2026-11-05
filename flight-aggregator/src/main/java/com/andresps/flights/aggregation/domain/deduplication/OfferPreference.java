@@ -16,6 +16,10 @@ import java.util.List;
  * </ol>
  *
  * Because the order is total, keeping its minimum gives the same winner whatever order offers arrive in.
+ *
+ * <p>Within one aggregation, offers being compared share an {@code ItineraryKey}, so they have the same segments
+ * except for arrival times: step 4 and the segment-count fallback in step 3 can never decide there. They are kept on
+ * purpose so this public comparator is a consistent total order for any two offers (0 only for equal offers).
  */
 public final class OfferPreference {
 

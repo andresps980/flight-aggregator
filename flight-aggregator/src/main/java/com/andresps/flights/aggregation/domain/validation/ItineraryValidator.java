@@ -17,7 +17,10 @@ public final class ItineraryValidator {
         this.rules = List.copyOf(rules);
     }
 
-    /** The rules of spec 001 in their evaluation order: structural, then timing, then time-relative (AC-20). */
+    /**
+     * The rules of spec 001 in their evaluation order: structural, then timing, then time-relative (AC-20). "Now" is
+     * taken from the clock at this call, so build one validator per aggregation run.
+     */
     public static ItineraryValidator withDefaultRules(Clock clock) {
         return new ItineraryValidator(List.of(
                 new SingleAirlineRule(),
