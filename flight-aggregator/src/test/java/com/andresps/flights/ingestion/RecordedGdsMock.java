@@ -11,10 +11,12 @@ import com.github.tomakehurst.wiremock.client.ResponseDefinitionBuilder;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.time.zone.ZoneRulesProvider;
 import java.util.List;
 import java.util.stream.IntStream;
 import tools.jackson.databind.JsonNode;
@@ -31,6 +33,11 @@ import tools.jackson.databind.json.JsonMapper;
  * </pre>
  *
  * Regenerate them if the mock's generator changes (data is deterministic per mock version).
+ *
+ * <p><b>Time-zone rules matter.</b> Mock-Beta writes offsets and Mock-Gamma local times computed with the recording
+ * JVM's tzdata; the aggregator converts them back with the test JVM's. If a zone's rules changed in between (tzdata
+ * 2026 moved {@code Africa/Casablanca} from UTC+1 to UTC+0), some instants shift and reconciliation fails. The tzdata
+ * version used to record is in {@code tzdata-version.txt}; a test JVM with older rules fails fast with an explanation.
  */
 public final class RecordedGdsMock {
 
@@ -49,7 +56,20 @@ public final class RecordedGdsMock {
     private static final String ROOT = "/gds-mock/seed42-v1400-2026-11-05/";
     private static final JsonMapper JSON = JsonMapper.builder().build();
 
+    static {
+        requireTimeZoneRulesAtLeast(new String(resource(ROOT + "tzdata-version.txt"), StandardCharsets.UTF_8).strip());
+    }
+
     private RecordedGdsMock() {}
+
+    private static void requireTimeZoneRulesAtLeast(String recorded) {
+        String jvm = ZoneRulesProvider.getVersions("Africa/Casablanca").lastKey();
+        if (jvm.compareTo(recorded) < 0) {
+            throw new IllegalStateException("The recorded gds-mock feeds use tzdata " + recorded + " but this JVM has "
+                    + jvm + ": local times would convert to different instants (e.g. Africa/Casablanca). Use an "
+                    + "up-to-date JDK 21 (Temurin 21.0.13+ ships 2026e) or re-record the fixtures.");
+        }
+    }
 
     public static byte[] feed(String provider, LocalDate day) {
         return resource(ROOT + provider + "/" + day + "." + extension(provider));

@@ -267,6 +267,13 @@ Ingestion (spec 003):
 - With too little heap for the days in flight, the run degrades rather than crashes: GC pauses cause read timeouts,
   and the report is `PARTIAL`. With far too little, it runs out of memory; affected partitions are reported as
   `UNEXPECTED_ERROR` and the error is rethrown.
+- **Time-zone rules must agree between provider and aggregator.** Mock-Gamma sends local times plus a zone, and
+  Mock-Beta sends offsets computed from the provider's rules. If the two sides run different tzdata versions, an
+  instant can shift silently. CI found exactly that: tzdata 2026 moved `Africa/Casablanca` from UTC+1 to UTC+0, so
+  fixtures recorded on an older JDK no longer reconciled. Two itineraries became invalid connections, and
+  cross-provider duplicates stopped matching. Mitigations: keep the JDK (tzdata) current, as the recorded fixtures
+  now require (tzdata ≥ 2026e, checked with a clear message). With a real provider, prefer offsets or UTC, or detect
+  disagreements by comparing the same flight across providers.
 - Gamma local times in a DST gap or overlap are resolved by `java.time` defaults (shifted forward in a gap, earlier
   offset in an overlap).
 - "No concurrent runs" isn't enforced yet: the use case documents it and the trigger (next spec) will guard it.

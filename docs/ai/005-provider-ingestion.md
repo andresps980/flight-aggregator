@@ -194,6 +194,13 @@ lock) and required breaker thresholds that never open at the mock's normal 10 % 
 - **The docs had an arithmetic error.** `docs/providers.md` (spec 002) said OPO 12:55 Lisbon → BOS 12:15 New York is
   6 h 20 min. On 6 November it is 4 h 20 min, because the US left DST on 1 November. The parser test caught it; the
   doc and spec 003 were fixed.
+- **CI found a time-zone database mismatch** (after the PR was opened). The recorded fixtures came from a gds-mock
+  running on the local JDK (Corretto 21.0.6, tzdata 2024b), while CI uses Temurin 21.0.13 (tzdata 2026e), in which
+  `Africa/Casablanca` moves from UTC+1 to UTC+0. Gamma's local times then converted to different instants, and two
+  itineraries reconciled differently. The agent found it by downloading CI's JDK and diffing every mock zone's
+  offsets for the fixture week. The fixtures were re-recorded with that JDK: only Beta and Gamma representations
+  changed, and the stats were identical. A guard now fails fast on a JVM with older tzdata. The production lesson
+  is in SOLUTION.md.
 - **A memory surprise:** too little heap degrades into `PARTIAL` runs (GC pauses cause read timeouts) before it
   causes out-of-memory errors. That is now recorded as a limitation.
 

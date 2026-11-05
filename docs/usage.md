@@ -11,6 +11,7 @@
 |---|---|
 | Full build (unit + IT + coverage gate + format check, both modules) | `./mvnw verify` |
 | Also run the slow volume tests (tagged `slow`: 1,000,000-record generation and streaming) | `./mvnw verify -Pslow-tests` |
+| Requirement for the ingestion tests | A current JDK 21 (tzdata ≥ 2026e, e.g. Temurin 21.0.13): the recorded provider feeds embed time-zone rules, and an older JVM fails fast saying so |
 | Also run the end-to-end ingestion test (tagged `e2e`, needs gds-mock running in the `deterministic` profile) | `./mvnw -pl flight-aggregator verify -Pe2e-tests` |
 | Start the stack (currently only gds-mock) | `docker compose up --build` |
 
