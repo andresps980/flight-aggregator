@@ -152,6 +152,9 @@ curl http://localhost:8080/api/v1/catalog
  "routes":[{"origin":"AMS","destinations":["JFK"]},{"origin":"MAD","destinations":["JFK","LHR"]}]}
 ```
 
+The catalog is computed once per data version (and kept in memory too), so after the last flight of a route departs
+it can still be listed until the next ingestion run; days before today are never listed.
+
 Both endpoints are cached in Redis per data version: the first request after an ingestion run publishes data reads
 PostgreSQL, the next identical ones are served from Redis ([ADR-0022](adr/0022-search-cache.md)). If Redis is down,
 answers come from PostgreSQL (a WARN when the cache is switched off for 30 s, the `search.cache` metric counts

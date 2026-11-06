@@ -39,7 +39,16 @@ PostgreSQL adapter know nothing about Redis (ArchUnit: Spring Data Redis and Let
   (PostgreSQL) for reads and skips the write. A Resilience4j **circuit breaker** (already a dependency, ADR-0014)
   opens after repeated failures and skips Redis for **30 s**, then probes it again; transitions are logged (WARN when
   it opens, INFO when it closes), individual errors at DEBUG, so an outage logs a few lines, not one per request.
-  Micrometer counter `search.cache` tagged `result=hit|miss|error|bypassed`.
+  Micrometer counter `search.cache` tagged `result=hit|miss|error|bypassed`. Until the breaker opens (5 calls), a
+  miss with Redis hung can wait for two timeouts (the `GET` and the `PUT`), so ≈ 200 ms on top of the database time
+  for at most the first three requests.
+- **Catalog single-flight** (added after the code review). The catalog is a grouped scan of every future row (≈ 420 ms
+  at 1M rows). It is also memoised in the JVM per data version behind a lock, so a version bump, or a Redis outage,
+  costs one scan per instance instead of one per concurrent request (which could exhaust the connection pool shared
+  with ingestion). Days before today are dropped from a reused catalog.
+- **Where `DataVersionQuery` lives.** It is an application port although only the decorators use it: the data version
+  is a property of the read model the search application owns (it is not Redis-specific), and keeping it a port lets
+  the decorators depend on an abstraction implemented by the persistence adapter instead of on that adapter.
 
 ## Alternatives considered
 
@@ -68,4 +77,7 @@ PostgreSQL adapter know nothing about Redis (ArchUnit: Spring Data Redis and Let
   the version row (held only from the last statement to the commit); a cached catalog can list a date or route whose
   last flight has just departed (until the TTL or the next run).
 - **Follow-ups:** cached vs uncached latency in SOLUTION.md (AC-23); cache warming of popular searches after a run
-  if the miss cost matters.
+  if the miss cost matters; register the breaker in a `CircuitBreakerRegistry` with Micrometer bindings if breaker
+  state should appear in metrics (today: the `search.cache` counter and the WARN/INFO transition logs); signed
+  cursors or caching only first pages if clients flood the cache with crafted positions (keys are client-controlled,
+  bounded by `maxmemory` + LRU).

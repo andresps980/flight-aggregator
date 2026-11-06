@@ -24,3 +24,4 @@ The guardrails (rules, skills, agents, hooks) are versioned in the repository an
 | [004](004-gds-mock.md) | gds-mock: three providers, seeded world, stats, chaos (spec 002), review findings | `feat/002-gds-mock` |
 | [005](005-provider-ingestion.md) | Provider ingestion: streaming parsers, resilience, per-day aggregation (spec 003), memory at 1M, review findings | `feat/003-provider-ingestion` |
 | [006](006-persistence-and-pipeline.md) | Persistence and pipeline: PostgreSQL day snapshots, COPY, advisory lock, runs over REST and schedule, compose (spec 004), review findings | `feat/004-persistence-and-pipeline` |
+| [007](007-search-api.md) | Search API: filters, keyset cursor, indexes measured at 1M, Redis cache-aside with data version, catalog, OpenAPI (spec 005), review findings | `feat/005-search-api` |

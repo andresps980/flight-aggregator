@@ -14,4 +14,4 @@ starts here.
 | [002](002-gds-mock/spec.md) | GDS mock providers (Alpha JSON, Beta XML, Gamma CSV) with chaos | Implemented |
 | [003](003-provider-ingestion/spec.md) | Provider ingestion: streaming adapters, parallel resilient ingestion, report | Implemented |
 | [004](004-persistence-and-pipeline/spec.md) | Persistence (PostgreSQL read model, day snapshots), scheduled and on-demand ingestion runs, docker compose | Implemented |
-| [005](005-search-api/spec.md) | Search API: filters, keyset pagination, indexes, Redis cache, catalog, OpenAPI | Approved |
+| [005](005-search-api/spec.md) | Search API: filters, keyset pagination, indexes, Redis cache, catalog, OpenAPI | Implemented |

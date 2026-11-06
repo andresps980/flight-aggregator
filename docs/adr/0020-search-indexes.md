@@ -57,12 +57,15 @@ chosen, because the route index already returns a route in price order:
 
 | Combination (first page of 20) | Index | Rows read and discarded | Execution |
 |---|---|---:|---:|
-| none | `(final_price, id)` | 0 | 0.18 ms |
-| `date` (143k rows) | `(final_price, id)`, date as filter | 106 | 0.67 ms |
-| `origin` (29k rows) | `(final_price, id)`, origin as filter | 758 | 2.4 ms |
-| route, any of date / carrier / `maxPrice` | `(origin, destination, final_price, id)` | ≤ a few | ≤ 0.11 ms |
+| none | `(final_price, id)` | 0 | 0.22 ms |
+| `maxPrice=200` (294k rows) | `(final_price, id)`, upper bound in the index condition | 0 | < 1 ms |
+| `date` (143k rows), also with `maxPrice` | `(final_price, id)`, date as filter | 106 | 0.75 ms |
+| `carrier` + `maxPrice` (12k rows) | `(final_price, id)`, carrier as filter | 410 | 0.20 ms |
+| `origin` (29k rows) / `origin` + `maxPrice` (8.6k rows) | `(final_price, id)`, origin as filter | 758 | 2.9 / 0.52 ms |
+| route, alone or with carrier / `maxPrice` | `(origin, destination, final_price, id)` | 0 | 0.05–0.09 ms |
+| route + date + `maxPrice` (39 rows) | same, date as filter | 103 | 0.43 ms |
 | route, `maxPrice` above every price (worst realistic) | same, `final_price <= …` in the index condition | 0 | 0.05 ms |
-| `origin` + `carrier` + `maxPrice=200` (365 rows) | `(final_price, id)`, two filters | 19,334 | 89 ms (51 ms median warm) |
+| `origin` + `carrier` + `maxPrice=200` (365 rows) | `(final_price, id)`, two filters | 19,334 | 92 ms cold (49 ms median) |
 
 ```
 -- route, worst realistic case
@@ -82,7 +85,7 @@ Limit (actual time=0.240..88.696 rows=21)
 ```
 
 Two filters outside the route index (origin × carrier ≈ 1/800 of the rows) make the price-ordered scan read ≈ 800
-entries per result; ≈ 50–90 ms for a first page, then served from the cache. It is not in AC-22's list; adding
+entries per result; ≈ 50–90 ms for a first page (the only combination above 3 ms), then served from the cache. It is not in AC-22's list; adding
 `(origin, final_price, id)` would fix origin + carrier but not destination + carrier, so it is recorded instead of
 indexed.
 
@@ -90,8 +93,8 @@ Cost on the bulk load (`COPY` of 1M rows as 7 days through the real store):
 
 | Indexes | First load | Replacement (delete + load) |
 |---|---:|---:|
-| PK, unique key, `departure_date` | 13.0 s | — (13.8 s in ADR-0018's run) |
-| + the two search indexes | 18.5 s (+42 %) | 31.0 s |
+| PK, unique key, `departure_date` | 12.1 s | — (13.8 s in ADR-0018's run) |
+| + the two search indexes | 17.9 s (+48 %) | 32.6 s |
 
 Still well under the one-minute budget of ADR-0018; the replacement pays for maintaining four indexes over a table
 with a day of dead tuples.

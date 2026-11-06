@@ -1,6 +1,6 @@
 # Spec 005: Search API over the read model, keyset pagination, Redis cache
 
-- **Status:** Approved
+- **Status:** Implemented
 - **Branch:** feat/005-search-api
 - **Related ADRs:** [ADR-0007](../../docs/adr/0007-postgresql-and-redis.md),
   [ADR-0008](../../docs/adr/0008-keyset-pagination.md), [ADR-0010](../../docs/adr/0010-domain-assumptions.md),
@@ -202,7 +202,7 @@ New feature `com.andresps.flights.search` (no Java dependency on `ingestion`; it
 - `ItineraryView`, `Freshness`, `SearchPage` (items, nextCursor, hasMore), `Catalog`.
 - Ports: in `SearchItineraries`, `GetCatalog`; out `ItinerarySearchQuery`, `CatalogQuery`. The Redis cache is a
   decorator of the out ports in `infrastructure/adapter/out/cache` (the use case never sees Redis); PostgreSQL code
-  in `infrastructure/adapter/out/persistence`. ArchUnit: Redis/Lettuce types only in the cache adapter.
+  in `infrastructure/adapter/out/persistence`. ArchUnit: Redis/Lettuce types only in the cache adapter (and the composition root that hands it a `StringRedisTemplate`).
 - Schema: a single-row `data_version` table, incremented by the ingestion persistence adapter in each transaction
   that changes `itinerary` or `day_snapshot`; the search indexes.
 

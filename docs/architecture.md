@@ -231,6 +231,9 @@ A search request:
    joined with the day's `day_snapshot` row for freshness.
 4. The use case encodes the next cursor from the page's last position; the controller maps to DTOs.
 
+The `search` and `ingestion` features have no Java dependency on each other (ArchUnit checks for cycles): they meet
+only in the schema — ingestion writes `itinerary`, `day_snapshot` and `data_version`, search reads them.
+
 An ingestion run that replaces a day or marks it stale increments `data_version` in the same transaction, so the next
 request misses and reads the new data; old entries expire by TTL, nothing is deleted.
 

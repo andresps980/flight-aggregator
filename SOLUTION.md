@@ -275,14 +275,22 @@ case owns every validation message.
 | | Result |
 |---|---|
 | Plans | Every AC-22 combination is an index scan in keyset order stopped by `LIMIT`; no sequential scan, no sort (ADR-0020) |
-| `COPY` 1M rows without / with the two search indexes | 13.0 s / 18.5 s first load; 31.0 s replacement with them |
-| Search, server side, first page | 0.2–2.4 ms for every AC-22 combination; 51 ms median for origin + carrier + low `maxPrice` (two filters outside the route index) |
-| API, client side, uncached / cached (median) | 3–6 ms / 2–4 ms for typical searches; 58 ms / 2.5 ms for that two-filter case |
-| Catalog, uncached / cached (median) | 448 ms (grouped scan of 1M rows, once per data version) / 2.1 ms |
+| `COPY` 1M rows without / with the two search indexes | 12.1 s / 17.9 s first load; 32.6 s replacement with them |
+| Search, server side, first page | 0.2–2.9 ms for every AC-22 combination (each with and without `maxPrice`); 49 ms median for origin + carrier + low `maxPrice` (two filters outside the route index) |
+| API, client side, uncached / cached (median) | 2.6–8 ms / 1.8–5.4 ms for typical searches; 56 ms / 3.0 ms for that two-filter case |
+| Catalog, uncached / cached (median) | 420 ms (grouped scan of 1M rows, once per data version) / 1.4 ms |
 
 The cache saves little on a typical search, which is already sub-millisecond in PostgreSQL thanks to the indexes;
-it pays off for the expensive requests — the catalog (≈ 200×) and the filter combinations no index serves (≈ 20×) —
+it pays off for the expensive requests — the catalog (≈ 300×) and the filter combinations no index serves (≈ 18×) —
 and it takes repeated load off the database.
+
+Default compose stack, AC-25 checked by hand: `postgres`, `redis`, `gds-mock` and `flight-aggregator` healthy; after the
+first scheduled run (94,543 rows) a search returns data and the repeated request is a cache hit. `./mvnw verify` (both
+modules): **66 s**.
+
+**Changed after the code review:** the catalog is memoised per data version in the JVM (single-flight), so a version
+bump or a Redis outage costs one scan instead of one per concurrent request; a reused catalog drops past days; the
+breaker records `Error`s too; the cache format is pinned by a golden test.
 
 **Found while implementing:**
 - `RestClient` expands and encodes the URI template, so a test that wrote `%20` sent `%2520`; the test now writes
@@ -366,17 +374,18 @@ Same filters, page of 20, server side, median / p95 of 30 runs on 1,000,006 rows
 
 | Filters (matching rows) | Page | Keyset | `OFFSET` |
 |---|---:|---:|---:|
-| none (1,000,006) | 1 | 0.80 / 1.20 ms | 0.58 / 0.77 ms |
-| none | 1,000 | **0.54 / 0.65 ms** | **50.66 / 62.93 ms** |
-| `date` (142,858) | 1,000 | 0.50 / 0.66 ms | 63.87 / 66.07 ms |
-| `carrier` (42,082) | 1,000 | 0.62 / 0.77 ms | 151.56 / 157.89 ms |
-| `origin` (29,375) | 1,000 | 0.77 / 1.88 ms | 82.21 / 99.93 ms |
-| busiest route, no date, `maxPrice` above all (993) | 50 (last) | 0.37 / 0.51 ms | 1.51 / 1.67 ms |
+| none (1,000,006) | 1 | 0.75 / 1.24 ms | 0.61 / 0.76 ms |
+| none | 1,000 | **0.55 / 0.75 ms** | **50.30 / 68.81 ms** |
+| `date` (142,858) | 1,000 | 0.47 / 0.63 ms | 63.68 / 65.51 ms |
+| `carrier` (42,082) | 1,000 | 0.76 / 0.94 ms | 159.11 / 176.64 ms |
+| `origin` (29,375) | 1,000 | 0.89 / 1.78 ms | 94.91 / 104.69 ms |
+| `carrier` + `maxPrice` (12,397) | 620 (last) | 0.99 / 1.22 ms | 174.92 / 192.35 ms |
+| busiest route, no date, `maxPrice` above all (993) | 50 (last) | 0.53 / 0.91 ms | 2.14 / 2.98 ms |
 
 - **Keyset cost does not depend on depth**: page 1,000 costs what page 1 costs, because the query seeks the cursor
   position in the index and reads `limit + 1` entries.
-- **`OFFSET` grows linearly**: page 1,000 reads and discards 19,980 rows first (≈ 100× slower here), and with a
-  residual filter (carrier) every discarded row is also a heap fetch (≈ 250×). At the last page of the unfiltered
+- **`OFFSET` grows linearly**: page 1,000 reads and discards 19,980 rows first (≈ 90× slower here), and with a
+  residual filter (carrier) every discarded row is also a heap fetch (≈ 200×). At the last page of the unfiltered
   1M result it would read the whole index.
 - **Offset is not even correct here**: an ingestion run replaces whole days every 15 min, so a row inserted or deleted
   before the current position shifts every later page (duplicates or gaps), whereas keyset continues from a position.
@@ -493,9 +502,17 @@ Search and cache (spec 005):
 - **Every run invalidates the whole cache**, also for days that did not change; a per-day version would keep more hits
   at the cost of keys that span several days. Every request, hit or miss, reads the data version from PostgreSQL, so
   PostgreSQL must be up even for cache hits.
-- **The catalog is computed by a grouped scan of the future rows** (no index helps a `DISTINCT` over every route); it is
-  cached per data version, but with Redis down every catalog request pays it (≈ 450 ms at 1M rows). A cached catalog can
-  list a date or route whose last flight has just departed, until the next run or the TTL.
+- **The catalog is computed by a grouped scan of the future rows** (≈ 420 ms at 1M rows; no index helps a `DISTINCT`
+  over every route). It runs once per data version per instance — memoised in the JVM behind a lock, also when Redis
+  is down — but a run bumps the version once per day it writes, so a run triggers up to 7 scans. A cached catalog
+  can list a route whose last flight has just departed until the next run; past days are dropped.
+- **Cache keys are client-controlled** (any position or `maxPrice` is a new key): a client looping over crafted
+  values gets misses and fills Redis, bounded by `maxmemory 256mb` + LRU. Signed cursors or caching only first pages
+  would close it if needed.
+- **Until the breaker opens**, a request with Redis hung can wait for two 100 ms timeouts (read and write); after 5
+  failed calls Redis is skipped for 30 s.
+- **`/actuator/metrics` is exposed on the application port without authentication**, like the API; production would
+  move management to its own port or behind the network policy.
 - **Cursors are not signed**: a client can craft one to start anywhere; the data is public, so nothing is gained.
 - **Selective filters outside the indexes** (e.g. a rare carrier on its own) scan more of the price index; measured
   combinations are in ADR-0020.
