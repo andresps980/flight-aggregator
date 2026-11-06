@@ -26,3 +26,4 @@ The guardrails (rules, skills, agents, hooks) are versioned in the repository an
 | [006](006-persistence-and-pipeline.md) | Persistence and pipeline: PostgreSQL day snapshots, COPY, advisory lock, runs over REST and schedule, compose (spec 004), review findings | `feat/004-persistence-and-pipeline` |
 | [007](007-search-api.md) | Search API: filters, keyset cursor, indexes measured at 1M, Redis cache-aside with data version, catalog, OpenAPI (spec 005), review findings | `feat/005-search-api` |
 | [008](008-dashboard.md) | Dashboard: React + TypeScript + Vite, live ingestion status, nginx, frontend CI and hooks (spec 006), OpenAPI follow-up, review findings | `feat/006-dashboard` |
+| [009](009-dependabot-triage.md) | Dependabot triage: Spotless bump merged, TypeScript 7 / ESLint 10 declined with ignore rules, `minimatch` security update not possible | `chore/dependabot-ignore-majors` |

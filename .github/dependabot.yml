@@ -29,6 +29,22 @@ updates:
         patterns: ["eslint", "@eslint/*", "eslint-plugin-*", "typescript-eslint", "prettier", "globals"]
       typescript:
         patterns: ["typescript", "openapi-typescript"]
+    # Majors our toolchain cannot install yet without forcing peer dependencies (docs/frontend.md → Version
+    # constraints; decisions in docs/ai/009). Remove a rule when its revisit condition holds, then let Dependabot
+    # propose the bump again.
+    ignore:
+      # TypeScript >= 6: openapi-typescript (latest 7.13.0) declares peer typescript "^5.x" and typescript-eslint
+      # (8.72.1) accepts typescript "<6.1.0". Declined: #11 (5.9.3 -> 7.0.2). Revisit when openapi-typescript supports
+      # TypeScript >= 6 and typescript-eslint supports the target major.
+      - dependency-name: "typescript"
+        versions: [">=6"]
+      # ESLint >= 10: eslint-plugin-jsx-a11y (latest 6.10.2), the accessibility rules spec 006 relies on, declares
+      # peer eslint "^3 || ... || ^9". Declined: #10 (9.39.5 -> 10.14.0). Revisit when eslint-plugin-jsx-a11y
+      # declares ESLint 10 support. @eslint/js is versioned with eslint.
+      - dependency-name: "eslint"
+        versions: [">=10"]
+      - dependency-name: "@eslint/js"
+        versions: [">=10"]
 
   - package-ecosystem: docker
     directory: /frontend
