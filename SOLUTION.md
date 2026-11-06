@@ -344,6 +344,13 @@ restart (`502` meanwhile). The resilience demo through the dashboard's proxy: Mo
   (load, submit, back/forward, reload) instead of "filters changed" effects — simpler to follow.
 - The compose healthcheck used `localhost`, which resolves to `::1` in the container while nginx listens on IPv4:
   the dashboard worked but the service stayed unhealthy. Now `127.0.0.1`, and the smoke test runs that command.
+- **A layout bug found by hand** (the author, in Brave at 1170 px): the results column painted over the search form
+  and the status table. Grid/flex children cannot shrink below their widest content (the providers table, `<select>`s
+  as wide as their longest option) unless told to (`minmax(0, 1fr)`, `min-width: 0`). Fixed with named grid areas
+  (one column below 960 px, status and demo under the results), contained tables, wrapping and clipped SVGs, and
+  guarded by a **Playwright layout check in Chromium** at four widths, which also found a second bug: screen-reader
+  tables hidden with `overflow: hidden` (which does not apply to tables) widened the page at 768 px. The check fails on
+  the old layout and on a deliberately broken one.
 - Versions: TypeScript 5.9 and ESLint 9, the newest every tool's declared peer range accepts
   (`openapi-typescript`, `typescript-eslint`, `eslint-plugin-jsx-a11y`), instead of forcing peers.
 
@@ -591,8 +598,8 @@ Dashboard (spec 006):
   `localhost:3000/api/v1/ingestions` or toggle a gds-mock outage. Acceptable for a local demo stack (gds-mock's admin
   API is published unauthenticated on 8081 anyway); production would put authentication in front, disable
   `DEMO_CONTROLS`, and check `Origin` on state-changing requests.
-- **No browser end-to-end tests**: behaviour is tested in jsdom with MSW, the image with a smoke test, and the stack by
-  hand. jsdom does no layout, so visual regressions are caught by eye.
+- **No browser end-to-end flows**: behaviour is tested in jsdom with MSW, layout in headless Chromium with a mocked
+  API (one engine, four widths), the image with a smoke test, and the stack by hand.
 - **`npm audit`: 7 moderate advisories** in `minimatch` inside the dev-only lint toolchain (`typescript-eslint`); they
   concern glob patterns we write ourselves. Production dependencies audit clean. Accepted until upstream updates.
 - **Pinned behind the latest majors**: TypeScript 5.9 and ESLint 9 until the tools support TypeScript 7 / ESLint 10.

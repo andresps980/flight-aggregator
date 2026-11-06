@@ -48,7 +48,8 @@ the file are exact. `OpenApiContractIT` checks it.
 **Out of scope**
 - New search features in the backend (sort orders, total counts, time zones — see Q1), authentication.
 - Server-side rendering, routing between pages (one screen), i18n (English only, fixed `en-GB` formatting).
-- Browser end-to-end tests (Playwright/Cypress); the compose stack is checked by hand (AC-30).
+- Browser end-to-end flows (Playwright/Cypress); the compose stack is checked by hand (AC-30). *Added after a layout
+  bug found by hand: a Playwright layout check in Chromium with a mocked API (panels never overlap or overflow).*
 - Push channels (WebSocket / SSE) — polling is enough at a 15 min ingestion cadence (ADR-0023).
 - Mobile-specific layout beyond a single responsive column.
 

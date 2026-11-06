@@ -115,6 +115,31 @@ Then implement against the tests and continue with the remaining steps (reviewer
 including docs/frontend.md, verification with docker compose, PR description; push after my OK).
 ````
 
+### 4. Layout bug found by the author
+
+The author first sent this prompt with placeholders left unfilled and the screenshot at `/tmp/layout-bug.png`; the
+agent could not read it (outside the session's allowed directories) and started from the CSS. The author then resent
+it, filled in:
+
+````text
+Layout bug in the dashboard: the right-hand panels overlap the left-hand ones, so they can't
+be read. Screenshot: ./docs/images/dashboard.png (read it). Browser: brave,
+window.innerWidth = 1170. It happens at
+these widths.
+
+Fix the CSS layout so panels never overlap at any width:
+- typical cause: grid/flex children with wide content (tables, SVG) need min-width: 0 /
+  overflow handling, and fixed widths should become minmax()/fr;
+- below a reasonable breakpoint, stack the side panels under the results instead of
+  side by side;
+- long content (segment lists, provider names) wraps or scrolls inside its own panel.
+Then add a layout check so this can't regress silently: a small Playwright test (dev
+dependency, Chromium only) that loads the built app with mocked API responses at 3 viewport
+widths (e.g. 1440, 1024, 768) and asserts the main panels' bounding boxes don't intersect.
+Run it in the frontend CI job. Tell me when it's fixed so I can re-check in the browser
+before taking the screenshots.
+````
+
 ## Clarifications (open questions of the spec)
 
 | # | Question | Answer |
@@ -185,6 +210,31 @@ intended division of labour: the agent cannot widen its own permissions; a human
 - **Prettier and `.editorconfig`**: Prettier inherited 4-space indentation; the frontend pins 2.
 - **Healthcheck**: `localhost` resolved to `::1` inside the nginx container; the compose stack showed `frontend`
   unhealthy while serving. Fixed (`127.0.0.1`) and covered by the smoke test.
+
+## The layout bug (prompt 4)
+
+- **Cause** (screenshot: results column at x ≈ 325 px over a left column that needed more): grid and flex items default
+  to `min-width: auto`, i.e. never narrower than their widest content. The providers table and the `<select>`s (as
+  wide as their longest option, e.g. *"2026-11-09 · INCOMPLETE (missing …)"*) made the left column's content wider
+  than its `minmax(18rem, 22rem)` track; jsdom has no layout, so no unit test could see it.
+- **Fix**: named grid areas with `minmax(16rem, 22rem) minmax(0, 1fr)`, one column below 60rem (search, results, then
+  status and demo, as asked), `min-width: 0` on grid children, full-width selects, `overflow-wrap: anywhere` in
+  panels, the providers table in a horizontal scroll container, wrapping result rows, clipped chart SVGs with shortened
+  labels.
+- **Layout check**: `e2e/layout.spec.ts` (Playwright 1.65, Chromium headless shell only), production build via `vite
+  preview`, all API calls mocked with wide content, widths 1440 / 1170 (the author's) / 1024 / 768. Asserts panels do
+  not intersect, no visible element sticks out of its panel, no horizontal page scroll (naming the culprits), and that
+  the status panel is under the results below the breakpoint. Runs in the CI frontend job (report uploaded on failure).
+- **It found a second bug**: the charts' screen-reader tables carried `visually-hidden` themselves; `overflow` does not
+  apply to table boxes, so their cells widened the page to 782 px in a 768 px window. The class moved to a wrapping
+  `<div>`.
+- **Is the check real?** Against the old layout it fails at every width (at 768 px with the page-scroll message; at the
+  wider widths the old markup has no grid areas). Against the new layout with the results column deliberately shifted
+  left it reports `area-search / area-status / area-demo overlaps area-results`; a deliberately wide table inside its
+  scroll container is correctly not reported.
+- Test fixes while writing it: two selectors matched twice (the hidden chart table also has a provider row; the demo
+  text contains "Days"); the `<details>` is opened programmatically, so an overlapped element cannot turn the test into
+  a 30 s timeout; it asserts the four panels exist, so the overlap check can never pass on an empty list.
 
 ## Review findings and how they were handled
 

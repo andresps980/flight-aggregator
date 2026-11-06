@@ -43,6 +43,7 @@ activates it in its own `<build><plugins>`, so formatting, the coverage gate and
 | Frontend: tests only / watch | `npm test` / `npm run test:watch` |
 | Frontend: regenerate API types after an OpenAPI change | `cd frontend && npm run gen:api` |
 | Frontend: production build / image smoke test | `npm run build` / `bash frontend/docker/smoke-test.sh` |
+| Frontend: layout check in Chromium (after `npm run build`; once: `npx playwright install chromium`) | `npm run test:layout` |
 
 Always run `./mvnw verify` and, when `frontend/` changed, `npm run check` before declaring a task done. The Stop hook
 runs whichever applies.

@@ -15,6 +15,7 @@ This page is written for a backend developer: it maps each frontend idea to some
 | Checks (what CI runs) | `cd frontend && npm run check` | — |
 | Production build | `cd frontend && npm run build` (output in `dist/`) | — |
 | Image smoke test | `bash frontend/docker/smoke-test.sh` | — |
+| Layout check in Chromium (after a build; once: `npx playwright install chromium`) | `cd frontend && npm run test:layout` | — |
 
 The dev server proxies `/api` to `localhost:8080` and `/gds-admin` to `localhost:8081/admin` (see
 `vite.config.ts`), exactly like nginx does in the container, so the browser always talks to one origin and no CORS is
@@ -163,6 +164,13 @@ a test overrides them with `server.use(...)`, and any request without a handler 
 fake timers (`vi.advanceTimersByTimeAsync(3_000)`) instead of waiting. Each test name starts with the acceptance
 criterion it covers (`AC-13: …`). Coverage gate: 80 % lines / 70 % branches.
 
+**Layout check (Playwright, Chromium).** jsdom has no layout engine, so `e2e/layout.spec.ts` loads the production
+build in a real (headless) Chromium with every API call mocked by deliberately wide content (long provider names,
+three-segment itineraries, failures, demo panel on) at 1440, 1170, 1024 and 768 px, and asserts that (1) no two main
+panels intersect, (2) no visible element sticks out of its panel (scroll containers count as their own box), and (3)
+the page does not scroll sideways — naming the culprits when it does. It runs in CI after the build. It was added after
+a layout bug found by hand (below) and checked against the old layout and against a deliberately broken one.
+
 `frontend/docker/smoke-test.sh` builds the image and checks what nginx serves (22 checks: headers, SPA fallback,
 proxy scope, demo flag, URL validation, non-root user, healthcheck command), also in CI.
 
@@ -184,14 +192,29 @@ proxy scope, demo flag, URL validation, non-root user, healthcheck command), als
 - **Compose**: service `frontend` on `${FRONTEND_PORT:-3000}`, healthcheck on `/healthz`, starts after the
   aggregator is healthy.
 
+## Layout
+
+Named CSS grid areas (`styles.css`): on wide screens the search, status and demo panels form a left column of
+`minmax(16rem, 22rem)` and the results take `minmax(0, 1fr)`; below 60rem (960 px) everything is one column — search,
+then results, then status and demo. Rules that keep content inside its panel:
+
+- `minmax(0, 1fr)` and `min-width: 0` on grid/flex children: by default they cannot shrink below their widest content
+  (a table, an SVG, a long `<select>` option) and spill over their neighbour — **the bug found by hand: at 1170 px in
+  Brave, the results column painted over the search form and the status table**.
+- `<select>` / inputs are `width: 100%`; long words wrap (`overflow-wrap: anywhere`); the providers table scrolls
+  inside its panel; result rows wrap the price block under the details; chart SVGs clip and long provider labels are
+  shortened (full name in the tooltip and the table).
+- Screen-reader tables are hidden through a wrapping `<div class="visually-hidden">`: `overflow: hidden` does not
+  apply to a `<table>` box, so a hidden table still widened the page by 14 px at 768 px (found by the layout check).
+
 ## Limitations
 
 - Times are UTC only (no airport time zones in the API).
 - "Real time" is polling: up to 30 s before a scheduled run is noticed; each open tab polls independently
   (ADR-0023).
 - Charts describe the loaded results, not the whole result set (there is no total count by design).
-- No browser end-to-end tests (Playwright); the compose stack was checked by hand. jsdom does not do layout, so visual
-  regressions are caught by eye.
+- No browser end-to-end flows: behaviour is tested in jsdom, layout in Chromium with mocked data (one browser
+  engine; Safari/Firefox differences would be caught by eye), the stack by hand.
 - The demo controls are unauthenticated, like gds-mock's admin API itself; demo-only, off with `DEMO_CONTROLS=false`.
 - `npm audit` reports 7 moderate advisories in `minimatch` inside the dev-only lint toolchain (`typescript-eslint`);
   they affect glob patterns we write ourselves, and production dependencies audit clean. Accepted until upstream
