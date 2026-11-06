@@ -24,7 +24,7 @@ updates:
       react:
         patterns: ["react", "react-dom", "@types/react", "@types/react-dom"]
       build-and-test:
-        patterns: ["vite", "@vitejs/*", "vitest", "@vitest/*", "jsdom", "msw", "@testing-library/*"]
+        patterns: ["vite", "@vitejs/*", "vitest", "@vitest/*", "jsdom", "msw", "@testing-library/*", "@playwright/*"]
       lint-and-format:
         patterns: ["eslint", "@eslint/*", "eslint-plugin-*", "typescript-eslint", "prettier", "globals"]
       typescript:

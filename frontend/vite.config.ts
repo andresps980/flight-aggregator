@@ -17,6 +17,8 @@ export default defineConfig({
     },
   },
   test: {
+    // Unit tests only; e2e/ holds the Playwright layout tests (npm run test:layout).
+    include: ['src/**/*.test.{ts,tsx}'],
     environment: 'jsdom',
     // The page URL in tests; the client resolves `/api/...` against it, as the browser does.
     environmentOptions: { jsdom: { url: 'http://localhost:3000/' } },

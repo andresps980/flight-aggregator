@@ -89,7 +89,7 @@ jobs:
           if-no-files-found: ignore
 
   frontend:
-    name: Frontend (format, lint, types, tests & coverage, build, image)
+    name: Frontend (format, lint, types, tests & coverage, build, layout, image)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -135,6 +135,21 @@ jobs:
 
       - name: Production build
         run: npm run build
+
+      - name: Layout check in Chromium (Playwright, mocked API, 4 widths)
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:layout
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          if-no-files-found: ignore
 
       - name: nginx image smoke test
         run: bash docker/smoke-test.sh
