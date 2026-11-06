@@ -153,6 +153,14 @@ class OpenApiContractIT extends SearchSpringTest {
                         .valueStream()
                         .map(JsonNode::asString))
                 .contains("null");
+        assertThat(schemas.at("/IngestionRunResponse/properties/report/anyOf/0/$ref")
+                        .asString())
+                .endsWith("/ReportDocument");
+        assertThat(schemas.at("/IngestionRunResponse/properties/report/anyOf/1/type")
+                        .asString())
+                .isEqualTo("null");
+        assertThat(schemas.at("/IngestionRunResponse/properties/report/$ref").isMissingNode())
+                .isTrue();
         assertThat(schemas.at("/ProblemDetail/properties/properties").isMissingNode())
                 .isTrue();
         assertThat(schemas.at("/IngestionAlreadyRunningProblem/required")

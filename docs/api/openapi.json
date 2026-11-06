@@ -387,8 +387,11 @@
             "description" : "Generic failure message (details are in the log); set for FAILED and ABORTED runs"
           },
           "report" : {
-            "type" : "null",
-            "$ref" : "#/components/schemas/ReportDocument",
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/ReportDocument"
+            }, {
+              "type" : "null"
+            } ],
             "description" : "The ingestion report: set once the run finished normally (COMPLETED, PARTIAL, or FAILED because every provider failed); null while RUNNING and for runs that failed or aborted without one"
           }
         },

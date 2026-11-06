@@ -181,7 +181,7 @@ export interface components {
             /** @description Generic failure message (details are in the log); set for FAILED and ABORTED runs */
             failure: string | null;
             /** @description The ingestion report: set once the run finished normally (COMPLETED, PARTIAL, or FAILED because every provider failed); null while RUNNING and for runs that failed or aborted without one */
-            report: components["schemas"]["ReportDocument"];
+            report: components["schemas"]["ReportDocument"] | null;
         };
         /** @description What one provider delivered in the run */
         ProviderDocument: {

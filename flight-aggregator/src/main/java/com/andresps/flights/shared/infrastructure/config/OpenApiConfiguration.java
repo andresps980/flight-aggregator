@@ -4,7 +4,9 @@ import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.info.Info;
 import io.swagger.v3.oas.models.media.Schema;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.springdoc.core.customizers.OpenApiCustomizer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -34,6 +36,9 @@ class OpenApiConfiguration {
      *   <li>Every property of a response record ({@code *Response}, report {@code *Document}) is required: Jackson
      *       writes every record component, {@code null} included. Properties that can be {@code null} are marked
      *       {@code nullable} on the record, so a client sees {@code string | null}, never an optional field.
+     *   <li>A nullable reference to another schema is written {@code anyOf: [{$ref}, {type: null}]}: springdoc emits
+     *       {@code $ref} next to {@code type: null}, which in OpenAPI 3.1 means "both" and makes generators drop the
+     *       {@code null} (found by the dashboard's generated types, spec 006).
      *   <li>{@code ProblemDetail}: Spring writes extra properties (e.g. {@code runningIngestionId}) next to the
      *       standard fields, not inside a {@code properties} object as springdoc infers from the getter.
      * </ul>
@@ -43,10 +48,14 @@ class OpenApiConfiguration {
         return openApi -> {
             Map<String, Schema> schemas = openApi.getComponents().getSchemas();
             schemas.forEach((name, schema) -> {
-                if ((name.endsWith("Response") || name.endsWith("Document")) && schema.getProperties() != null) {
-                    schema.setRequired(
-                            new ArrayList<String>(schema.getProperties().keySet()));
+                Map<String, Schema> properties = schema.getProperties();
+                if (properties == null) {
+                    return;
                 }
+                if (name.endsWith("Response") || name.endsWith("Document")) {
+                    schema.setRequired(new ArrayList<String>(properties.keySet()));
+                }
+                properties.replaceAll((property, value) -> nullableReference(value));
             });
             Schema<?> problem = schemas.get("ProblemDetail");
             if (problem != null && problem.getProperties() != null) {
@@ -54,5 +63,17 @@ class OpenApiConfiguration {
                 problem.setAdditionalProperties(true);
             }
         };
+    }
+
+    private static Schema nullableReference(Schema property) {
+        boolean nullable = (property.getTypes() != null && property.getTypes().contains("null"))
+                || "null".equals(property.getType())
+                || Boolean.TRUE.equals(property.getNullable());
+        if (property.get$ref() == null || !nullable) {
+            return property;
+        }
+        Schema<?> reference = new Schema<>().$ref(property.get$ref());
+        Schema<?> nothing = new Schema<>().types(Set.of("null"));
+        return new Schema<>().anyOf(List.of(reference, nothing)).description(property.getDescription());
     }
 }
