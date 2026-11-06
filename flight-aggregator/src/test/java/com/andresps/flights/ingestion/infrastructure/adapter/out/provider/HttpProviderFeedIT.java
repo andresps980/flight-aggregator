@@ -55,12 +55,41 @@ class HttpProviderFeedIT {
             new RetrySettings(3, Duration.ofMillis(10), 2.0, 0.5),
             new CircuitBreakerSettings(10, 10, 80f, Duration.ofMillis(400), 2));
 
+    /**
+     * For every test that is not about timeouts: the same retries and breaker as {@link #SCALED}, but timeouts no slow CI
+     * runner can hit. With SCALED's 300 ms read timeout, a first request slowed by a cold JVM or a GC pause on a busy
+     * runner became a second attempt and failed an exact attempt count (PR 8, {@code fetchesPartition}); only the
+     * timeout tests need short timeouts, and for them a slower runner only makes the timeout fire more surely.
+     */
+    static final ResilienceSettings NOT_ABOUT_TIMEOUTS = new ResilienceSettings(
+            Duration.ofSeconds(5),
+            Duration.ofSeconds(5),
+            Duration.ofSeconds(10),
+            SCALED.retry(),
+            SCALED.circuitBreaker());
+
     private static WireMockServer server;
 
     @BeforeAll
     static void startServer() {
         server = new WireMockServer(options().dynamicPort());
         server.start();
+        warmUp();
+    }
+
+    /**
+     * One throwaway fetch through the same code (JDK HTTP client, WireMock's first request, the CSV parser), so the
+     * first measured test does not pay the JVM's cold start; then WireMock forgets it.
+     */
+    private static void warmUp() {
+        server.stubFor(get(urlPathEqualTo(PATH)).willReturn(csv(BODY)));
+        new HttpProviderFeed(
+                        new GammaCsvParser(),
+                        URI.create(server.baseUrl()),
+                        NOT_ABOUT_TIMEOUTS,
+                        ResiliencePolicies.circuitBreaker("mock-gamma-warm-up", NOT_ABOUT_TIMEOUTS.circuitBreaker()))
+                .fetch(DAY);
+        server.resetAll();
     }
 
     @AfterAll
@@ -127,7 +156,7 @@ class HttpProviderFeedIT {
         always(csv(
                 BODY + "GAM-4,-1.00,IB0345~MAD~2026-11-06T09:00~Europe/Madrid~BCN~2026-11-06T10:25~Europe/Madrid\n"));
 
-        ProviderPartition partition = feed(SCALED).fetch(DAY);
+        ProviderPartition partition = feed(NOT_ABOUT_TIMEOUTS).fetch(DAY);
 
         assertThat(partition.provider()).isEqualTo(new ProviderId("mock-gamma"));
         assertThat(partition.day()).isEqualTo(DAY);
@@ -138,6 +167,19 @@ class HttpProviderFeedIT {
                 1,
                 getRequestedFor(urlPathEqualTo(PATH))
                         .withQueryParam("date", com.github.tomakehurst.wiremock.client.WireMock.equalTo("2026-11-06")));
+    }
+
+    @Test
+    @DisplayName(
+            "CI flake (PR 8): a slow first response (cold JVM, busy runner) is one attempt outside the timeout tests")
+    void slowRunnerIsNotAnExtraAttempt() {
+        // 400 ms: more than SCALED's 300 ms read timeout, what the first request of the class took on a CI runner.
+        firstThen(csv(BODY).withFixedDelay(400), csv(BODY));
+
+        ProviderPartition partition = feed(NOT_ABOUT_TIMEOUTS).fetch(DAY);
+
+        assertThat(partition.attempts()).isEqualTo(1);
+        assertThat(requests()).isEqualTo(1);
     }
 
     @Test
@@ -197,7 +239,7 @@ class HttpProviderFeedIT {
     void serverErrorThenSuccess() {
         firstThen(aResponse().withStatus(500), csv(BODY));
 
-        ProviderPartition partition = feed(SCALED).fetch(DAY);
+        ProviderPartition partition = feed(NOT_ABOUT_TIMEOUTS).fetch(DAY);
 
         assertThat(partition.attempts()).isEqualTo(2);
         assertThat(requests()).isEqualTo(2);
@@ -210,7 +252,7 @@ class HttpProviderFeedIT {
         // (SOLUTION.md); a persistent one does.
         always(aResponse().withFault(Fault.CONNECTION_RESET_BY_PEER));
 
-        PartitionFetchException failure = failure(feed(SCALED));
+        PartitionFetchException failure = failure(feed(NOT_ABOUT_TIMEOUTS));
 
         assertThat(failure.kind()).isEqualTo(FailureKind.IO_ERROR);
         assertThat(failure.attempts()).isEqualTo(3);
@@ -224,7 +266,8 @@ class HttpProviderFeedIT {
             closedPort = socket.getLocalPort();
         }
 
-        PartitionFetchException failure = failure(feed(URI.create("http://localhost:" + closedPort), SCALED));
+        PartitionFetchException failure =
+                failure(feed(URI.create("http://localhost:" + closedPort), NOT_ABOUT_TIMEOUTS));
 
         assertThat(failure.kind()).isEqualTo(FailureKind.IO_ERROR);
         assertThat(failure.attempts()).isEqualTo(3);
@@ -237,7 +280,7 @@ class HttpProviderFeedIT {
         String truncated = HEADER + LINE.formatted(1) + LINE.formatted(2) + "GAM-3,100.00,IB0345~MAD~2026";
         firstThen(csv(truncated), csv(BODY));
 
-        ProviderPartition partition = feed(SCALED).fetch(DAY);
+        ProviderPartition partition = feed(NOT_ABOUT_TIMEOUTS).fetch(DAY);
 
         assertThat(partition.attempts()).isEqualTo(2);
         assertThat(partition.offers()).hasSize(3);
@@ -249,7 +292,7 @@ class HttpProviderFeedIT {
     void persistentMalformedDocument() {
         always(csv("not,a,gamma,feed\n"));
 
-        PartitionFetchException failure = failure(feed(SCALED));
+        PartitionFetchException failure = failure(feed(NOT_ABOUT_TIMEOUTS));
 
         assertThat(failure.kind()).isEqualTo(FailureKind.MALFORMED_DOCUMENT);
         assertThat(failure.attempts()).isEqualTo(3);
@@ -260,7 +303,7 @@ class HttpProviderFeedIT {
     void clientErrorIsNotRetried() {
         always(aResponse().withStatus(400));
 
-        PartitionFetchException failure = failure(feed(SCALED));
+        PartitionFetchException failure = failure(feed(NOT_ABOUT_TIMEOUTS));
 
         assertThat(failure.kind()).isEqualTo(FailureKind.CLIENT_ERROR);
         assertThat(failure.attempts()).isEqualTo(1);
@@ -272,7 +315,7 @@ class HttpProviderFeedIT {
     void persistentServerError() {
         always(aResponse().withStatus(500));
 
-        PartitionFetchException failure = failure(feed(SCALED));
+        PartitionFetchException failure = failure(feed(NOT_ABOUT_TIMEOUTS));
 
         assertThat(failure.kind()).isEqualTo(FailureKind.SERVER_ERROR);
         assertThat(failure.attempts()).isEqualTo(3);
@@ -283,7 +326,7 @@ class HttpProviderFeedIT {
     @DisplayName("AC-16: a 503 outage opens the breaker after minimum-calls attempts; later fetches make no request")
     void outageOpensBreaker() {
         always(aResponse().withStatus(503));
-        HttpProviderFeed feed = feed(SCALED);
+        HttpProviderFeed feed = feed(NOT_ABOUT_TIMEOUTS);
 
         for (int i = 0; i < 4; i++) {
             failure(feed);
@@ -305,8 +348,8 @@ class HttpProviderFeedIT {
         HttpProviderFeed feed = new HttpProviderFeed(
                 new GammaCsvParser(),
                 URI.create(server.baseUrl()),
-                SCALED,
-                ResiliencePolicies.circuitBreaker("mock-gamma", SCALED.circuitBreaker(), clock));
+                NOT_ABOUT_TIMEOUTS,
+                ResiliencePolicies.circuitBreaker("mock-gamma", NOT_ABOUT_TIMEOUTS.circuitBreaker(), clock));
         always(aResponse().withStatus(503));
         for (int i = 0; i < 4; i++) {
             failure(feed);
@@ -315,7 +358,7 @@ class HttpProviderFeedIT {
 
         server.resetAll();
         always(csv(BODY));
-        clock.advance(SCALED.circuitBreaker().openWait().plusMillis(1));
+        clock.advance(NOT_ABOUT_TIMEOUTS.circuitBreaker().openWait().plusMillis(1));
 
         feed.fetch(DAY);
         assertThat(feed.circuitState()).isEqualTo(CircuitState.HALF_OPEN);
@@ -327,7 +370,7 @@ class HttpProviderFeedIT {
     @DisplayName("AC-16: 4xx responses never open the breaker")
     void clientErrorsDoNotOpenBreaker() {
         always(aResponse().withStatus(404));
-        HttpProviderFeed feed = feed(SCALED);
+        HttpProviderFeed feed = feed(NOT_ABOUT_TIMEOUTS);
 
         for (int i = 0; i < 12; i++) {
             assertThat(failure(feed).kind()).isEqualTo(FailureKind.CLIENT_ERROR);
@@ -393,11 +436,11 @@ class HttpProviderFeedIT {
     @DisplayName("AC-5/ADR-0015: a partition with more records than max-records-per-partition fails the attempt")
     void recordLimitPerPartition() {
         ResilienceSettings capped = new ResilienceSettings(
-                SCALED.connectTimeout(),
-                SCALED.readTimeout(),
-                SCALED.attemptTimeout(),
-                SCALED.retry(),
-                SCALED.circuitBreaker(),
+                NOT_ABOUT_TIMEOUTS.connectTimeout(),
+                NOT_ABOUT_TIMEOUTS.readTimeout(),
+                NOT_ABOUT_TIMEOUTS.attemptTimeout(),
+                NOT_ABOUT_TIMEOUTS.retry(),
+                NOT_ABOUT_TIMEOUTS.circuitBreaker(),
                 2);
         always(csv(BODY));
 
@@ -431,8 +474,8 @@ class HttpProviderFeedIT {
     @Test
     @DisplayName("AC-23: a feed is named after its parser's provider")
     void providerComesFromParser() {
-        assertThat(feed(SCALED).provider()).isEqualTo(new ProviderId("mock-gamma"));
-        assertThatThrownBy(() -> new HttpProviderFeed(new GammaCsvParser(), null, SCALED, null))
+        assertThat(feed(NOT_ABOUT_TIMEOUTS).provider()).isEqualTo(new ProviderId("mock-gamma"));
+        assertThatThrownBy(() -> new HttpProviderFeed(new GammaCsvParser(), null, NOT_ABOUT_TIMEOUTS, null))
                 .isInstanceOf(NullPointerException.class);
     }
 }

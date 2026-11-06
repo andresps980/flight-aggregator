@@ -111,6 +111,10 @@ contracts (LSP).
 - Conventional Commits: `feat: ...`, `fix: ...`, `test: ...`, `docs: ...`, `refactor: ...`, `chore: ...`.
 - One functional increment per PR, with its unit and integration tests and docs updates.
 - Never use `--no-verify` or force-push.
+- **After every push, wait for the CI run of the pushed commit and report that one, by SHA** (`gh run list --branch
+  <branch> --json headSha,...`, then `gh run watch`). An earlier run's green says nothing about the latest commit —
+  a docs-only push runs the full CI too. A red run from a flaky test is diagnosed (root cause, reproduction) before
+  any re-run.
 
 ## Testing conventions
 
@@ -124,6 +128,8 @@ contracts (LSP).
 - Each acceptance criterion in the spec maps to at least one test; reference it in the test name or `@DisplayName`.
 - Coverage gate: 80% lines / 70% branches on merged unit + IT coverage. Don't game it with trivial tests.
 - AssertJ for assertions, given/when/then structure.
+- Timing in tests: assert exact attempt/request counts only with timeouts a slow CI runner cannot hit; use short,
+  scaled timeouts only in the tests about timeouts (see `HttpProviderFeedIT.NOT_ABOUT_TIMEOUTS`).
 
 ## Definition of done
 
