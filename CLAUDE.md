@@ -21,7 +21,7 @@ Maven multi-module build; the parent `pom.xml` and `./mvnw` live at the reposito
 |---|---|---|
 | `flight-aggregator/` | Ingestion, deduplication and search API | `com.andresps.flights` |
 | `gds-mock/` | Mock GDS providers (Mock-Alpha JSON, Mock-Beta XML, Mock-Gamma CSV) with chaos; test double, must not depend on `flight-aggregator` | `com.andresps.gdsmock` |
-| `frontend/` | React + TypeScript dashboard (planned, ADR-0009) | — |
+| `frontend/` | React + TypeScript + Vite dashboard served by nginx (spec 006, ADR-0009, ADR-0023, ADR-0024); npm project, not a Maven module | — |
 
 Shared plugin configuration (Spotless, JaCoCo, Failsafe) lives in the parent `pluginManagement`; each module
 activates it in its own `<build><plugins>`, so formatting, the coverage gate and ArchUnit rules apply per module.
@@ -37,8 +37,15 @@ activates it in its own `<build><plugins>`, so formatting, the coverage gate and
 | Run the mock providers | `docker compose up --build` or `./mvnw -pl gds-mock spring-boot:run` |
 | Run the aggregator | `./mvnw -pl flight-aggregator spring-boot:run` |
 | Coverage report | `<module>/target/site/jacoco/index.html` (after `verify`) |
+| Frontend: install | `cd frontend && npm ci` (Node 26, see `frontend/.nvmrc`) |
+| Frontend: dev server (proxies `/api` to :8080, `/gds-admin` to :8081) | `cd frontend && npm run dev` |
+| Frontend: all checks (Prettier, ESLint, tsc, Vitest + coverage gate) | `cd frontend && npm run check` |
+| Frontend: tests only / watch | `npm test` / `npm run test:watch` |
+| Frontend: regenerate API types after an OpenAPI change | `cd frontend && npm run gen:api` |
+| Frontend: production build / image smoke test | `npm run build` / `bash frontend/docker/smoke-test.sh` |
 
-Always run `./mvnw verify` before declaring a task done. The Stop hook also runs it automatically.
+Always run `./mvnw verify` and, when `frontend/` changed, `npm run check` before declaring a task done. The Stop hook
+runs whichever applies.
 
 ## Architecture (enforced by `ArchitectureTest`)
 
@@ -71,6 +78,20 @@ Rules:
 SOLID in practice here: one use case per interface (SRP/ISP), new behaviour through new adapters/implementations rather
 than editing existing ones (OCP), ports as abstractions owned by the application (DIP), implementations honour port
 contracts (LSP).
+
+## Frontend conventions (spec 006, ADR-0024)
+
+- Layout under `frontend/src/`: `api/` (generated `schema.d.ts`, `types.ts` aliases, `client.ts`), `hooks/`,
+  `components/`, plain modules for pure logic (`format.ts`, `filters.ts`, `charts.ts`, `newData.ts`).
+- API types are **generated** from `docs/api/openapi.json` (`npm run gen:api`); never hand-edit `schema.d.ts`.
+  `api/client.ts` is the only module that calls `fetch` for the backend.
+- State in React hooks only (no Redux/Zustand/React Query); runtime dependencies are `react` and `react-dom`.
+  No UI kit, chart, date or router library.
+- Small components with one job, each with a one-line comment on what it owns. Accessible by default: visible
+  `<label>`s, keyboard operable, `aria-live` for async updates, never colour alone.
+- Tests: Vitest + React Testing Library (query by label/role) + MSW for HTTP (`src/test/server.ts`), named after the
+  AC (`it('AC-12: ...')`). Coverage gate 80 % lines / 70 % branches.
+- Prettier formats, ESLint (with `jsx-a11y`, `react-hooks`) lints; `tsc` is strict.
 
 ## SDD workflow
 
@@ -117,5 +138,10 @@ contracts (LSP).
 - `PreToolUse(Bash)` — `guard-git.sh` blocks commits/pushes on main, pushes to main, force-push and `--no-verify`.
   Rules apply per sub-command (split on `&&`, `||`, `;`, `|` outside quotes), only to real `git push` / `git commit`.
   Tests: `bash .claude/hooks/tests/guard-git.test.sh` (also run in CI); extend them when changing the hook.
-- `PostToolUse(Edit|Write)` — `format-java.sh` runs Spotless after Java/POM edits (scoped to the edited module).
-- `Stop` — `verify-on-stop.sh` runs `./mvnw verify` when any `pom.xml` or `<module>/src` changed since the last green build.
+- `PostToolUse(Edit|Write)` — `format-java.sh` runs Spotless after Java/POM edits (scoped to the edited module);
+  `format-frontend.sh` runs Prettier after edits to `frontend/` files.
+- `Stop` — `verify-on-stop.sh` runs `./mvnw verify` when any `pom.xml` or backend `<module>/src` changed, and the
+  frontend checks when `frontend/` changed, each since its last green run.
+- Git hooks (`.githooks`): pre-commit checks Spotless / Prettier on staged files; pre-push runs `./mvnw verify` and/or
+  the frontend checks for the gates the pushed commits touch (`classify_paths` in `.claude/hooks/lib.sh`, tested by
+  `.claude/hooks/tests/classify-paths.test.sh`).

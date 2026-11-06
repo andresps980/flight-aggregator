@@ -16,3 +16,13 @@ if git diff --cached --name-only --diff-filter=ACMR | grep -Eq '(\.java|pom\.xml
     exit 1
   fi
 fi
+
+# Frontend formatting (Prettier) of the staged frontend files.
+staged_frontend="$(git diff --cached --name-only --diff-filter=ACMR -- frontend | grep -E '\.(ts|tsx|js|css|json|html|md)$' | grep -v '^frontend/src/api/schema.d.ts$' || true)"
+if [ -n "$staged_frontend" ] && [ -x frontend/node_modules/.bin/prettier ]; then
+  # Paths relative to frontend/, where Prettier's config lives.
+  if ! (cd frontend && printf '%s\n' "$staged_frontend" | sed 's#^frontend/##' | xargs node_modules/.bin/prettier --check --log-level warn); then
+    echo "pre-commit: formatting issues found. Run 'npm run format' in frontend/, re-stage and commit again." >&2
+    exit 1
+  fi
+fi

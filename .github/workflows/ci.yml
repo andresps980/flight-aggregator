@@ -27,8 +27,10 @@ jobs:
           cache: maven
       - name: Check formatting
         run: ./mvnw -B -ntp spotless:check
-      - name: Claude hook tests (guard-git)
-        run: bash .claude/hooks/tests/guard-git.test.sh
+      - name: Claude hook tests (guard-git, classify-paths)
+        run: |
+          bash .claude/hooks/tests/guard-git.test.sh
+          bash .claude/hooks/tests/classify-paths.test.sh
 
   build:
     name: Build, tests & coverage
@@ -85,6 +87,57 @@ jobs:
             */target/surefire-reports/
             */target/failsafe-reports/
           if-no-files-found: ignore
+
+  frontend:
+    name: Frontend (format, lint, types, tests & coverage, build, image)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install (from the lock file)
+        run: npm ci --no-audit --no-fund
+
+      - name: Generated API types match docs/api/openapi.json
+        run: |
+          npm run gen:api
+          git diff --exit-code -- src/api/schema.d.ts \
+            || { echo "::error::src/api/schema.d.ts is out of date: run 'npm run gen:api' in frontend/ and commit it"; exit 1; }
+
+      - name: Format (Prettier)
+        run: npm run format:check
+
+      - name: Lint (ESLint)
+        run: npm run lint
+
+      - name: Typecheck (tsc)
+        run: npm run typecheck
+
+      - name: Unit tests with coverage gate (Vitest)
+        run: npm run coverage -- --coverage.reporter=text --coverage.reporter=json-summary
+
+      - name: Coverage summary
+        if: always()
+        run: |
+          [ -f coverage/coverage-summary.json ] || exit 0
+          node -e '
+            const t = require("./coverage/coverage-summary.json").total;
+            console.log("### Frontend coverage\n\n| Lines | Branches | Functions | Statements |\n|---:|---:|---:|---:|");
+            console.log(`| ${t.lines.pct} % | ${t.branches.pct} % | ${t.functions.pct} % | ${t.statements.pct} % |`);
+          ' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Production build
+        run: npm run build
+
+      - name: nginx image smoke test
+        run: bash docker/smoke-test.sh
 
   dependency-review:
     name: Dependency review (vulnerable dependencies)
