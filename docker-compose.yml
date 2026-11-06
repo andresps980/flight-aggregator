@@ -108,7 +108,8 @@ services:
       flight-aggregator:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      # 127.0.0.1, not localhost: inside the container localhost resolves to ::1 first and nginx listens on IPv4.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
       interval: 10s
       timeout: 3s
       start_period: 5s
