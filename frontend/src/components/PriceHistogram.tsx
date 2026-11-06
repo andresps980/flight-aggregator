@@ -45,22 +45,26 @@ export function PriceHistogram({ items }: { items: Itinerary[] }) {
           {formatEur(buckets[buckets.length - 1]?.to ?? 0)}
         </text>
       </svg>
-      <table className="visually-hidden">
-        <thead>
-          <tr>
-            <th scope="col">Price range</th>
-            <th scope="col">Results</th>
-          </tr>
-        </thead>
-        <tbody>
-          {buckets.map((bucket, i) => (
-            <tr key={i}>
-              <td>{range(bucket.from, bucket.to)}</td>
-              <td>{bucket.count}</td>
+      {/* Hidden but read by screen readers. The class is on a wrapper: overflow does not apply to a table box, so
+          a hidden table would still widen the page. */}
+      <div className="visually-hidden">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Price range</th>
+              <th scope="col">Results</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {buckets.map((bucket, i) => (
+              <tr key={i}>
+                <td>{range(bucket.from, bucket.to)}</td>
+                <td>{bucket.count}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </figure>
   );
 }

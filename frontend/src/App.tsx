@@ -69,26 +69,32 @@ export default function App({ config }: { config: AppConfig }) {
           Cheapest itineraries across Mock-Alpha, Mock-Beta and Mock-Gamma · times in UTC
         </p>
       </header>
+      {/* Grid areas (styles.css): side by side on wide screens; on narrow ones the search panel stays on top and the
+          status and demo panels move below the results. */}
       <main className="layout">
-        <aside className="sidebar">
-          <section className="panel" aria-labelledby="search-heading">
-            <h2 id="search-heading">Search</h2>
-            {catalog.error && <ProblemAlert error={catalog.error} />}
-            <SearchPanel
-              // A new key on back/forward remounts the form with the restored filters. Only then: remounting on
-              // every search would drop the keyboard focus from the Search button.
-              key={navigation}
-              catalog={catalog.catalog}
-              catalogLoading={catalog.loading && catalog.catalog === null}
-              filters={filters}
-              busy={search.busy}
-              onSearch={onSearch}
-            />
-          </section>
+        <section className="panel area-search" aria-labelledby="search-heading">
+          <h2 id="search-heading">Search</h2>
+          {catalog.error && <ProblemAlert error={catalog.error} />}
+          <SearchPanel
+            // A new key on back/forward remounts the form with the restored filters. Only then: remounting on
+            // every search would drop the keyboard focus from the Search button.
+            key={navigation}
+            catalog={catalog.catalog}
+            catalogLoading={catalog.loading && catalog.catalog === null}
+            filters={filters}
+            busy={search.busy}
+            onSearch={onSearch}
+          />
+        </section>
+        <div className="area-status">
           <StatusPanel status={status} />
-          {config.demoControls && <DemoControls />}
-        </aside>
-        <div className="content">
+        </div>
+        {config.demoControls && (
+          <div className="area-demo">
+            <DemoControls />
+          </div>
+        )}
+        <div className="content area-results">
           <NewDataBanner visible={newData} onReload={reload} />
           {search.items.length > 0 && (
             <div className="charts">

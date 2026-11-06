@@ -10,6 +10,11 @@ const ROW = 30;
 const LABEL = 92; // room for the provider name on the left
 const VALUE = 36; // room for the count after the bar
 
+/** Fits a provider name into the label column; the full name is in the tooltip and the table. */
+function shortLabel(name: string): string {
+  return name.length > 13 ? `${name.slice(0, 12)}…` : name;
+}
+
 export function ProviderChart({ items }: { items: Itinerary[] }) {
   const counts = countByProvider(items);
   const highest = Math.max(...counts.map((c) => c.count));
@@ -39,7 +44,7 @@ export function ProviderChart({ items }: { items: Itinerary[] }) {
                 textAnchor="end"
                 dominantBaseline="middle"
               >
-                {provider}
+                {shortLabel(provider)}
               </text>
               <path
                 className="mark"
@@ -59,22 +64,26 @@ export function ProviderChart({ items }: { items: Itinerary[] }) {
           );
         })}
       </svg>
-      <table className="visually-hidden">
-        <thead>
-          <tr>
-            <th scope="col">Provider</th>
-            <th scope="col">Results</th>
-          </tr>
-        </thead>
-        <tbody>
-          {counts.map(({ provider, count }) => (
-            <tr key={provider}>
-              <td>{provider}</td>
-              <td>{count}</td>
+      {/* Hidden but read by screen readers. The class is on a wrapper: overflow does not apply to a table box, so
+          a hidden table would still widen the page. */}
+      <div className="visually-hidden">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Provider</th>
+              <th scope="col">Results</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {counts.map(({ provider, count }) => (
+              <tr key={provider}>
+                <td>{provider}</td>
+                <td>{count}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </figure>
   );
 }

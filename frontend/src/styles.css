@@ -80,32 +80,77 @@ h2 {
   margin: 0;
 }
 
+/* Layout: named grid areas. Wide screens: search, status and demo panels in a left column, results on the right
+   (spanning all rows; the last row absorbs their height so the left panels stay together). Narrow screens: one
+   column, search first, then results, then status and demo.
+   minmax(0, 1fr) and min-width: 0 let a column shrink below its content's width: grid and flex items otherwise
+   refuse to be narrower than their widest child (a table, an SVG, a long select option) and spill over their
+   neighbours. */
 .layout {
   display: grid;
-  grid-template-columns: minmax(18rem, 22rem) 1fr;
+  grid-template-columns: minmax(16rem, 22rem) minmax(0, 1fr);
+  grid-template-rows: auto auto 1fr;
+  grid-template-areas:
+    'search results'
+    'status results'
+    'demo results';
   gap: 1rem;
   padding: 0.5rem 1.5rem 2rem;
   align-items: start;
 }
 
-@media (max-width: 52rem) {
-  .layout {
-    grid-template-columns: 1fr;
-  }
-}
-
-.sidebar,
-.content {
-  display: grid;
-  gap: 1rem;
+.layout > * {
   min-width: 0;
 }
 
+.area-search {
+  grid-area: search;
+}
+
+.area-status {
+  grid-area: status;
+}
+
+.area-demo {
+  grid-area: demo;
+}
+
+.area-results {
+  grid-area: results;
+}
+
+@media (max-width: 60rem) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto;
+    grid-template-areas:
+      'search'
+      'results'
+      'status'
+      'demo';
+    padding: 0.5rem 1rem 2rem;
+  }
+}
+
+.content {
+  display: grid;
+  gap: 1rem;
+}
+
+/* Long words (provider ids, run ids, flight keys) wrap inside their panel instead of widening it. */
 .panel {
+  min-width: 0;
+  overflow-wrap: anywhere;
   background: var(--surface-1);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 1rem;
+}
+
+/* Wide tables scroll inside their panel. */
+.table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 .muted {
@@ -147,8 +192,12 @@ button {
   color: inherit;
 }
 
+/* Full width of the panel, never wider: a <select> is otherwise as wide as its longest option. */
 select,
-input[type='number'] {
+input[type='text'] {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   padding: 0.4rem 0.5rem;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -342,12 +391,18 @@ summary {
 
 .itinerary {
   display: flex;
+  flex-wrap: wrap; /* on narrow screens the price block moves under the details */
   justify-content: space-between;
   gap: 1rem;
   background: var(--surface-1);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 0.75rem 1rem;
+}
+
+.itinerary-main {
+  flex: 1 1 18rem;
+  min-width: 0;
 }
 
 .itinerary-title {
@@ -383,6 +438,7 @@ summary {
 }
 
 .itinerary-price {
+  flex: 0 0 auto;
   display: grid;
   justify-items: end;
   align-content: start;
@@ -412,11 +468,13 @@ summary {
 /* Charts (plain SVG) */
 .charts {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(16rem, 100%), 1fr));
   gap: 1rem;
 }
 
 .chart {
+  min-width: 0;
+  overflow: hidden;
   margin: 0;
   background: var(--surface-1);
   border: 1px solid var(--border);
@@ -430,9 +488,9 @@ summary {
 }
 
 .chart svg {
+  display: block;
   width: 100%;
   height: auto;
-  overflow: visible;
 }
 
 .chart .mark {

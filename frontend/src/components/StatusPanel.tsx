@@ -86,23 +86,25 @@ function RunDetails({ run }: { run: IngestionRun }) {
 
       {report && (
         <>
-          <table className="providers">
-            <caption className="visually-hidden">Providers in the latest run</caption>
-            <thead>
-              <tr>
-                <th scope="col">Provider</th>
-                <th scope="col">Result</th>
-                <th scope="col">Partitions</th>
-                <th scope="col">Breaker</th>
-                <th scope="col">Failures</th>
-              </tr>
-            </thead>
-            <tbody>
-              {report.providers.map((provider) => (
-                <ProviderRow key={provider.provider} provider={provider} />
-              ))}
-            </tbody>
-          </table>
+          <div className="table-scroll">
+            <table className="providers">
+              <caption className="visually-hidden">Providers in the latest run</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Provider</th>
+                  <th scope="col">Result</th>
+                  <th scope="col">Partitions</th>
+                  <th scope="col">Breaker</th>
+                  <th scope="col">Failures</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.providers.map((provider) => (
+                  <ProviderRow key={provider.provider} provider={provider} />
+                ))}
+              </tbody>
+            </table>
+          </div>
           <details>
             <summary>Days</summary>
             <ul className="days">
