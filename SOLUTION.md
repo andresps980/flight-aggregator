@@ -31,6 +31,8 @@ links to the ADRs, which hold the full reasoning.
 | Two search indexes, `(final_price, id)` and `(origin, destination, final_price, id)`, chosen by `EXPLAIN` on 1M rows | [ADR-0020](docs/adr/0020-search-indexes.md) |
 | Opaque, unsigned keyset cursor `v1|price|id|filter fingerprint` | [ADR-0021](docs/adr/0021-search-cursor.md) |
 | Redis cache-aside as a decorator of the query ports, keyed by a transactional data version; optional at runtime | [ADR-0022](docs/adr/0022-search-cache.md) |
+| Dashboard "real time" by polling the latest ingestion run (30 s, 3 s while running), never auto-replacing results | [ADR-0023](docs/adr/0023-real-time-by-polling.md) |
+| Frontend types generated from the OpenAPI description; Vitest + RTL + MSW; ESLint + Prettier; Node 26; runtime config | [ADR-0024](docs/adr/0024-contract-generated-client-and-frontend-toolchain.md) |
 
 ### Core domain (spec 001)
 
@@ -127,6 +129,14 @@ produces a report. The flow diagram is in [architecture.md](docs/architecture.md
 **Partial results.** A failed partition never fails the run: a provider is `COMPLETED`, `PARTIAL` or `FAILED` by its
 partitions, and the run is `FAILED` only if every provider failed (no exception either way). A day is published if at
 least one provider delivered it, naming the missing providers, so the persistence spec can keep their previous data.
+
+The dashboard's demo controls make this visible (spec 006). Below, Mock-Gamma was forced down through gds-mock's admin
+API and a run started with *Refresh data*: the run is `PARTIAL`, Gamma `FAILED` on all 7 partitions with its breaker
+`OPEN`, Alpha and Beta `COMPLETED`; no day was replaced (0 itineraries stored, every day `KEPT_STALE`, ADR-0017), so
+search keeps serving the previous, more complete data with `STALE` badges instead of dropping Gamma's offers.
+
+![Data status after a Mock-Gamma outage: run PARTIAL, mock-gamma FAILED 0/7 with breaker OPEN, demo controls with the
+Gamma outage switched on](docs/images/dashboard-outage.png)
 
 **Reconciliation.** With no failures, every figure of the report equals gds-mock's `/admin/world/stats`, for the run
 and for each day: records and malformed records per reason per provider, offers received, discards per reason,
@@ -298,6 +308,68 @@ breaker records `Error`s too; the cache format is pinned by a golden test.
 - With Redis paused, the `SET`s that timed out had already been written to the socket; Redis ran them when it resumed.
   Harmless (the value is what PostgreSQL returned), but the recovery test first expected the pre-outage page.
 
+### Dashboard (spec 006)
+
+`frontend/`: React 19 + TypeScript + Vite, no state-management, UI, chart or date library (runtime dependencies:
+`react`, `react-dom`), built into static files served by an unprivileged nginx that also proxies `/api` to the
+aggregator. Walkthrough for backend developers: [docs/frontend.md](docs/frontend.md).
+
+| Decision | Where |
+|---|---|
+| Search on submit, filters in the URL (shareable, back/forward), destinations filtered by the catalog's routes, dates with freshness | spec 006 AC-1 – AC-6 |
+| Keyset "Load more"; short or empty pages while `hasMore` are followed automatically (≤ 5 empty in a row); no total | AC-12 – AC-14, ADR-0008 |
+| Times shown in UTC, labelled: the API has no airport time zones | AC-8, Q1 |
+| Polling instead of SSE/WebSocket; "New data available" only for runs that published data, results never replaced automatically | ADR-0023, AC-15 – AC-18 |
+| Types generated from `docs/api/openapi.json`; the chain Java → JSON → TypeScript is checked at both links | ADR-0024, AC-27 |
+| Demo controls behind a runtime flag (`DEMO_CONTROLS`, on in compose) written by the container's entrypoint | AC-22 |
+| Plain-SVG charts of the loaded results, one validated hue, a table alternative and tooltips | AC-19 |
+
+**Backend follow-up.** The ingestion endpoints are now in the OpenAPI description (`202` + `Location`, `409` with
+`runningIngestionId`, `200`/`400`/`404`), and a customizer makes the schemas exact: response properties required
+(nullable where they can be null), `ProblemDetail` flat, nullable references as `anyOf [$ref, null]`. The last one was
+**found by the generated types**: springdoc wrote `$ref` next to `type: null`, so the TypeScript said a run's report
+was never null. An ArchUnit rule keeps response records from omitting nulls, which would make "required" untrue. The
+contract check only compares in every build; regenerating `docs/api/openapi.json` is an explicit
+`-Popenapi-write` run that reports itself aborted, not passed, and is refused in CI.
+
+**How the frontend maps to the backend's principles.** Pure modules (`format`, `filters`, `charts`, `newData`) are the
+core and are unit-tested alone; `api/client.ts` is the only outbound adapter; hooks orchestrate and hold state;
+components only render. SRP: one component or hook per concern. DIP-like: components never call `fetch`. Not
+abstracted: no repository/service layers or dependency injection — at this size they would be ceremony.
+
+**Measured.** `npm run check` (types regenerated and diffed, Prettier, ESLint, `tsc`, 118 tests with coverage):
+**7 s**; coverage 99.7 % lines / 95.5 % branches (gate 80 / 70). Production bundle 243 kB JS (**76 kB gzipped**),
+5.5 kB CSS. Image smoke test (22 checks): 10 s. `./mvnw verify` (both modules): 65 s.
+
+Default compose stack, AC-25/AC-30 checked by hand: five services healthy, dashboard at <http://localhost:3000>,
+searches return data after the first run, *Refresh data* → `202` then `409`, nginx finds the aggregator again after a
+restart (`502` meanwhile). The resilience demo through the dashboard's proxy: Mock-Beta forced down, manual run →
+`PARTIAL`, Beta `FAILED 0/7` with its breaker `OPEN`, every day `KEPT_STALE`, results `STALE`.
+
+**Found while implementing:**
+- msw 3 renamed `onUnhandledRequest` to `onUnhandledFrame`; the old name was silently ignored, so an unexpected request
+  only warned. Found by `tsc`, not by a failing test.
+- Prettier inherited the repository's 4-space `.editorconfig`; the frontend now pins 2 spaces.
+- The React hooks lint rule against setting state inside effects pushed the design to start searches from events
+  (load, submit, back/forward, reload) instead of "filters changed" effects — simpler to follow.
+- The compose healthcheck used `localhost`, which resolves to `::1` in the container while nginx listens on IPv4:
+  the dashboard worked but the service stayed unhealthy. Now `127.0.0.1`, and the smoke test runs that command.
+- **A layout bug found by hand** (the author, in Brave at 1170 px): the results column painted over the search form
+  and the status table. Grid/flex children cannot shrink below their widest content (the providers table, `<select>`s
+  as wide as their longest option) unless told to (`minmax(0, 1fr)`, `min-width: 0`). Fixed with named grid areas
+  (one column below 960 px, status and demo under the results), contained tables, wrapping and clipped SVGs, and
+  guarded by a **Playwright layout check in Chromium** at four widths, which also found a second bug: screen-reader
+  tables hidden with `overflow: hidden` (which does not apply to tables) widened the page at 768 px. The check fails on
+  the old layout and on a deliberately broken one.
+- Versions: TypeScript 5.9 and ESLint 9, the newest every tool's declared peer range accepts
+  (`openapi-typescript`, `typescript-eslint`, `eslint-plugin-jsx-a11y`), instead of forcing peers.
+
+**Changed after the reviews:** a superseded poll could flag "status unavailable", and a poll in flight during *Refresh
+data* could replace the new `RUNNING` run with the previous one (both reproduced by tests on the old code, then
+fixed); keyboard focus was lost after every search (the form remounted); a non-numeric max price was silently dropped
+by `<input type="number">`; repeated items across pages are de-duplicated; upstream URLs are validated before they
+reach the nginx config; the OpenAPI → types check runs locally too.
+
 ### AI tools used
 
 The code is developed with **Claude Code** under versioned guardrails ([ADR-0005](docs/adr/0005-ai-assisted-development.md)):
@@ -305,7 +377,14 @@ The code is developed with **Claude Code** under versioned guardrails ([ADR-0005
 - `CLAUDE.md` with project rules (architecture, testing, git workflow, language rule).
 - Skills: `spec-feature`, `implement-spec`, `adr`, `pr-description`.
 - Agents: `code-reviewer`, `spec-reviewer`, `test-engineer`.
-- Hooks: git guard, Spotless after edits, `./mvnw verify` before finishing a turn.
+- Hooks: git guard, Spotless / Prettier after edits, `./mvnw verify` and/or the frontend checks before finishing a
+  turn, for whatever changed.
+
+**The guardrails also constrain the agent itself.** In PR 8 the agent tried to register the new Prettier hook and
+`npm` permissions in `.claude/settings.json`; Claude Code's auto-mode classifier blocked the edit as
+*self-modification* (an agent widening its own permissions or hooks). The agent wrote the hook script, explained the
+exact change, and the author applied it by hand and committed it. Changes to the agent's own rules go through a human
+([docs/ai/008](docs/ai/008-dashboard.md)).
 
 Every prompt and agent run is logged in [docs/ai/](docs/ai/README.md).
 
@@ -517,5 +596,22 @@ Search and cache (spec 005):
 - **Selective filters outside the indexes** (e.g. a rare carrier on its own) scan more of the price index; measured
   combinations are in ADR-0020.
 - **Search is unauthenticated and not rate limited**, like the rest of the API.
+
+Dashboard (spec 006):
+
+- **Times are UTC only**: the API exposes no airport time zones; local times would need a zone per airport in the
+  catalog.
+- **Polling, not push**: up to 30 s before a scheduled run is noticed, and every open tab polls (one primary-key read
+  every 30 s, every 3 s during a run). SSE is the upgrade path (ADR-0023).
+- **Charts describe the loaded results**, not the whole result set (there is no total by design).
+- **Demo controls and Refresh are unauthenticated and not CSRF-protected**: any page the user visits could POST to
+  `localhost:3000/api/v1/ingestions` or toggle a gds-mock outage. Acceptable for a local demo stack (gds-mock's admin
+  API is published unauthenticated on 8081 anyway); production would put authentication in front, disable
+  `DEMO_CONTROLS`, and check `Origin` on state-changing requests.
+- **No browser end-to-end flows**: behaviour is tested in jsdom with MSW, layout in headless Chromium with a mocked
+  API (one engine, four widths), the image with a smoke test, and the stack by hand.
+- **`npm audit`: 7 moderate advisories** in `minimatch` inside the dev-only lint toolchain (`typescript-eslint`); they
+  concern glob patterns we write ourselves. Production dependencies audit clean. Accepted until upstream updates.
+- **Pinned behind the latest majors**: TypeScript 5.9 and ESLint 9 until the tools support TypeScript 7 / ESLint 10.
 
 *To be completed:* what would change for production.

@@ -28,3 +28,33 @@ project_dir() {
 current_branch() {
   git -C "$(project_dir)" rev-parse --abbrev-ref HEAD 2>/dev/null || echo ""
 }
+
+# Reads repository-relative paths on stdin and prints which quality gates they affect, one per line, each at most
+# once: "backend" (Maven build: poms, wrapper, module sources) and/or "frontend" (anything under frontend/, plus
+# docs/api/openapi.json, from which the frontend's types are generated). Other docs, specs and CI files affect
+# neither. Used by verify-on-stop.sh and .githooks/pre-push (spec 006 AC-29).
+classify_paths() {
+  local path backend=0 frontend=0
+  while IFS= read -r path; do
+    case "$path" in
+      "") ;;
+      frontend/* | docs/api/openapi.json) frontend=1 ;;
+      pom.xml | */pom.xml | mvnw | mvnw.cmd | .mvn/* | */src/*) backend=1 ;;
+    esac
+  done
+  [ "$backend" = 1 ] && echo backend
+  [ "$frontend" = 1 ] && echo frontend
+  return 0
+}
+
+# The frontend checks (format, lint, types, unit tests with coverage), installing dependencies first if needed.
+run_frontend_checks() {
+  local dir
+  dir="$(project_dir)/frontend"
+  command -v npm >/dev/null 2>&1 || { echo "npm not found: skipping the frontend checks" >&2; return 0; }
+  # Install when node_modules is missing or older than the lock file (dependencies changed since the last install).
+  if [ ! -f "$dir/node_modules/.package-lock.json" ] || [ "$dir/package-lock.json" -nt "$dir/node_modules/.package-lock.json" ]; then
+    npm --prefix "$dir" ci --no-audit --no-fund || return 1
+  fi
+  npm --prefix "$dir" run --silent check
+}

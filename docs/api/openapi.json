@@ -1,15 +1,57 @@
 {
   "openapi" : "3.1.0",
   "info" : {
-    "title" : "Flight Aggregator search API",
-    "description" : "Search over the aggregated itineraries (spec 005). Errors are RFC 9457 problem details.",
+    "title" : "Flight Aggregator API",
+    "description" : "Search over the aggregated itineraries (spec 005) and ingestion runs (spec 004). Errors are RFC 9457 problem details.",
     "version" : "v1"
   },
   "tags" : [ {
     "name" : "Search",
     "description" : "Future itineraries, cheapest first, keyset-paginated"
+  }, {
+    "name" : "Ingestion",
+    "description" : "Ingestion runs: start one on demand and follow its status"
   } ],
   "paths" : {
+    "/api/v1/ingestions" : {
+      "post" : {
+        "tags" : [ "Ingestion" ],
+        "summary" : "Start an ingestion run",
+        "description" : "Starts a run in the background and returns it as RUNNING. Runs never overlap: while one is in progress (started by the schedule or by another request) the answer is 409.",
+        "operationId" : "start",
+        "responses" : {
+          "202" : {
+            "description" : "The run started; follow it at Location",
+            "headers" : {
+              "Location" : {
+                "description" : "URL of the run",
+                "style" : "simple",
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            },
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/IngestionRunResponse"
+                }
+              }
+            }
+          },
+          "409" : {
+            "description" : "A run is already in progress",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/IngestionAlreadyRunningProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/itineraries" : {
       "get" : {
         "tags" : [ "Search" ],
@@ -111,6 +153,85 @@
         }
       }
     },
+    "/api/v1/ingestions/{id}" : {
+      "get" : {
+        "tags" : [ "Ingestion" ],
+        "summary" : "Ingestion run by id",
+        "operationId" : "byId",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "description" : "Run id, as returned by POST",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "The run",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/IngestionRunResponse"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "The id is not a UUID",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "No run with this id (runs are kept for 7 days)",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/ingestions/latest" : {
+      "get" : {
+        "tags" : [ "Ingestion" ],
+        "summary" : "Latest ingestion run",
+        "description" : "The most recently started run, in any status (RUNNING included).",
+        "operationId" : "latest",
+        "responses" : {
+          "200" : {
+            "description" : "The latest run",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/IngestionRunResponse"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "No ingestion has run yet",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/catalog" : {
       "get" : {
         "tags" : [ "Search" ],
@@ -134,8 +255,300 @@
   },
   "components" : {
     "schemas" : {
+      "IngestionAlreadyRunningProblem" : {
+        "type" : "object",
+        "description" : "RFC 9457 problem detail of a POST refused because a run is in progress",
+        "properties" : {
+          "type" : {
+            "type" : "string",
+            "example" : "about:blank"
+          },
+          "title" : {
+            "type" : "string",
+            "example" : "Ingestion already running"
+          },
+          "status" : {
+            "type" : "integer",
+            "format" : "int32",
+            "example" : 409
+          },
+          "detail" : {
+            "type" : "string",
+            "example" : "Ingestion 46369dfb-0078-4b6e-b27d-5d3e7c96e870 is in progress"
+          },
+          "instance" : {
+            "type" : "string",
+            "example" : "/api/v1/ingestions"
+          },
+          "runningIngestionId" : {
+            "type" : "string",
+            "description" : "Id of the run in progress; absent in the few milliseconds after it took the lock and before its row is visible",
+            "example" : "46369dfb-0078-4b6e-b27d-5d3e7c96e870"
+          }
+        },
+        "required" : [ "detail", "instance", "status", "title", "type" ]
+      },
+      "DayDocument" : {
+        "type" : "object",
+        "description" : "What the run did with one horizon day",
+        "properties" : {
+          "day" : {
+            "type" : "string"
+          },
+          "contributing" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "missing" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "outcome" : {
+            "type" : "string",
+            "enum" : [ "REPLACED", "PUBLISHED_INCOMPLETE", "KEPT_STALE", "NO_DATA", "WRITE_FAILED" ]
+          },
+          "published" : {
+            "type" : "boolean"
+          },
+          "storedItineraries" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "misfiledItineraries" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "statistics" : {
+            "$ref" : "#/components/schemas/StatisticsDocument"
+          }
+        },
+        "required" : [ "contributing", "day", "misfiledItineraries", "missing", "outcome", "published", "statistics", "storedItineraries" ]
+      },
+      "FailureDocument" : {
+        "type" : "object",
+        "description" : "A partition (provider, day) that could not be fetched",
+        "properties" : {
+          "day" : {
+            "type" : "string"
+          },
+          "kind" : {
+            "type" : "string",
+            "enum" : [ "TIMEOUT", "SERVER_ERROR", "CLIENT_ERROR", "IO_ERROR", "MALFORMED_DOCUMENT", "CIRCUIT_OPEN", "RUN_TIMEOUT", "UNEXPECTED_ERROR" ]
+          },
+          "attempts" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "detail" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "attempts", "day", "detail", "kind" ]
+      },
+      "IngestionRunResponse" : {
+        "type" : "object",
+        "description" : "An ingestion run",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "description" : "Run id (UUID)",
+            "example" : "46369dfb-0078-4b6e-b27d-5d3e7c96e870"
+          },
+          "trigger" : {
+            "type" : "string",
+            "description" : "What started the run",
+            "enum" : [ "SCHEDULED", "MANUAL" ]
+          },
+          "status" : {
+            "type" : "string",
+            "description" : "RUNNING; COMPLETED; PARTIAL: some partition failed or a day could not be written; FAILED: every provider failed, an unexpected error, or the run lost its lock; ABORTED: its process died (marked by the next run)",
+            "enum" : [ "RUNNING", "COMPLETED", "PARTIAL", "FAILED", "ABORTED" ]
+          },
+          "startedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "finishedAt" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time",
+            "description" : "Null while RUNNING"
+          },
+          "durationMs" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int64",
+            "description" : "Null while RUNNING"
+          },
+          "failure" : {
+            "type" : [ "string", "null" ],
+            "description" : "Generic failure message (details are in the log); set for FAILED and ABORTED runs"
+          },
+          "report" : {
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/ReportDocument"
+            }, {
+              "type" : "null"
+            } ],
+            "description" : "The ingestion report: set once the run finished normally (COMPLETED, PARTIAL, or FAILED because every provider failed); null while RUNNING and for runs that failed or aborted without one"
+          }
+        },
+        "required" : [ "durationMs", "failure", "finishedAt", "id", "report", "startedAt", "status", "trigger" ]
+      },
+      "ProviderDocument" : {
+        "type" : "object",
+        "description" : "What one provider delivered in the run",
+        "properties" : {
+          "provider" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "COMPLETED", "PARTIAL", "FAILED" ]
+          },
+          "partitionsRequested" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "partitionsSucceeded" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "partitionsFailed" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "failures" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/FailureDocument"
+            }
+          },
+          "attempts" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "duration" : {
+            "type" : "string"
+          },
+          "durationMs" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "circuitState" : {
+            "type" : "string",
+            "description" : "State of the provider's circuit breaker at the end of the run",
+            "enum" : [ "CLOSED", "OPEN", "HALF_OPEN" ]
+          },
+          "recordsReceived" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "offersReceived" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "malformed" : {
+            "type" : "object",
+            "additionalProperties" : {
+              "type" : "integer",
+              "format" : "int64"
+            }
+          }
+        },
+        "required" : [ "attempts", "circuitState", "duration", "durationMs", "failures", "malformed", "offersReceived", "partitionsFailed", "partitionsRequested", "partitionsSucceeded", "provider", "recordsReceived", "status" ]
+      },
+      "ReportDocument" : {
+        "type" : "object",
+        "description" : "Ingestion report of a finished run (spec 003, spec 004)",
+        "properties" : {
+          "runId" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "COMPLETED", "PARTIAL", "FAILED" ]
+          },
+          "startedAt" : {
+            "type" : "string"
+          },
+          "finishedAt" : {
+            "type" : "string"
+          },
+          "duration" : {
+            "type" : "string"
+          },
+          "durationMs" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "storedItineraries" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "misfiledItineraries" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "providers" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ProviderDocument"
+            }
+          },
+          "days" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/DayDocument"
+            }
+          },
+          "statistics" : {
+            "$ref" : "#/components/schemas/StatisticsDocument"
+          }
+        },
+        "required" : [ "days", "duration", "durationMs", "finishedAt", "misfiledItineraries", "providers", "runId", "startedAt", "statistics", "status", "storedItineraries" ]
+      },
+      "StatisticsDocument" : {
+        "type" : "object",
+        "properties" : {
+          "offersReceivedByProvider" : {
+            "type" : "object",
+            "additionalProperties" : {
+              "type" : "integer",
+              "format" : "int64"
+            }
+          },
+          "discardedByReason" : {
+            "type" : "object",
+            "additionalProperties" : {
+              "type" : "integer",
+              "format" : "int64"
+            }
+          },
+          "duplicatesMerged" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "itinerariesProduced" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "totalReceived" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "totalDiscarded" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        },
+        "required" : [ "discardedByReason", "duplicatesMerged", "itinerariesProduced", "offersReceivedByProvider", "totalDiscarded", "totalReceived" ]
+      },
       "ProblemDetail" : {
         "type" : "object",
+        "additionalProperties" : true,
         "properties" : {
           "type" : {
             "type" : "string",
@@ -154,10 +567,6 @@
           "instance" : {
             "type" : "string",
             "format" : "uri"
-          },
-          "properties" : {
-            "type" : "object",
-            "additionalProperties" : { }
           }
         }
       },
@@ -186,7 +595,8 @@
             "format" : "date-time",
             "description" : "Since when the day is stale; null unless STALE"
           }
-        }
+        },
+        "required" : [ "missingProviders", "publishedAt", "staleSince", "status" ]
       },
       "ItineraryPageResponse" : {
         "type" : "object",
@@ -207,7 +617,8 @@
             "type" : "boolean",
             "description" : "Whether more results follow"
           }
-        }
+        },
+        "required" : [ "hasMore", "items", "nextCursor" ]
       },
       "ItineraryResponse" : {
         "type" : "object",
@@ -283,7 +694,8 @@
           "freshness" : {
             "$ref" : "#/components/schemas/FreshnessResponse"
           }
-        }
+        },
+        "required" : [ "arrivalAt", "basePrice", "carrier", "currency", "departureAt", "departureDate", "destination", "finalPrice", "freshness", "itineraryKey", "origin", "providers", "segments", "selectedProvider", "stops" ]
       },
       "SegmentResponse" : {
         "type" : "object",
@@ -307,7 +719,8 @@
             "type" : "string",
             "format" : "date-time"
           }
-        }
+        },
+        "required" : [ "arrivalAt", "departureAt", "destination", "flightNumber", "origin" ]
       },
       "CatalogDateResponse" : {
         "type" : "object",
@@ -319,7 +732,8 @@
           "freshness" : {
             "$ref" : "#/components/schemas/FreshnessResponse"
           }
-        }
+        },
+        "required" : [ "date", "freshness" ]
       },
       "CatalogResponse" : {
         "type" : "object",
@@ -356,7 +770,8 @@
               "$ref" : "#/components/schemas/RouteResponse"
             }
           }
-        }
+        },
+        "required" : [ "carriers", "dates", "destinations", "origins", "routes" ]
       },
       "RouteResponse" : {
         "type" : "object",
@@ -370,7 +785,8 @@
               "type" : "string"
             }
           }
-        }
+        },
+        "required" : [ "destinations", "origin" ]
       }
     }
   }

@@ -21,9 +21,10 @@ spring:
     problemdetails:
       enabled: true
 
-# OpenAPI description (spec 005, AC-24): the search contract the dashboard consumes; kept in docs/api/openapi.json.
+# OpenAPI description (spec 005 AC-24, spec 006): every /api/v1 endpoint; kept in docs/api/openapi.json, from which
+# the dashboard generates its TypeScript types.
 springdoc:
-  paths-to-match: /api/v1/itineraries, /api/v1/catalog
+  paths-to-match: /api/v1/**
 
 management:
   endpoints:

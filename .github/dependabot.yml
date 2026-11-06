@@ -13,6 +13,30 @@ updates:
       build-plugins:
         patterns: ["org.jacoco*", "com.diffplug.spotless*", "org.apache.maven.plugins*"]
 
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      react:
+        patterns: ["react", "react-dom", "@types/react", "@types/react-dom"]
+      build-and-test:
+        patterns: ["vite", "@vitejs/*", "vitest", "@vitest/*", "jsdom", "msw", "@testing-library/*", "@playwright/*"]
+      lint-and-format:
+        patterns: ["eslint", "@eslint/*", "eslint-plugin-*", "typescript-eslint", "prettier", "globals"]
+      typescript:
+        patterns: ["typescript", "openapi-typescript"]
+
+  - package-ecosystem: docker
+    directory: /frontend
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+
   - package-ecosystem: github-actions
     directory: /
     schedule:

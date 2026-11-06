@@ -90,8 +90,21 @@ public final class HttpProviderFeed implements ProviderFeed {
                     throw cancelled(null);
                 }
                 return circuitBreaker.executeSupplier(() -> {
-                    attempts.incrementAndGet();
-                    return attempt(day);
+                    int attempt = attempts.incrementAndGet();
+                    try {
+                        return attempt(day);
+                    } catch (AttemptFailedException failure) {
+                        // Each failed attempt, retried or not, so a run's (or a test's) extra attempts are explained.
+                        LOG.info(
+                                "Attempt {}/{} for {} {} failed: {} ({})",
+                                attempt,
+                                settings.retry().maxAttempts(),
+                                provider(),
+                                day,
+                                failure.kind(),
+                                failure.getMessage());
+                        throw failure;
+                    }
                 });
             });
             return buffer.toPartition(provider(), day, attempts.get());

@@ -237,6 +237,24 @@ only in the schema — ingestion writes `itinerary`, `day_snapshot` and `data_ve
 An ingestion run that replaces a day or marks it stale increments `data_version` in the same transaction, so the next
 request misses and reads the new data; old entries expire by TTL, nothing is deleted.
 
+## Dashboard (spec 006)
+
+The frontend is a separate npm project, not a Maven module; its structure and data flow are in
+[frontend.md](frontend.md). At runtime it is one more client of the REST API, behind nginx on the same origin:
+
+```mermaid
+flowchart LR
+    browser([Browser]) -->|static files, /config.json| nginx[frontend: nginx]
+    nginx -->|/api/*| agg[flight-aggregator]
+    nginx -.->|/gds-admin/providers… only if DEMO_CONTROLS| mock[gds-mock /admin]
+    browser -. polls /api/v1/ingestions/latest every 30 s / 3 s .-> nginx
+```
+
+The contract between the two is `docs/api/openapi.json`: generated from the controllers (checked by
+`OpenApiContractIT`) and turned into the dashboard's TypeScript types (checked in CI), see
+[ADR-0024](adr/0024-contract-generated-client-and-frontend-toolchain.md). Real time is polling, not push
+([ADR-0023](adr/0023-real-time-by-polling.md)).
+
 ## Dependency rule
 
 `infrastructure → application → domain`. Inner layers know nothing about outer ones, and `domain` and
