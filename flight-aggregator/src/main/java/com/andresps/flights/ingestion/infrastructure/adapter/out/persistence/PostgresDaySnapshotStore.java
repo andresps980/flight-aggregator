@@ -91,6 +91,7 @@ public final class PostgresDaySnapshotStore implements DaySnapshotStore, Snapsho
                     .param(Math.toIntExact(rows))
                     .param(write.runId())
                     .update();
+            bumpDataVersion();
         });
     }
 
@@ -108,21 +109,38 @@ public final class PostgresDaySnapshotStore implements DaySnapshotStore, Snapsho
 
     @Override
     public void markStale(LocalDate day, UUID runId, Instant at) {
-        jdbc.sql("""
-                        UPDATE day_snapshot SET stale_since = COALESCE(stale_since, ?), last_run_id = ?
-                        WHERE departure_date = ?""").param(utc(at)).param(runId).param(day).update();
+        transactions.executeWithoutResult(status -> {
+            int marked = jdbc.sql("""
+                            UPDATE day_snapshot SET stale_since = COALESCE(stale_since, ?), last_run_id = ?
+                            WHERE departure_date = ?""").param(utc(at)).param(runId).param(day).update();
+            if (marked > 0) {
+                bumpDataVersion();
+            }
+        });
     }
 
     @Override
     public void deleteDaysBefore(LocalDate day) {
         transactions.executeWithoutResult(status -> {
-            jdbc.sql("DELETE FROM itinerary WHERE departure_date < ?")
+            int rows = jdbc.sql("DELETE FROM itinerary WHERE departure_date < ?")
                     .param(day)
                     .update();
-            jdbc.sql("DELETE FROM day_snapshot WHERE departure_date < ?")
+            int days = jdbc.sql("DELETE FROM day_snapshot WHERE departure_date < ?")
                     .param(day)
                     .update();
+            if (rows + days > 0) {
+                bumpDataVersion();
+            }
         });
+    }
+
+    /**
+     * Tells the search cache that the read model changed (ADR-0022). The last statement of each writing transaction:
+     * the new version becomes visible exactly with the data, and the row lock it takes (shared by concurrent day
+     * writes) is held only until the commit that follows.
+     */
+    private void bumpDataVersion() {
+        jdbc.sql("UPDATE data_version SET version = version + 1").update();
     }
 
     @Override

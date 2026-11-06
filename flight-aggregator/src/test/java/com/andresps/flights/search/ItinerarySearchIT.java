@@ -114,7 +114,7 @@ class ItinerarySearchIT extends SearchSpringTest {
         @Test
         @DisplayName("AC-2: codes are case-insensitive and trimmed; 100 and 100.00 are the same maxPrice")
         void normalization() {
-            assertThat(keys(ok("?origin=mad&destination=%20jfk%20&carrier=ib")))
+            assertThat(keys(ok("?origin=mad&destination= jfk &carrier=ib")))
                     .isEqualTo(keys(ok("?origin=MAD&destination=JFK&carrier=IB")));
             assertThat(keys(ok("?maxPrice=400"))).isEqualTo(keys(ok("?maxPrice=400.00")));
         }

@@ -1,0 +1,377 @@
+{
+  "openapi" : "3.1.0",
+  "info" : {
+    "title" : "Flight Aggregator search API",
+    "description" : "Search over the aggregated itineraries (spec 005). Errors are RFC 9457 problem details.",
+    "version" : "v1"
+  },
+  "tags" : [ {
+    "name" : "Search",
+    "description" : "Future itineraries, cheapest first, keyset-paginated"
+  } ],
+  "paths" : {
+    "/api/v1/itineraries" : {
+      "get" : {
+        "tags" : [ "Search" ],
+        "summary" : "Search itineraries",
+        "description" : "Itineraries departing after now that match every given filter, ordered by final price ascending (ties by an internal id). Keep requesting with nextCursor while hasMore is true. No total count is returned.",
+        "operationId" : "search",
+        "parameters" : [ {
+          "name" : "origin",
+          "in" : "query",
+          "description" : "Origin airport (IATA, 3 letters, case-insensitive)",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "pattern" : "^[A-Za-z]{3}$"
+          },
+          "example" : "MAD"
+        }, {
+          "name" : "destination",
+          "in" : "query",
+          "description" : "Final destination airport (IATA, 3 letters, case-insensitive)",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "pattern" : "^[A-Za-z]{3}$"
+          },
+          "example" : "JFK"
+        }, {
+          "name" : "date",
+          "in" : "query",
+          "description" : "UTC day of the first departure; absent: every future day. From yesterday to today + 365 days",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "example" : "2026-11-08"
+        }, {
+          "name" : "maxPrice",
+          "in" : "query",
+          "description" : "Maximum final price in EUR, inclusive, at most 2 decimals",
+          "required" : false,
+          "schema" : {
+            "type" : "number",
+            "maximum" : 9.9999999999E8,
+            "minimum" : 0
+          },
+          "example" : 650
+        }, {
+          "name" : "carrier",
+          "in" : "query",
+          "description" : "Airline (IATA, 2 characters A-Z/0-9, case-insensitive)",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "pattern" : "^[A-Za-z0-9]{2}$"
+          },
+          "example" : "IB"
+        }, {
+          "name" : "limit",
+          "in" : "query",
+          "description" : "Items per page",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "default" : 20,
+            "maximum" : 100,
+            "minimum" : 1
+          }
+        }, {
+          "name" : "cursor",
+          "in" : "query",
+          "description" : "Opaque nextCursor of the previous page; only valid with the same filters",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "A page of results",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ItineraryPageResponse"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid parameter, or a cursor that is malformed or was issued for other filters",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/catalog" : {
+      "get" : {
+        "tags" : [ "Search" ],
+        "summary" : "Search catalog",
+        "description" : "Sorted origins, destinations, carriers, departure dates (with freshness) and routes over the itineraries still to depart.",
+        "operationId" : "catalog",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CatalogResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components" : {
+    "schemas" : {
+      "ProblemDetail" : {
+        "type" : "object",
+        "properties" : {
+          "type" : {
+            "type" : "string",
+            "format" : "uri"
+          },
+          "title" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "detail" : {
+            "type" : "string"
+          },
+          "instance" : {
+            "type" : "string",
+            "format" : "uri"
+          },
+          "properties" : {
+            "type" : "object",
+            "additionalProperties" : { }
+          }
+        }
+      },
+      "FreshnessResponse" : {
+        "type" : "object",
+        "description" : "Freshness of the itinerary's departure day",
+        "properties" : {
+          "status" : {
+            "type" : "string",
+            "description" : "COMPLETE: every provider; INCOMPLETE: some providers missing; STALE: the latest run could not refresh the day, previous data kept (takes precedence)",
+            "enum" : [ "COMPLETE", "INCOMPLETE", "STALE" ]
+          },
+          "publishedAt" : {
+            "type" : "string",
+            "format" : "date-time",
+            "description" : "When the day's data was written"
+          },
+          "missingProviders" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "staleSince" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time",
+            "description" : "Since when the day is stale; null unless STALE"
+          }
+        }
+      },
+      "ItineraryPageResponse" : {
+        "type" : "object",
+        "description" : "A page of search results",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "description" : "Matching itineraries, cheapest first",
+            "items" : {
+              "$ref" : "#/components/schemas/ItineraryResponse"
+            }
+          },
+          "nextCursor" : {
+            "type" : [ "string", "null" ],
+            "description" : "Cursor for the next page, null when hasMore is false. A page served from the cache omits itineraries that departed after it was cached, so it may be shorter than limit, or even empty, while hasMore is true: keep paging until hasMore is false."
+          },
+          "hasMore" : {
+            "type" : "boolean",
+            "description" : "Whether more results follow"
+          }
+        }
+      },
+      "ItineraryResponse" : {
+        "type" : "object",
+        "description" : "An aggregated itinerary",
+        "properties" : {
+          "itineraryKey" : {
+            "type" : "string",
+            "description" : "Stable identity: flight numbers, airports and departure instants",
+            "example" : "IB6251:MAD-JFK@2026-11-08T10:15:00Z"
+          },
+          "origin" : {
+            "type" : "string",
+            "example" : "MAD"
+          },
+          "destination" : {
+            "type" : "string",
+            "example" : "JFK"
+          },
+          "departureDate" : {
+            "type" : "string",
+            "format" : "date",
+            "description" : "UTC date of the first departure"
+          },
+          "departureAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "arrivalAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "carrier" : {
+            "type" : "string",
+            "description" : "Airline operating every segment",
+            "example" : "IB"
+          },
+          "stops" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "segments" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/SegmentResponse"
+            }
+          },
+          "basePrice" : {
+            "type" : "number",
+            "description" : "Cheapest provider price, EUR",
+            "example" : 412.38
+          },
+          "finalPrice" : {
+            "type" : "number",
+            "description" : "Base price plus the OTA markup, EUR; the sort key",
+            "example" : 433.0
+          },
+          "currency" : {
+            "type" : "string",
+            "example" : "EUR"
+          },
+          "selectedProvider" : {
+            "type" : "string",
+            "description" : "Provider of the selected (cheapest) offer",
+            "example" : "mock-alpha"
+          },
+          "providers" : {
+            "type" : "array",
+            "description" : "Every provider that offered it",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "freshness" : {
+            "$ref" : "#/components/schemas/FreshnessResponse"
+          }
+        }
+      },
+      "SegmentResponse" : {
+        "type" : "object",
+        "description" : "One flight of the itinerary",
+        "properties" : {
+          "flightNumber" : {
+            "type" : "string",
+            "example" : "IB6251"
+          },
+          "origin" : {
+            "type" : "string"
+          },
+          "destination" : {
+            "type" : "string"
+          },
+          "departureAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "arrivalAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "CatalogDateResponse" : {
+        "type" : "object",
+        "properties" : {
+          "date" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "freshness" : {
+            "$ref" : "#/components/schemas/FreshnessResponse"
+          }
+        }
+      },
+      "CatalogResponse" : {
+        "type" : "object",
+        "description" : "What can be searched right now",
+        "properties" : {
+          "origins" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "destinations" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "carriers" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "dates" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/CatalogDateResponse"
+            }
+          },
+          "routes" : {
+            "type" : "array",
+            "description" : "Each origin with the destinations it has flights to",
+            "items" : {
+              "$ref" : "#/components/schemas/RouteResponse"
+            }
+          }
+        }
+      },
+      "RouteResponse" : {
+        "type" : "object",
+        "properties" : {
+          "origin" : {
+            "type" : "string"
+          },
+          "destinations" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}

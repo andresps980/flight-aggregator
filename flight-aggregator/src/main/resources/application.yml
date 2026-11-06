@@ -9,15 +9,27 @@ spring:
     hikari:
       # A run holds one connection for its lock (ADR-0019) and up to max-concurrent-days write in parallel.
       maximum-pool-size: 10
+  # Search cache (spec 005, ADR-0022). REDIS_HOST is set by docker-compose. Short timeouts: a slow or absent Redis
+  # degrades to PostgreSQL reads instead of slowing searches down.
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 100ms
+      connect-timeout: 100ms
   mvc:
     problemdetails:
       enabled: true
+
+# OpenAPI description (spec 005, AC-24): the search contract the dashboard consumes; kept in docs/api/openapi.json.
+springdoc:
+  paths-to-match: /api/v1/itineraries, /api/v1/catalog
 
 management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,metrics
   endpoint:
     health:
       probes:
@@ -49,6 +61,11 @@ aggregator:
       enabled: true
       initial-delay: 10s
       fixed-delay: 15m
+  # Search API (spec 005): Redis cache-aside keyed by the data version; the TTL is only a safety net (ADR-0022).
+  search:
+    cache:
+      enabled: true
+      ttl: 10m
   # Day snapshots and run history (spec 004, ADR-0017).
   persistence:
     max-stale-age: 2h

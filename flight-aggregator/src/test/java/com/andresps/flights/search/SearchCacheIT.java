@@ -143,7 +143,7 @@ class SearchCacheIT extends SearchSpringTest {
             + "requests go back to Redis once it recovers")
     void redisHungThenRecovers() {
         long id = seedOne();
-        JsonNode cached = ok(SEARCH);
+        ok(SEARCH);
         JsonNode catalog = ok("/api/v1/catalog");
         rows.changePriceBehindTheCache(id, "399.00");
 
@@ -170,8 +170,9 @@ class SearchCacheIT extends SearchSpringTest {
         JsonNode again = ok(SEARCH);
         ok(SEARCH);
 
-        // the entry cached before the outage is still valid (same data version): served from Redis again
-        assertThat(again).isEqualTo(cached);
+        // served from Redis again. The SETs that timed out before the breaker opened had already been written to the
+        // socket, and Redis ran them when it resumed: the entry now holds PostgreSQL's current price, not the old one.
+        assertThat(again.get("items").get(0).get("finalPrice").decimalValue()).isEqualByComparingTo("399.00");
         assertThat(cacheCount("hit")).isGreaterThan(hits);
         assertThat(cacheBreaker.getState()).isEqualTo(CircuitBreaker.State.CLOSED);
     }

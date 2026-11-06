@@ -64,7 +64,17 @@ public class TestRedis {
                 .exec();
     }
 
+    /** Resumes a paused container; does nothing if it is running. */
     public static void unpause() {
+        Boolean paused = DockerClientFactory.instance()
+                .client()
+                .inspectContainerCmd(CONTAINER.getContainerId())
+                .exec()
+                .getState()
+                .getPaused();
+        if (!Boolean.TRUE.equals(paused)) {
+            return;
+        }
         DockerClientFactory.instance()
                 .client()
                 .unpauseContainerCmd(CONTAINER.getContainerId())
