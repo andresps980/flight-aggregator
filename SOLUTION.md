@@ -612,6 +612,9 @@ Dashboard (spec 006):
   API (one engine, four widths), the image with a smoke test, and the stack by hand.
 - **`npm audit`: 7 moderate advisories** in `minimatch` inside the dev-only lint toolchain (`typescript-eslint`); they
   concern glob patterns we write ourselves. Production dependencies audit clean. Accepted until upstream updates.
-- **Pinned behind the latest majors**: TypeScript 5.9 and ESLint 9 until the tools support TypeScript 7 / ESLint 10.
+- **Pinned behind the latest majors**: TypeScript 5.9 and ESLint 9 until the tools support TypeScript 7 / ESLint 10;
+  Dependabot ignores those majors with a documented revisit condition (the first such PRs, #10 and #11, were
+  declined — [docs/frontend.md](docs/frontend.md#version-constraints)). For the same reason Dependabot's security
+  update for `minimatch` reports "not possible" (the fix needs a major `typescript-eslint` does not accept yet).
 
 *To be completed:* what would change for production.

@@ -236,5 +236,20 @@ then results, then status and demo. Rules that keep content inside its panel:
 - `npm audit` reports 7 moderate advisories in `minimatch` inside the dev-only lint toolchain (`typescript-eslint`);
   they affect glob patterns we write ourselves, and production dependencies audit clean. Accepted until upstream
   updates.
-- TypeScript 5.9 and ESLint 9 rather than TypeScript 7 / ESLint 10: the newest versions every tool's declared peer
-  range accepts (`openapi-typescript`, `typescript-eslint`, `eslint-plugin-jsx-a11y`).
+- TypeScript 5.9 and ESLint 9 rather than TypeScript 7 / ESLint 10: see *Version constraints* below.
+
+## Version constraints
+
+Some majors cannot be installed yet without forcing peer dependencies (`--legacy-peer-deps`), which this project
+does not do. Dependabot ignores them (`.github/dependabot.yml`, `ignore`), each rule with its reason and revisit
+condition; decisions in [docs/ai/009](ai/009-dependabot-triage.md).
+
+| Package | Pinned to | Blocked by (declared peer range, as of 2026-11-06) | Revisit when | Dependabot |
+|---|---|---|---|---|
+| `typescript` | `~5.9` | `openapi-typescript` 7.13.0: `typescript ^5.x`; `typescript-eslint` 8.72.1: `typescript <6.1.0` | `openapi-typescript` supports TS ≥ 6 and `typescript-eslint` the target major | `>=6` ignored; #11 declined |
+| `eslint`, `@eslint/js` | `^9` | `eslint-plugin-jsx-a11y` 6.10.2: `eslint ^3 … ^9` | `eslint-plugin-jsx-a11y` declares ESLint 10 | `>=10` ignored; #10 declined |
+| `minimatch` (transitive, via `typescript-eslint`) | 10.x | `@typescript-eslint/typescript-estree` requires `minimatch ^10`; the advisories' first fixed version is 11.0.1 | `typescript-eslint` moves to `minimatch` 11 | security update "not possible" (dev-only, accepted; see *Limitations*) |
+
+To check a constraint: `npm view <package> peerDependencies` for the blocking package's latest version; to try a bump,
+`npm install -D <package>@<major>` must succeed without `--force` / `--legacy-peer-deps`, then `npm run check`,
+`npm run build` and `npm run test:layout`.
