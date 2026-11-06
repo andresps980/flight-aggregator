@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-11-04
-- **Related spec:** to be written (ingestion, search)
+- **Related spec:** [specs/004](../../specs/004-persistence-and-pipeline/spec.md), [specs/005](../../specs/005-search-api/spec.md); cache keying in [ADR-0022](0022-search-cache.md)
 
 ## Context
 

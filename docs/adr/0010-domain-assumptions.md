@@ -4,7 +4,7 @@
 - **Date:** 2026-11-04
 - **Related spec:** [specs/001-itinerary-aggregation](../../specs/001-itinerary-aggregation/spec.md) (refines the rule
   list: equal arrival/departure is invalid, `MIXED_AIRLINES` and `REVISITED_AIRPORT` are discard reasons, fixed
-  evaluation order); search to be written
+  evaluation order); [specs/005-search-api](../../specs/005-search-api/spec.md) (amends item 6)
 
 ## Context
 
@@ -29,7 +29,11 @@ We will assume:
    matches that airline).
 5. **Markup:** a configurable OTA markup, **5% by default**, applied to the selected cheapest price. Money is
    modelled with **`BigDecimal`** and rounded to 2 decimals with **`HALF_EVEN`** (banker's rounding).
-6. **Date filter:** search accepts an optional departure date; when absent it defaults to the **date of the request**.
+6. **Date filter:** search accepts an optional departure date (UTC day of the first departure). *Amended by
+   [spec 005](../../specs/005-search-api/spec.md) (2026-11-06):* when absent, search returns **every future
+   departure** (first departure strictly after the request instant), not just the request's date; with a date, that
+   UTC day only. **Departed itineraries are never returned**: the "already departed" rule of item 1 is applied again
+   at query time, because stored data can be up to one ingestion interval old.
 
 ## Alternatives considered
 
