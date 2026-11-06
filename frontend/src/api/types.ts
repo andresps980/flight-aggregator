@@ -21,9 +21,9 @@ export type IngestionAlreadyRunningProblem = Schemas['IngestionAlreadyRunningPro
 
 /** One gds-mock provider from `GET /admin/providers` (demo controls; gds-mock has no OpenAPI description). */
 export interface MockProvider {
-    id: string;
-    latencyMinMs: number;
-    latencyMaxMs: number;
-    errorRate: number;
-    outage: boolean;
+  id: string;
+  latencyMinMs: number;
+  latencyMaxMs: number;
+  errorRate: number;
+  outage: boolean;
 }
