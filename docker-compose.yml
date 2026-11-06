@@ -1,7 +1,7 @@
-# The stack so far: PostgreSQL, the mock GDS providers and the aggregator (spec 004). Redis and the frontend come in
-# later PRs.
+# The stack so far: PostgreSQL, Redis (search cache), the mock GDS providers and the aggregator (specs 004, 005). The
+# frontend comes in a later PR.
 #   docker compose up --build
-# The aggregator starts once PostgreSQL and gds-mock are healthy, runs its first ingestion ~10 s later and then every
+# The aggregator starts once PostgreSQL, Redis and gds-mock are healthy, runs its first ingestion ~10 s later and then every
 # 15 min. Any setting can be overridden with an environment variable (see docs/usage.md).
 services:
   postgres:
@@ -20,6 +20,20 @@ services:
       interval: 5s
       timeout: 3s
       start_period: 10s
+      retries: 10
+
+  # Search cache (spec 005, ADR-0022): a disposable cache, so no persistence; bounded memory with LRU eviction. Search
+  # keeps working from PostgreSQL if it is down.
+  redis:
+    image: redis:8
+    command: ["redis-server", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru", "--save", "", "--appendonly", "no"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      start_period: 5s
       retries: 10
 
   gds-mock:
@@ -57,12 +71,15 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
       gds-mock:
         condition: service_healthy
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/flights
       SPRING_DATASOURCE_USERNAME: flights
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-flights}
+      REDIS_HOST: redis
       GDS_MOCK_URL: http://gds-mock:8081
       AGGREGATOR_INGESTION_SCHEDULE_INITIAL_DELAY: ${INGESTION_INITIAL_DELAY:-10s}
       AGGREGATOR_INGESTION_SCHEDULE_FIXED_DELAY: ${INGESTION_FIXED_DELAY:-15m}

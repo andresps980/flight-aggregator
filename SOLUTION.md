@@ -28,6 +28,9 @@ links to the ADRs, which hold the full reasoning.
 | Each day is an atomic snapshot; a less complete day never wipes a more complete one (kept stale, at most 2 h) | [ADR-0017](docs/adr/0017-day-snapshot-replacement.md) |
 | Bulk load with PostgreSQL `COPY` (measured 1.8× faster than batched inserts) | [ADR-0018](docs/adr/0018-bulk-load.md) |
 | No concurrent runs across instances: session advisory lock on a dedicated connection | [ADR-0019](docs/adr/0019-ingestion-run-lock.md) |
+| Two search indexes, `(final_price, id)` and `(origin, destination, final_price, id)`, chosen by `EXPLAIN` on 1M rows | [ADR-0020](docs/adr/0020-search-indexes.md) |
+| Opaque, unsigned keyset cursor `v1|price|id|filter fingerprint` | [ADR-0021](docs/adr/0021-search-cursor.md) |
+| Redis cache-aside as a decorator of the query ports, keyed by a transactional data version; optional at runtime | [ADR-0022](docs/adr/0022-search-cache.md) |
 
 ### Core domain (spec 001)
 
@@ -242,6 +245,59 @@ Reproduce: `./mvnw -pl flight-aggregator verify -Pslow-tests -Dit.test=BulkLoadB
 - **The lock connection was shared by concurrent day coordinators** (found in review): it is now used under a lock,
   opened outside the pool, and any failure to confirm the lock counts as losing it.
 
+### Search API and cache (spec 005)
+
+`GET /api/v1/itineraries` (filters `origin`, `destination`, `date`, `maxPrice`, `carrier`; `limit`, `cursor`) and
+`GET /api/v1/catalog`, documented by OpenAPI ([docs/api/openapi.json](docs/api/openapi.json), checked by a test) and in
+[usage.md](docs/usage.md#search-spec-005). Flow: [architecture.md](docs/architecture.md#search-spec-005).
+
+| Decision | Where |
+|---|---|
+| New `search` feature. Use cases `ItinerarySearchService` / `CatalogService` (plain Java) validate, check the cursor and issue the next one through two outbound ports (`ItinerarySearchQuery`, `CatalogQuery`); no Java dependency on `ingestion`, both meet only in the schema. | spec 005 |
+| Date semantics: no `date` = every future departure; with `date` = that UTC day. Departed itineraries (first departure not strictly after now) are filtered at query time, and also dropped from cached pages. | ADR-0010 (amended), AC-3, AC-4, AC-20 |
+| Keyset on `(final_price, id)`, `limit + 1` rows to know whether more follow; the cursor carries a filter fingerprint, so a cursor reused with other filters is a `400`, not a silently wrong page. | ADR-0008, ADR-0021 |
+| Cache-aside in Redis as **decorators of the query ports**: the use case cannot tell. Keys = data version + normalized filters + limit + position. The version is a single row bumped as the last statement of every ingestion transaction that changes the read model, so invalidation is atomic with the commit and needs no deletion; TTL 10 min as a safety net. | ADR-0022 |
+| Redis is optional: 100 ms timeouts, failures read as misses, a Resilience4j breaker skips Redis for 30 s after repeated failures (WARN once), `search.cache` metric. Readiness doesn't depend on Redis. | AC-21 |
+| Codes compared as `bpchar` placeholders, so the `char(n)` columns are not cast and the indexes stay usable. | `ItinerarySearchSql` |
+
+**SOLID, pragmatically.** SRP: validation and cursor rules in the domain (`SearchCriteria`, `Cursor`, `PageSize`), paging
+in the use case, SQL in the adapter, caching in a decorator, failure handling in `ResilientCacheStore`. OCP: the cache
+was added without touching the use case or the SQL adapter; a different cache is another `CacheStore`. LSP: the
+decorators honour the port contract (same items and next position; fewer items only for departed flights, as the
+port's Javadoc allows). ISP: `DataVersionQuery` is its own port, used only by the decorators. DIP: the application owns
+every port. **Not abstracted:** the cache codec serialises the search records directly (a cache-only DTO layer would
+duplicate them; the key prefix `v1` is bumped if the format changes), and the controllers take raw strings so the use
+case owns every validation message.
+
+**Measured at 1M rows** (`SearchPerformanceIT`, Apple M1 Max, Docker 6 CPUs / 16 GB; full report with every plan:
+[docs/measurements/search-1m.md](docs/measurements/search-1m.md)):
+
+| | Result |
+|---|---|
+| Plans | Every AC-22 combination is an index scan in keyset order stopped by `LIMIT`; no sequential scan, no sort (ADR-0020) |
+| `COPY` 1M rows without / with the two search indexes | 12.1 s / 17.9 s first load; 32.6 s replacement with them |
+| Search, server side, first page | 0.2–2.9 ms for every AC-22 combination (each with and without `maxPrice`); 49 ms median for origin + carrier + low `maxPrice` (two filters outside the route index) |
+| API, client side, uncached / cached (median) | 2.6–8 ms / 1.8–5.4 ms for typical searches; 56 ms / 3.0 ms for that two-filter case |
+| Catalog, uncached / cached (median) | 420 ms (grouped scan of 1M rows, once per data version) / 1.4 ms |
+
+The cache saves little on a typical search, which is already sub-millisecond in PostgreSQL thanks to the indexes;
+it pays off for the expensive requests — the catalog (≈ 300×) and the filter combinations no index serves (≈ 18×) —
+and it takes repeated load off the database.
+
+Default compose stack, AC-25 checked by hand: `postgres`, `redis`, `gds-mock` and `flight-aggregator` healthy; after the
+first scheduled run (94,543 rows) a search returns data and the repeated request is a cache hit. `./mvnw verify` (both
+modules): **66 s**.
+
+**Changed after the code review:** the catalog is memoised per data version in the JVM (single-flight), so a version
+bump or a Redis outage costs one scan instead of one per concurrent request; a reused catalog drops past days; the
+breaker records `Error`s too; the cache format is pinned by a golden test.
+
+**Found while implementing:**
+- `RestClient` expands and encodes the URI template, so a test that wrote `%20` sent `%2520`; the test now writes
+  plain spaces.
+- With Redis paused, the `SET`s that timed out had already been written to the socket; Redis ran them when it resumed.
+  Harmless (the value is what PostgreSQL returned), but the recovery test first expected the pre-outage page.
+
 ### AI tools used
 
 The code is developed with **Claude Code** under versioned guardrails ([ADR-0005](docs/adr/0005-ai-assisted-development.md)):
@@ -260,8 +316,8 @@ until the implementation lands); every merge result is green.
 
 ## 2. Data modelling and pagination up to 1,000,000 rows
 
-- **Pagination:** keyset pagination on `(price, id)` instead of offset. See [ADR-0008](docs/adr/0008-keyset-pagination.md)
-  for the justification: constant cost per page at any depth and stable results while data changes.
+- **Pagination:** keyset pagination on `(final_price, id)` instead of offset ([ADR-0008](docs/adr/0008-keyset-pagination.md)),
+  measured at 1M rows below (*Keyset vs offset, measured*).
 - **Storage and cache:** see [ADR-0007](docs/adr/0007-postgresql-and-redis.md).
 
 ### Domain model and deduplication
@@ -311,6 +367,31 @@ One **denormalized row per aggregated itinerary** in `itinerary` (columns in [ar
 - Partitioning by `departure_date` was considered and deferred (ADR-0017): it would make retention instant and avoid
   dead tuples, at the cost of DDL on every run; at ≈ 1M rows plain deletes and autovacuum are enough.
 
+### Keyset vs offset, measured (spec 005)
+
+Same filters, page of 20, server side, median / p95 of 30 runs on 1,000,006 rows
+([full table](docs/measurements/search-1m.md)):
+
+| Filters (matching rows) | Page | Keyset | `OFFSET` |
+|---|---:|---:|---:|
+| none (1,000,006) | 1 | 0.75 / 1.24 ms | 0.61 / 0.76 ms |
+| none | 1,000 | **0.55 / 0.75 ms** | **50.30 / 68.81 ms** |
+| `date` (142,858) | 1,000 | 0.47 / 0.63 ms | 63.68 / 65.51 ms |
+| `carrier` (42,082) | 1,000 | 0.76 / 0.94 ms | 159.11 / 176.64 ms |
+| `origin` (29,375) | 1,000 | 0.89 / 1.78 ms | 94.91 / 104.69 ms |
+| `carrier` + `maxPrice` (12,397) | 620 (last) | 0.99 / 1.22 ms | 174.92 / 192.35 ms |
+| busiest route, no date, `maxPrice` above all (993) | 50 (last) | 0.53 / 0.91 ms | 2.14 / 2.98 ms |
+
+- **Keyset cost does not depend on depth**: page 1,000 costs what page 1 costs, because the query seeks the cursor
+  position in the index and reads `limit + 1` entries.
+- **`OFFSET` grows linearly**: page 1,000 reads and discards 19,980 rows first (≈ 90× slower here), and with a
+  residual filter (carrier) every discarded row is also a heap fetch (≈ 200×). At the last page of the unfiltered
+  1M result it would read the whole index.
+- **Offset is not even correct here**: an ingestion run replaces whole days every 15 min, so a row inserted or deleted
+  before the current position shifts every later page (duplicates or gaps), whereas keyset continues from a position.
+- The price of keyset: no "jump to page N" and no total count (an exact `COUNT(*)` would read up to 1M rows per
+  request); the dashboard pages forward with "more results".
+
 ## 3. System limitations and trade-offs
 
 Known from the accepted decisions:
@@ -322,8 +403,8 @@ Known from the accepted decisions:
 - One-way itineraries only: visiting an airport twice (including a return to the origin) is discarded as
   `REVISITED_AIRPORT` — [spec 001](specs/001-itinerary-aggregation/spec.md).
 - An itinerary that breaks several rules is counted under its first failing reason only, so the counts add up.
-- "Already departed" is evaluated at ingestion time. Data can be up to one interval old, so search must also filter
-  departed flights at query time (search spec).
+- "Already departed" is evaluated at ingestion time and again at query time by search (spec 005), including on cached
+  pages.
 - `OfferAggregator` is single-threaded and holds a day's distinct itineraries in memory. Ingestion aggregates one day
   per aggregator (ADR-0016), so memory follows the days in flight, not the world (measurements above).
 - Day partitioning assumes providers partition by the UTC date of the first departure (true for gds-mock). A provider
@@ -407,5 +488,34 @@ Persistence and pipeline (spec 004):
   gives the container 40 s before killing it); a run killed harder stays `RUNNING` until the next run aborts it.
 - **Failure messages are generic** (`Unexpected error (IllegalStateException)…`): the API never serves exception
   text, which may contain SQL or host names; the details are in the log under the run id.
+
+Search and cache (spec 005):
+
+- **Pagination across a refresh.** A day's replacement gives its rows new ids. A cursor taken before continues from
+  its `(price, id)` position in the new data, so an itinerary at the boundary may be skipped or repeated and prices
+  may change between pages. Accepted: every page is consistent, it only affects a walk that spans a refresh (every
+  15 min, seconds of writes), and rejecting old cursors would send users back to page 1 after every run.
+- **No total count, no page N, no backwards cursor**, and only one sort order (price). Another order needs its own
+  index and cursor version.
+- **Cached pages can be short**: items that departed since the page was cached are dropped, so a page can have fewer
+  than `limit` items, even none, while `hasMore` is true. The contract tells clients to keep paging.
+- **Every run invalidates the whole cache**, also for days that did not change; a per-day version would keep more hits
+  at the cost of keys that span several days. Every request, hit or miss, reads the data version from PostgreSQL, so
+  PostgreSQL must be up even for cache hits.
+- **The catalog is computed by a grouped scan of the future rows** (≈ 420 ms at 1M rows; no index helps a `DISTINCT`
+  over every route). It runs once per data version per instance — memoised in the JVM behind a lock, also when Redis
+  is down — but a run bumps the version once per day it writes, so a run triggers up to 7 scans. A cached catalog
+  can list a route whose last flight has just departed until the next run; past days are dropped.
+- **Cache keys are client-controlled** (any position or `maxPrice` is a new key): a client looping over crafted
+  values gets misses and fills Redis, bounded by `maxmemory 256mb` + LRU. Signed cursors or caching only first pages
+  would close it if needed.
+- **Until the breaker opens**, a request with Redis hung can wait for two 100 ms timeouts (read and write); after 5
+  failed calls Redis is skipped for 30 s.
+- **`/actuator/metrics` is exposed on the application port without authentication**, like the API; production would
+  move management to its own port or behind the network policy.
+- **Cursors are not signed**: a client can craft one to start anywhere; the data is public, so nothing is gained.
+- **Selective filters outside the indexes** (e.g. a rare carrier on its own) scan more of the price index; measured
+  combinations are in ADR-0020.
+- **Search is unauthenticated and not rate limited**, like the rest of the API.
 
 *To be completed:* what would change for production.

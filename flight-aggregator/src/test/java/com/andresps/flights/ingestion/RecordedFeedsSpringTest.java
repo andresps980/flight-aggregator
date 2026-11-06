@@ -4,6 +4,7 @@ import static com.andresps.flights.ingestion.RecordedGdsMock.PROVIDERS;
 import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.options;
 
 import com.andresps.flights.support.TestPostgres;
+import com.andresps.flights.support.TestRedis;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
@@ -49,7 +50,7 @@ import org.springframework.test.context.DynamicPropertySource;
             "aggregator.resilience.default.retry.initial-backoff=10ms",
             "aggregator.resilience.default.circuit-breaker.open-wait=60s"
         })
-@Import({TestPostgres.class, RecordedFeedsSpringTest.RecordedTime.class})
+@Import({TestPostgres.class, TestRedis.class, RecordedFeedsSpringTest.RecordedTime.class})
 public abstract class RecordedFeedsSpringTest {
 
     /** Shared by every subclass for the whole JVM (like the context that points at it). */

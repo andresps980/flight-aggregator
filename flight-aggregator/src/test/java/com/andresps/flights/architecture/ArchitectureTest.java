@@ -76,6 +76,25 @@ class ArchitectureTest {
             .because("PostgreSQL-specific code (COPY, advisory locks) lives in the persistence adapter (ADR-0018)");
 
     @ArchTest
+    static final ArchRule redis_stays_in_the_cache_adapter = noClasses()
+            .that()
+            .resideOutsideOfPackages("..infrastructure.adapter.out.cache..", "..infrastructure.config..")
+            .should()
+            .dependOnClassesThat()
+            .resideInAnyPackage("org.springframework.data.redis..", "io.lettuce..", "redis..")
+            .because("the search cache is a decorator of the query ports; Redis code lives in its adapter (ADR-0022)");
+
+    @ArchTest
+    static final ArchRule cache_adapter_does_not_query_the_database = noClasses()
+            .that()
+            .resideInAPackage("..infrastructure.adapter.out.cache..")
+            .should()
+            .dependOnClassesThat()
+            .resideInAnyPackage(
+                    "java.sql..", "javax.sql..", "org.springframework.jdbc..", "..adapter.out.persistence..")
+            .because("the cache decorates ports; it reaches PostgreSQL only through them (ADR-0022)");
+
+    @ArchTest
     static final ArchRule jdbc_stays_in_persistence_and_wiring = noClasses()
             .that()
             .resideOutsideOfPackages("..infrastructure.adapter.out.persistence..", "..infrastructure.config..")

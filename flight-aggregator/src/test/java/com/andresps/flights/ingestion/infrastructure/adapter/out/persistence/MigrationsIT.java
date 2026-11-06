@@ -1,17 +1,19 @@
 package com.andresps.flights.ingestion.infrastructure.adapter.out.persistence;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.andresps.flights.ingestion.RecordedFeedsSpringTest;
 import java.util.List;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * Spec 004 AC-1: Flyway creates the schema when the application starts (the shared recorded-feeds context), and a
- * migrated database gets nothing more.
+ * Spec 004 AC-1 (and spec 005's additions): Flyway creates the schema when the application starts (the shared
+ * recorded-feeds context), and a migrated database gets nothing more.
  */
 class MigrationsIT extends RecordedFeedsSpringTest {
 
@@ -81,6 +83,34 @@ class MigrationsIT extends RecordedFeedsSpringTest {
                         .query(String.class)
                         .list())
                 .anySatisfy(def -> assertThat(def).contains("(started_at"));
+    }
+
+    @Test
+    @DisplayName("spec 005 / ADR-0022: data_version exists with exactly one row, and a second row is refused")
+    void dataVersionTable() {
+        JdbcClient jdbc = JdbcClient.create(dataSource);
+
+        assertThat(columns("data_version")).containsExactly("id", "version");
+        assertThat(jdbc.sql("SELECT count(*) FROM data_version")
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(1);
+        assertThatThrownBy(() -> jdbc.sql("INSERT INTO data_version (id, version) VALUES (false, 0)")
+                        .update())
+                .isInstanceOf(DataAccessException.class);
+    }
+
+    @Test
+    @DisplayName("spec 005 AC-22 / ADR-0020: the search indexes serve the keyset order (final_price, id)")
+    void searchIndexes() {
+        List<String> indexes = JdbcClient.create(dataSource)
+                .sql("SELECT indexdef FROM pg_indexes WHERE tablename = 'itinerary'")
+                .query(String.class)
+                .list();
+
+        assertThat(indexes)
+                .anySatisfy(def -> assertThat(def).endsWith("(final_price, id)"))
+                .anySatisfy(def -> assertThat(def).endsWith("(origin, destination, final_price, id)"));
     }
 
     @Test

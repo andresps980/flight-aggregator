@@ -11,11 +11,12 @@ that boots with `docker compose up --build`.
 
 Full statement: [docs/exercise.md](docs/exercise.md). Design write-up: [SOLUTION.md](SOLUTION.md).
 
-> **Status:** ingestion pipeline. Implemented: the framework-free aggregation domain
+> **Status:** search API. Implemented: the framework-free aggregation domain
 > ([spec 001](specs/001-itinerary-aggregation/spec.md)), the mock providers ([spec 002](specs/002-gds-mock/spec.md)),
 > resilient provider ingestion ([spec 003](specs/003-provider-ingestion/spec.md)), and PostgreSQL persistence with
-> scheduled and on-demand runs and a first `docker compose` stack ([spec 004](specs/004-persistence-and-pipeline/spec.md)).
-> Search, Redis and the frontend land in their own PRs.
+> scheduled and on-demand runs and a first `docker compose` stack ([spec 004](specs/004-persistence-and-pipeline/spec.md)),
+> and the search API with keyset pagination, a catalog and a Redis cache ([spec 005](specs/005-search-api/spec.md)).
+> The frontend lands in the next PR.
 
 ## Components
 
@@ -24,9 +25,9 @@ Target architecture. Each component is built in a later PR and described here on
 | Component | Role | Decision |
 |---|---|---|
 | `gds-mock` | Mock-Alpha (JSON), Mock-Beta (XML) and Mock-Gamma (CSV) provider APIs over a seeded, streamed world of up to 1M itineraries, with latency, random errors and an outage switch (**implemented**) | [ADR-0012](docs/adr/0012-single-gds-mock-application.md), [ADR-0013](docs/adr/0013-stateless-seeded-streamed-generation.md) |
-| `flight-aggregator` | Scheduled + on-demand **ingestion** from the 3 providers in parallel, **deduplication** and pricing in the domain, day snapshots in PostgreSQL (**implemented**), **search API** (next) | [ADR-0006](docs/adr/0006-scheduled-pre-ingestion.md), [ADR-0010](docs/adr/0010-domain-assumptions.md) |
-| PostgreSQL | Source of truth for itineraries and ingestion runs (**implemented**: Flyway schema, COPY bulk load, advisory run lock) | [ADR-0007](docs/adr/0007-postgresql-and-redis.md) |
-| Redis | Search results cache | [ADR-0007](docs/adr/0007-postgresql-and-redis.md) |
+| `flight-aggregator` | Scheduled + on-demand **ingestion** from the 3 providers in parallel, **deduplication** and pricing in the domain, day snapshots in PostgreSQL, **search API** with filters, keyset pagination and a catalog (**implemented**) | [ADR-0006](docs/adr/0006-scheduled-pre-ingestion.md), [ADR-0010](docs/adr/0010-domain-assumptions.md), [ADR-0021](docs/adr/0021-search-cursor.md) |
+| PostgreSQL | Source of truth for itineraries and ingestion runs (**implemented**: Flyway schema, COPY bulk load, advisory run lock, search indexes) | [ADR-0007](docs/adr/0007-postgresql-and-redis.md), [ADR-0020](docs/adr/0020-search-indexes.md) |
+| Redis | Search and catalog cache, keyed by a data version that every ingestion write bumps; optional at runtime (**implemented**) | [ADR-0022](docs/adr/0022-search-cache.md) |
 | `frontend` | React + TypeScript dashboard served by nginx | [ADR-0009](docs/adr/0009-react-frontend.md) |
 
 ```mermaid
@@ -65,17 +66,20 @@ Search reads only from PostgreSQL/Redis, never from the providers, and pages wit
 ./mvnw verify -Pslow-tests                      # also the slow 1,000,000-record tests
 ```
 
-**Docker** — `docker compose up --build` starts **PostgreSQL**, **gds-mock** (port 8081) and **flight-aggregator**
-(port 8080), each with a healthcheck. The aggregator runs its first ingestion about 10 s after it is healthy, then
-every 15 min:
+**Docker** — `docker compose up --build` starts **PostgreSQL**, **Redis**, **gds-mock** (port 8081) and
+**flight-aggregator** (port 8080), each with a healthcheck. The aggregator runs its first ingestion about 10 s after
+it is healthy, then every 15 min:
 
 ```bash
 docker compose up --build -d --wait
-curl http://localhost:8080/api/v1/ingestions/latest      # the initial run, with its report
-curl -X POST http://localhost:8080/api/v1/ingestions     # start one now (409 if one is running)
+curl http://localhost:8080/api/v1/ingestions/latest                              # the initial run, with its report
+curl 'http://localhost:8080/api/v1/itineraries?origin=MAD&maxPrice=300&limit=5'  # cheapest first; follow nextCursor
+curl http://localhost:8080/api/v1/catalog                                        # values for the filters
+curl -X POST http://localhost:8080/api/v1/ingestions                             # start one now (409 if running)
 ```
 
-The search API, Redis and the frontend are added in later PRs.
+The OpenAPI description is at `http://localhost:8080/swagger-ui.html` (committed copy:
+[docs/api/openapi.json](docs/api/openapi.json)). The frontend is added in the next PR.
 
 See [docs/usage.md](docs/usage.md) for the endpoints that currently exist and their configuration.
 
@@ -142,11 +146,11 @@ gds-mock/             mock GDS providers (Spring Boot), base package com.andresp
     chaos/                     latency, injected errors, outage switch
     shared/                    provider id, request errors, Problem Details handler
   Dockerfile                 multi-stage image (build context = repository root)
-docker-compose.yml    the stack (PostgreSQL, gds-mock, flight-aggregator for now)
+docker-compose.yml    the stack (PostgreSQL, Redis, gds-mock, flight-aggregator for now)
 .claude/              shared Claude Code config: settings + hooks, skills, agents
 .githooks/            versioned git hooks (pre-commit, pre-push)
 .github/              CI, CodeQL, Dependabot, PR template
-docs/                 exercise, usage, architecture, ADRs, AI log, GitHub setup
+docs/                 exercise, usage, architecture, ADRs, AI log, GitHub setup, OpenAPI (docs/api)
 specs/                one spec per feature (SDD)
 ```
 
@@ -158,5 +162,6 @@ specs/                one spec per feature (SDD)
 - [Architecture Decision Records](docs/adr/README.md)
 - [Specs](specs/README.md)
 - [Usage](docs/usage.md)
+- [Search API OpenAPI description](docs/api/openapi.json)
 - [AI-assisted development log](docs/ai/README.md)
 - [Repository bootstrap & GitHub setup](docs/github-setup.md)

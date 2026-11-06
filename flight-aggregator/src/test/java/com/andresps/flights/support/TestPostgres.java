@@ -85,10 +85,14 @@ public class TestPostgres {
         return CONTAINER.getPassword();
     }
 
-    /** Empties every table of spec 004. */
+    /**
+     * Empties every table of spec 004 and, since the read model changed, increments the data version (spec 005,
+     * ADR-0022), so nothing cached for the previous contents (in Redis or in memory) is served afterwards.
+     */
     public static void truncateAll(DataSource dataSource) {
-        JdbcClient.create(dataSource)
-                .sql("TRUNCATE itinerary, day_snapshot, ingestion_run RESTART IDENTITY")
+        JdbcClient jdbc = JdbcClient.create(dataSource);
+        jdbc.sql("TRUNCATE itinerary, day_snapshot, ingestion_run RESTART IDENTITY")
                 .update();
+        jdbc.sql("UPDATE data_version SET version = version + 1").update();
     }
 }

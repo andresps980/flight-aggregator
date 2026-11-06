@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-11-04
-- **Related spec:** to be written (search)
+- **Related spec:** [specs/005-search-api](../../specs/005-search-api/spec.md); cursor format in [ADR-0021](0021-search-cursor.md), indexes in [ADR-0020](0020-search-indexes.md)
 
 ## Context
 
