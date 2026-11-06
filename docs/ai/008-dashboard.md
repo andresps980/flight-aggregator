@@ -374,7 +374,11 @@ the log came from tests that provoke failures on purpose.
   in the class).
 - Stress: the class 10 times in fresh JVMs with every CPU core busy (`yes` × 10): **0/10 failures**; the first test now
   takes 41–69 ms (330 ms cold before the warm-up).
-- `./mvnw verify` and the CI run of the fix commit: below.
+- `./mvnw verify`: green in 67 s (flight-aggregator 507 unit + 182 integration tests).
+- CI of the fix, by SHA: run 42263593591 (CI) and 42263593542 (CodeQL) on `8f86998` — **success**: build, tests and
+  coverage 129 s, frontend 75 s, Spotless, dependency review, CodeQL `java-kotlin` and `javascript-typescript`; 0
+  code scanning alerts. The run of the commit adding this line is reported in the PR conversation, not here (a log
+  cannot contain the result of the commit that writes it).
 
 ## Verification
 
