@@ -298,6 +298,16 @@ passed by comparing the file with itself** (the misleading green noted above). N
 | Tooling ACs have no AC-named tests | `classify-paths.test.sh` now names AC-29; AC-26 – AC-28 are configuration, verified in CI |
 | Small scope additions (Docker in Dependabot, X-Frame-Options, pre-commit Prettier, URL overrides) | Kept: hardening/tooling, listed in the PR |
 
+## CI and code scanning findings on the PR
+
+- [PR 8](https://github.com/andresps980/flight-aggregator/pull/8), first push: every check passed — Spotless (21 s),
+  build, tests and coverage (2 min 19 s; flight-aggregator 96.0 % lines / 87.8 % branches), the new frontend job
+  (format, lint, types, Vitest with coverage, build, Playwright layout check, image smoke test: 1 min 27 s),
+  dependency review, CodeQL for `java-kotlin` (240 rules) and, **for the first time, `javascript-typescript`
+  (201 rules)**.
+- Code scanning: **0 alerts** in both languages (nothing to fix or dismiss).
+- The pre-push hook ran both gates before the push (`./mvnw verify` and the frontend checks): 78 s.
+
 ## Verification
 
 - `./mvnw verify` (both modules, unit + integration tests, ArchUnit, coverage gates, Spotless): **green in 65 s**
