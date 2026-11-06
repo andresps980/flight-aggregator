@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class PageSizeTest {
@@ -18,10 +19,12 @@ class PageSizeTest {
     }
 
     @ParameterizedTest(name = "limit={0}")
-    @ValueSource(strings = {"1", "20", "100", " 50 "})
+    @CsvSource(
+            delimiter = ';',
+            value = {"1;1", "20;20", "100;100", "' 50 ';50"})
     @DisplayName("AC-6: limit 1-100 is accepted")
-    void acceptsTheRange(String limit) {
-        assertThat(PageSize.parse(limit).value()).isEqualTo(Integer.parseInt(limit.trim()));
+    void acceptsTheRange(String limit, int expected) {
+        assertThat(PageSize.parse(limit).value()).isEqualTo(expected);
     }
 
     @ParameterizedTest(name = "limit={0}")

@@ -24,7 +24,11 @@ public record PageSize(int value) {
         if (!DIGITS.matcher(value).matches()) {
             throw invalid();
         }
-        return new PageSize(Integer.parseInt(value));
+        try {
+            return new PageSize(Integer.parseInt(value));
+        } catch (NumberFormatException e) {
+            throw invalid(); // unreachable after the 1-3 digit check; kept so the parse never escapes as a 500
+        }
     }
 
     private static InvalidSearchRequestException invalid() {

@@ -54,7 +54,12 @@ public class TestRedis {
 
     /** Number of keys currently stored. */
     public static long keys() {
-        return Long.parseLong(exec("DBSIZE").trim());
+        String output = exec("DBSIZE").trim();
+        try {
+            return Long.parseLong(output);
+        } catch (NumberFormatException e) {
+            throw new IllegalStateException("unexpected DBSIZE output: " + output, e);
+        }
     }
 
     public static void pause() {

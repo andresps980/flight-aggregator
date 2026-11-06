@@ -214,6 +214,17 @@ back with the day, serialised under READ COMMITTED) and the breaker accounting.
 | Up to two Redis timeouts per request until the breaker opens | Documented in ADR-0022 and SOLUTION.md |
 | OpenAPI patterns are stricter than the trimming server | Kept: clients should send clean codes; the server is lenient |
 
+## CI and code scanning findings on the PR
+
+- First push ([PR 7](https://github.com/andresps980/flight-aggregator/pull/7)): every check passed (Spotless, build,
+  tests and coverage in 1 min 52 s, dependency review, CodeQL).
+- CodeQL reported **3 new alerts, severity "note"**, all `java/uncaught-number-format-exception`:
+  - `PageSize.parse`: unreachable after the 1–3 digit check, but now caught and mapped to the same `400`, so a
+    future change to the pattern cannot turn it into a `500`;
+  - `PageSizeTest`: the expected value is now a test parameter instead of parsed;
+  - `TestRedis.keys()`: unexpected `DBSIZE` output now fails with a clear message.
+  Fixed in a follow-up commit on the branch rather than dismissed.
+
 ## Verification
 
 - `./mvnw verify` (both modules, unit + integration tests, ArchUnit, coverage gates, Spotless): **green in 66 s**
