@@ -26,13 +26,15 @@ management:
 # Provider ingestion (spec 003, ADR-0014..0016). Defaults are justified in the spec against the mock's 100-5000 ms
 # latency and 10 % error rate; docs/usage.md lists every property.
 aggregator:
+  # gds-mock serves the three providers; GDS_MOCK_URL (set by docker-compose) points all three at it at once, since
+  # environment variables cannot spell the dashed map keys.
   providers:
     mock-alpha:
-      base-url: http://localhost:8081
+      base-url: ${GDS_MOCK_URL:http://localhost:8081}
     mock-beta:
-      base-url: http://localhost:8081
+      base-url: ${GDS_MOCK_URL:http://localhost:8081}
     mock-gamma:
-      base-url: http://localhost:8081
+      base-url: ${GDS_MOCK_URL:http://localhost:8081}
       # Any resilience setting can be overridden per provider, e.g.:
       # resilience:
       #   read-timeout: 9s

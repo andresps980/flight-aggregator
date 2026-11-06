@@ -1,6 +1,27 @@
-# Full stack is added in later PRs (aggregator, PostgreSQL, Redis, frontend). For now: the mock GDS providers.
+# The stack so far: PostgreSQL, the mock GDS providers and the aggregator (spec 004). Redis and the frontend come in
+# later PRs.
 #   docker compose up --build
+# The aggregator starts once PostgreSQL and gds-mock are healthy, runs its first ingestion ~10 s later and then every
+# 15 min. Any setting can be overridden with an environment variable (see docs/usage.md).
 services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: flights
+      POSTGRES_USER: flights
+      # Local development credentials; override for anything shared.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-flights}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flights -d flights"]
+      interval: 5s
+      timeout: 3s
+      start_period: 10s
+      retries: 10
+
   gds-mock:
     build:
       context: .
@@ -12,9 +33,45 @@ services:
       # Any gds.* setting can be overridden here (see docs/usage.md), e.g.:
       GDS_WORLD_VOLUME: ${GDS_WORLD_VOLUME:-100000}
       GDS_CHAOS_DEFAULT_ERROR_RATE: ${GDS_CHAOS_DEFAULT_ERROR_RATE:-0.10}
+      # "deterministic" turns chaos off (no latency, no errors)
+      SPRING_PROFILES_ACTIVE: ${GDS_MOCK_PROFILE:-default}
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8081/actuator/health/readiness"]
       interval: 10s
       timeout: 3s
       start_period: 30s
       retries: 5
+
+  flight-aggregator:
+    build:
+      context: .
+      dockerfile: flight-aggregator/Dockerfile
+    image: flight-aggregator/flight-aggregator:local
+    # -XX:+ExitOnOutOfMemoryError exits the JVM: restart it. A run cut short stays RUNNING until the next run marks
+    # it ABORTED (its advisory lock died with the session).
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      gds-mock:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/flights
+      SPRING_DATASOURCE_USERNAME: flights
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-flights}
+      GDS_MOCK_URL: http://gds-mock:8081
+      AGGREGATOR_INGESTION_SCHEDULE_INITIAL_DELAY: ${INGESTION_INITIAL_DELAY:-10s}
+      AGGREGATOR_INGESTION_SCHEDULE_FIXED_DELAY: ${INGESTION_FIXED_DELAY:-15m}
+      # Heap: see flight-aggregator/Dockerfile and SOLUTION.md; override to experiment, e.g. "-Xmx512m ..."
+      JAVA_TOOL_OPTIONS: ${AGGREGATOR_JAVA_TOOL_OPTIONS:--Xmx768m -XX:+ExitOnOutOfMemoryError}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/actuator/health/readiness"]
+      interval: 10s
+      timeout: 3s
+      start_period: 60s
+      retries: 5
+
+volumes:
+  postgres-data:

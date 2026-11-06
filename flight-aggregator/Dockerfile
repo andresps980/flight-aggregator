@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # flight-aggregator image. Build context = repository root (multi-module Maven build):
 #   docker build -f flight-aggregator/Dockerfile -t flight-aggregator .
-# Both base images are multi-arch (amd64, arm64). Wired into docker-compose.yml with PostgreSQL (next spec).
+# Both base images are multi-arch (amd64, arm64). Run with PostgreSQL and gds-mock by docker-compose.yml.
 
 # --- Build: compile and package flight-aggregator with the Maven wrapper ----------------------------------------------
 FROM eclipse-temurin:21-jdk AS build
@@ -34,8 +34,9 @@ COPY --from=build /workspace/extracted/application/ ./
 USER 10001:10001
 
 EXPOSE 8080
-# Heap measured at 1,000,000 itineraries (SOLUTION.md): the ingestion itself needs ~512 MB with 2 days in flight, and
-# the in-memory result store keeps the whole world (~1 GB), so 1.5 GB completes with headroom. Give the container
-# ~2 GB. On OutOfMemoryError the JVM exits so the container is restarted instead of running in an unknown state.
-ENV JAVA_TOOL_OPTIONS="-Xmx1536m -XX:+ExitOnOutOfMemoryError"
+# Heap measured at 1,000,000 itineraries (SOLUTION.md, spec 004): results now go to PostgreSQL day by day, so the heap
+# only holds the ingestion working set (2 days in flight). A 1M run completes with 512 MB and runs out of memory with
+# 384 MB; 768 MB leaves 1.5x headroom (container peak ~1 GB). On OutOfMemoryError the JVM exits so the container is
+# restarted (docker-compose restart policy) instead of running in an unknown state.
+ENV JAVA_TOOL_OPTIONS="-Xmx768m -XX:+ExitOnOutOfMemoryError"
 ENTRYPOINT ["java", "org.springframework.boot.loader.launch.JarLauncher"]
