@@ -67,6 +67,25 @@ class ArchitectureTest {
             .because("parsing, HTTP and resilience are adapter concerns (ADR-0002, ADR-0014)");
 
     @ArchTest
+    static final ArchRule postgresql_stays_in_the_persistence_adapter = noClasses()
+            .that()
+            .resideOutsideOfPackage("..infrastructure.adapter.out.persistence..")
+            .should()
+            .dependOnClassesThat()
+            .resideInAnyPackage("org.postgresql..", "org.flywaydb..")
+            .because("PostgreSQL-specific code (COPY, advisory locks) lives in the persistence adapter (ADR-0018)");
+
+    @ArchTest
+    static final ArchRule jdbc_stays_in_persistence_and_wiring = noClasses()
+            .that()
+            .resideOutsideOfPackages("..infrastructure.adapter.out.persistence..", "..infrastructure.config..")
+            .should()
+            .dependOnClassesThat()
+            .resideInAnyPackage(
+                    "java.sql..", "javax.sql..", "org.springframework.jdbc..", "org.springframework.transaction..")
+            .because("only the persistence adapter talks SQL; the composition root only hands it a DataSource");
+
+    @ArchTest
     static final ArchRule provider_adapters_do_not_use_the_use_case = noClasses()
             .that()
             .resideInAPackage("..infrastructure.adapter.out..")

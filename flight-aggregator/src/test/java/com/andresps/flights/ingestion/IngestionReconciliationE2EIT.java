@@ -5,17 +5,23 @@ import static com.andresps.flights.ingestion.Reconciliation.assertReconciles;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.andresps.flights.ingestion.application.port.in.IngestFlightsUseCase;
+import com.andresps.flights.ingestion.application.port.in.PublicationGuard;
 import com.andresps.flights.ingestion.domain.DayReport;
 import com.andresps.flights.ingestion.domain.IngestionReport;
 import com.andresps.flights.ingestion.domain.IngestionStatus;
+import com.andresps.flights.support.TestPostgres;
 import java.time.Clock;
 import java.time.LocalDate;
+import java.util.UUID;
+import javax.sql.DataSource;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.web.client.RestClient;
@@ -35,7 +41,16 @@ import tools.jackson.databind.json.JsonMapper;
  */
 @Tag("e2e")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
+@Import(TestPostgres.class)
 class IngestionReconciliationE2EIT {
+
+    @Autowired
+    private DataSource dataSource;
+
+    @BeforeEach
+    void emptyTables() {
+        TestPostgres.truncateAll(dataSource);
+    }
 
     private static final String MOCK_URL = System.getProperty("e2e.gds-mock.url", "http://localhost:8081");
     private static final RestClient MOCK = RestClient.create(MOCK_URL);
@@ -72,7 +87,7 @@ class IngestionReconciliationE2EIT {
                 .as("same reference date on both sides")
                 .isEqualTo(LocalDate.now(clock));
 
-        IngestionReport report = ingestion.ingest();
+        IngestionReport report = ingestion.ingest(UUID.randomUUID(), PublicationGuard.ALWAYS);
 
         assertThat(report.status()).isEqualTo(IngestionStatus.COMPLETED);
         assertReconciles(report, stats);

@@ -1,9 +1,9 @@
 # Usage
 
-> The aggregator exposes no business API yet: the core aggregation domain ([spec 001](../specs/001-itinerary-aggregation/spec.md))
-> and the provider ingestion ([spec 003](../specs/003-provider-ingestion/spec.md)) have no HTTP surface; the ingestion
-> trigger and the search API will be documented here as they are implemented. The mock GDS providers
-> ([spec 002](../specs/002-gds-mock/spec.md)) are documented [below](#gds-mock-mock-gds-providers).
+> The aggregator ingests the three providers on a schedule and on demand, and stores the deduplicated itineraries in
+> PostgreSQL ([spec 003](../specs/003-provider-ingestion/spec.md), [spec 004](../specs/004-persistence-and-pipeline/spec.md)).
+> The search API comes in the next spec. The mock GDS providers ([spec 002](../specs/002-gds-mock/spec.md)) are
+> documented [below](#gds-mock-mock-gds-providers).
 
 ## Build and test
 
@@ -12,17 +12,48 @@
 | Full build (unit + IT + coverage gate + format check, both modules) | `./mvnw verify` |
 | Also run the slow volume tests (tagged `slow`: 1,000,000-record generation and streaming) | `./mvnw verify -Pslow-tests` |
 | Also run the end-to-end ingestion test (tagged `e2e`, needs gds-mock running in the `deterministic` profile) | `./mvnw -pl flight-aggregator verify -Pe2e-tests` |
-| Start the stack (currently only gds-mock) | `docker compose up --build` |
+| Also run the 1M-row bulk load benchmark (tagged `slow`, ADR-0018) | `./mvnw -pl flight-aggregator verify -Pslow-tests -Dit.test=BulkLoadBenchmarkIT` |
+| Start the stack (PostgreSQL, gds-mock, flight-aggregator) | `docker compose up --build` |
+
+Integration tests start one PostgreSQL container (`postgres:17`, Testcontainers) for the whole build, so Docker must
+be running.
 
 ## flight-aggregator
 
 ### Run
 
+The easiest way is the whole stack ([Docker Compose](#docker-compose)). To run the aggregator from the build, start
+PostgreSQL and gds-mock first:
+
 ```bash
+docker compose up -d postgres gds-mock
 ./mvnw -pl flight-aggregator spring-boot:run
 ```
 
-The `flight-aggregator` service starts on port `8080` (override with `--server.port=9090` or `SERVER_PORT`).
+The `flight-aggregator` service starts on port `8080` (override with `--server.port=9090` or `SERVER_PORT`). Flyway
+creates or migrates the schema at startup; the first ingestion runs 10 s after startup, then every 15 min.
+
+### Docker Compose
+
+```bash
+docker compose up --build        # postgres + gds-mock + flight-aggregator
+```
+
+| Service | Port | Notes |
+|---|---|---|
+| `postgres` | `5432` (`POSTGRES_PORT`) | `postgres:17`, database/user `flights`, password `flights` (`POSTGRES_PASSWORD`); data in the named volume `postgres-data` (`docker compose down -v` deletes it) |
+| `gds-mock` | `8081` | Chaos on by default; `GDS_MOCK_PROFILE=deterministic` turns it off, `GDS_WORLD_VOLUME=1000000` for the full volume |
+| `flight-aggregator` | `8080` | Starts when the other two are healthy; healthy on `/actuator/health/readiness`; restarts if the JVM exits on `OutOfMemoryError` |
+
+Variables for the aggregator: `INGESTION_INITIAL_DELAY` (default `10s`), `INGESTION_FIXED_DELAY` (`15m`),
+`AGGREGATOR_JAVA_TOOL_OPTIONS` (default `-Xmx768m -XX:+ExitOnOutOfMemoryError`, see SOLUTION.md). The compose file
+maps them to `aggregator.*` properties, the datasource and `GDS_MOCK_URL`. For example, a 1M run without chaos:
+
+```bash
+GDS_WORLD_VOLUME=1000000 GDS_MOCK_PROFILE=deterministic docker compose up --build -d --wait
+curl -X POST http://localhost:8080/api/v1/ingestions
+docker compose exec postgres psql -U flights -c "SELECT departure_date, count(*) FROM itinerary GROUP BY 1 ORDER BY 1"
+```
 
 ### API
 
@@ -32,6 +63,9 @@ The `flight-aggregator` service starts on port `8080` (override with `--server.p
 |---|---|
 | `GET /actuator/health` | Health (also `/actuator/health/liveness` and `/readiness`) |
 | `GET /actuator/info` | Build/app info |
+| `POST /api/v1/ingestions` | Start an ingestion run now (spec 004) |
+| `GET /api/v1/ingestions/{id}` | A run: status, timestamps and, once finished, its report |
+| `GET /api/v1/ingestions/latest` | The most recently started run |
 
 ```bash
 curl http://localhost:8080/actuator/health
@@ -42,7 +76,64 @@ curl http://localhost:8080/actuator/health
 ```
 
 Errors are returned as [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) Problem Details: domain validation errors
-map to `400`.
+and malformed ids map to `400`, unknown resources to `404`, a run already in progress to `409`.
+
+#### Ingestion runs (spec 004)
+
+Runs never overlap, not even across instances: the scheduler skips its tick, and `POST` answers `409`.
+
+```bash
+curl -i -X POST http://localhost:8080/api/v1/ingestions
+```
+
+```http
+HTTP/1.1 202
+Location: http://localhost:8080/api/v1/ingestions/46369dfb-0078-4b6e-b27d-5d3e7c96e870
+Content-Type: application/json
+
+{"id":"46369dfb-0078-4b6e-b27d-5d3e7c96e870","trigger":"MANUAL","status":"RUNNING",
+ "startedAt":"2026-11-06T09:13:20.944244Z","finishedAt":null,"durationMs":null,"failure":null,"report":null}
+```
+
+While it runs:
+
+```http
+HTTP/1.1 409
+Content-Type: application/problem+json
+
+{"type":"about:blank","title":"Ingestion already running","status":409,
+ "detail":"Ingestion 46369dfb-0078-4b6e-b27d-5d3e7c96e870 is in progress","instance":"/api/v1/ingestions",
+ "runningIngestionId":"46369dfb-0078-4b6e-b27d-5d3e7c96e870"}
+```
+
+Follow it with `GET /api/v1/ingestions/{id}` (or `/latest`). Statuses: `RUNNING`, `COMPLETED`, `PARTIAL` (some
+partition failed, or a day could not be written), `FAILED` (every provider failed, an unexpected error, or the run
+lost its lock), `ABORTED` (its process died; marked by the next run). Once finished, `report` holds the spec 003 report
+plus, per day, what the store did:
+
+```json
+{"id":"…","trigger":"SCHEDULED","status":"COMPLETED","startedAt":"…","finishedAt":"…","durationMs":17514,
+ "failure":null,
+ "report":{"runId":"…","status":"COMPLETED","durationMs":17514,"storedItineraries":94543,"misfiledItineraries":0,
+   "providers":[{"provider":"mock-alpha","status":"COMPLETED","partitionsRequested":7,"partitionsSucceeded":7,
+                 "attempts":8,"failures":[],"circuitState":"CLOSED","recordsReceived":…,"malformed":{…},…}, …],
+   "days":[{"day":"2026-11-07","contributing":["mock-alpha","mock-beta","mock-gamma"],"missing":[],
+            "outcome":"REPLACED","published":true,"storedItineraries":13529,"misfiledItineraries":0,
+            "statistics":{…}}, …],
+   "statistics":{"offersReceivedByProvider":{…},"discardedByReason":{…},"duplicatesMerged":…,
+                 "itinerariesProduced":94543,…}}}
+```
+
+| Day outcome | Meaning ([ADR-0017](adr/0017-day-snapshot-replacement.md)) |
+|---|---|
+| `REPLACED` | Every provider contributed; the day's rows were replaced atomically |
+| `PUBLISHED_INCOMPLETE` | Written with missing providers: there was no snapshot, the stored one was no more complete, or it had been stale for more than `max-stale-age` |
+| `KEPT_STALE` | The stored snapshot had a provider this run is missing (or every provider failed): it was kept and marked stale |
+| `NO_DATA` | Every provider failed and there was nothing stored |
+| `WRITE_FAILED` | The write failed and was rolled back; the previous snapshot is intact |
+
+Itineraries whose first departure falls on another UTC day than their partition are not stored and are counted as
+`misfiledItineraries` (`stored + misfiled = itineraries produced`).
 
 ### Domain behaviour (spec 001)
 
@@ -60,9 +151,8 @@ How offers become sellable itineraries. This is the behaviour the future ingesti
 ### Provider ingestion (spec 003)
 
 An ingestion run fetches every (provider, day) partition of the horizon (the 7 UTC days after today) from the three
-providers, aggregates each day with the rules above and publishes it. It has no trigger yet: scheduling and
-`POST /api/v1/ingestions` come with persistence in the next spec, so today it runs from the integration tests and the
-`e2e` test below. Results are kept in memory.
+providers, aggregates each day with the rules above and stores it in PostgreSQL (spec 004, see
+[Ingestion runs](#ingestion-runs-spec-004)).
 
 | Behaviour | Rule |
 |---|---|
@@ -98,6 +188,14 @@ As in gds-mock, per-provider keys contain a dash, so override them with command-
 | `aggregator.ingestion.max-concurrent-days` | `2` | Days aggregated at the same time; memory grows with it (see SOLUTION.md) |
 | `aggregator.ingestion.max-concurrent-partitions` | `2` | Requests in flight per provider |
 | `aggregator.ingestion.run-timeout` | `10m` | Deadline of a whole run (below the 15 min schedule) |
+| `aggregator.ingestion.schedule.enabled` | `true` | Run on a schedule (`false`: only `POST /api/v1/ingestions`) |
+| `aggregator.ingestion.schedule.initial-delay` | `10s` | First run after the application is ready |
+| `aggregator.ingestion.schedule.fixed-delay` | `15m` | Wait after each scheduled run ends before the next |
+| `aggregator.persistence.max-stale-age` | `2h` | How long a stale day snapshot is kept against partial data before partial data replaces it |
+| `aggregator.persistence.run-retention` | `7d` | Ingestion runs older than this are deleted at the start of each run |
+| `spring.datasource.hikari.maximum-pool-size` | `10` | Keep ≥ `max-concurrent-days` + 2: each day in flight writes on its own connection (the run lock uses a separate, non-pooled one) |
+| `spring.datasource.url` / `username` / `password` | `jdbc:postgresql://localhost:5432/flights` / `flights` / `flights` | PostgreSQL (`SPRING_DATASOURCE_*` in compose) |
+| `GDS_MOCK_URL` (environment) | `http://localhost:8081` | Base URL of all three providers at once (compose: `http://gds-mock:8081`) |
 | `aggregator.resilience.default.connect-timeout` | `1s` | TCP connect timeout |
 | `aggregator.resilience.default.read-timeout` | `6s` | Max wait for the first byte and between body bytes (above the 5 s max latency) |
 | `aggregator.resilience.default.attempt-timeout` | `60s` | Total time per attempt; must be greater than `read-timeout` |

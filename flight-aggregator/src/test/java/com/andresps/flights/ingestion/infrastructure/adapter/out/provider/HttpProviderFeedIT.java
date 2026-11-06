@@ -16,6 +16,7 @@ import com.andresps.flights.ingestion.domain.FailureKind;
 import com.andresps.flights.ingestion.domain.MalformedReason;
 import com.andresps.flights.ingestion.domain.ProviderPartition;
 import com.andresps.flights.ingestion.infrastructure.adapter.out.provider.gamma.GammaCsvParser;
+import com.andresps.flights.support.MutableClock;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.client.ResponseDefinitionBuilder;
 import com.github.tomakehurst.wiremock.http.Fault;

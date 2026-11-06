@@ -7,6 +7,7 @@ import java.util.Collections;
 import java.util.Objects;
 import java.util.SortedSet;
 import java.util.TreeSet;
+import java.util.UUID;
 
 /**
  * The aggregation of one horizon day (ADR-0016), as published to the result port. {@code missing} names the providers
@@ -14,9 +15,14 @@ import java.util.TreeSet;
  * requirements for the persistence spec).
  */
 public record DayAggregation(
-        LocalDate day, AggregationResult result, SortedSet<ProviderId> contributing, SortedSet<ProviderId> missing) {
+        UUID runId,
+        LocalDate day,
+        AggregationResult result,
+        SortedSet<ProviderId> contributing,
+        SortedSet<ProviderId> missing) {
 
     public DayAggregation {
+        Objects.requireNonNull(runId, "runId");
         Objects.requireNonNull(day, "day");
         Objects.requireNonNull(result, "result");
         contributing = Collections.unmodifiableSortedSet(new TreeSet<>(contributing));

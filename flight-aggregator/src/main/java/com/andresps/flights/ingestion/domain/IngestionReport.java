@@ -31,9 +31,29 @@ public record IngestionReport(
         days = List.copyOf(days);
     }
 
+    /**
+     * The providers' overall status (spec 003, AC-19), except that a day whose write failed makes a {@code COMPLETED}
+     * run {@code PARTIAL} (spec 004, AC-7).
+     */
     public IngestionStatus status() {
-        return IngestionStatus.overall(
+        IngestionStatus byProviders = IngestionStatus.overall(
                 providers.stream().map(ProviderReport::status).toList());
+        boolean writeFailed = days.stream().anyMatch(day -> day.publication().outcome() == DayOutcome.WRITE_FAILED);
+        return byProviders == IngestionStatus.COMPLETED && writeFailed ? IngestionStatus.PARTIAL : byProviders;
+    }
+
+    /** Rows stored by this run, over all days. */
+    public long storedItineraries() {
+        return days.stream()
+                .mapToLong(day -> day.publication().storedItineraries())
+                .sum();
+    }
+
+    /** Itineraries not stored because their first departure is on another UTC day (spec 004, AC-9). */
+    public long misfiledItineraries() {
+        return days.stream()
+                .mapToLong(day -> day.publication().misfiledItineraries())
+                .sum();
     }
 
     public Duration duration() {

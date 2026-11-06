@@ -12,20 +12,26 @@ import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.options
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.andresps.flights.ingestion.application.port.in.IngestFlightsUseCase;
+import com.andresps.flights.ingestion.application.port.in.PublicationGuard;
 import com.andresps.flights.ingestion.domain.IngestionReport;
 import com.andresps.flights.ingestion.domain.IngestionStatus;
+import com.andresps.flights.support.TestPostgres;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.util.Map;
+import java.util.UUID;
+import javax.sql.DataSource;
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -44,7 +50,16 @@ import org.springframework.test.context.DynamicPropertySource;
             "aggregator.resilience.default.read-timeout=3s",
             "aggregator.resilience.default.attempt-timeout=10s"
         })
+@Import(TestPostgres.class)
 class IngestionParallelismIT {
+
+    @Autowired
+    private DataSource dataSource;
+
+    @BeforeEach
+    void emptyTables() {
+        TestPostgres.truncateAll(dataSource);
+    }
 
     private static final Map<String, Integer> LATENCY_MS = Map.of(ALPHA, 2000, BETA, 1500, GAMMA, 1000);
     private static final WireMockServer SERVER = startServer();
@@ -84,7 +99,7 @@ class IngestionParallelismIT {
     @DisplayName("AC-9: three providers with 2 s / 1.5 s / 1 s latency take about the slowest, not the 4.5 s sum")
     void providersRunInParallel() {
         long start = System.nanoTime();
-        IngestionReport report = ingestion.ingest();
+        IngestionReport report = ingestion.ingest(UUID.randomUUID(), PublicationGuard.ALWAYS);
         Duration elapsed = Duration.ofNanos(System.nanoTime() - start);
 
         assertThat(report.status()).isEqualTo(IngestionStatus.COMPLETED);

@@ -11,9 +11,11 @@ that boots with `docker compose up --build`.
 
 Full statement: [docs/exercise.md](docs/exercise.md). Design write-up: [SOLUTION.md](SOLUTION.md).
 
-> **Status:** core domain. The repository has the multi-module build, quality gates, agreed design decisions (ADRs)
-> and the framework-free aggregation domain ([spec 001](specs/001-itinerary-aggregation/spec.md)): validation,
-> deduplication and markup. Ingestion, search and the frontend land in their own PRs.
+> **Status:** ingestion pipeline. Implemented: the framework-free aggregation domain
+> ([spec 001](specs/001-itinerary-aggregation/spec.md)), the mock providers ([spec 002](specs/002-gds-mock/spec.md)),
+> resilient provider ingestion ([spec 003](specs/003-provider-ingestion/spec.md)), and PostgreSQL persistence with
+> scheduled and on-demand runs and a first `docker compose` stack ([spec 004](specs/004-persistence-and-pipeline/spec.md)).
+> Search, Redis and the frontend land in their own PRs.
 
 ## Components
 
@@ -22,8 +24,8 @@ Target architecture. Each component is built in a later PR and described here on
 | Component | Role | Decision |
 |---|---|---|
 | `gds-mock` | Mock-Alpha (JSON), Mock-Beta (XML) and Mock-Gamma (CSV) provider APIs over a seeded, streamed world of up to 1M itineraries, with latency, random errors and an outage switch (**implemented**) | [ADR-0012](docs/adr/0012-single-gds-mock-application.md), [ADR-0013](docs/adr/0013-stateless-seeded-streamed-generation.md) |
-| `flight-aggregator` | Scheduled + on-demand **ingestion** from the 3 providers in parallel, **deduplication** and pricing in the domain, **search API** | [ADR-0006](docs/adr/0006-scheduled-pre-ingestion.md), [ADR-0010](docs/adr/0010-domain-assumptions.md) |
-| PostgreSQL | Source of truth for itineraries and ingestion runs | [ADR-0007](docs/adr/0007-postgresql-and-redis.md) |
+| `flight-aggregator` | Scheduled + on-demand **ingestion** from the 3 providers in parallel, **deduplication** and pricing in the domain, day snapshots in PostgreSQL (**implemented**), **search API** (next) | [ADR-0006](docs/adr/0006-scheduled-pre-ingestion.md), [ADR-0010](docs/adr/0010-domain-assumptions.md) |
+| PostgreSQL | Source of truth for itineraries and ingestion runs (**implemented**: Flyway schema, COPY bulk load, advisory run lock) | [ADR-0007](docs/adr/0007-postgresql-and-redis.md) |
 | Redis | Search results cache | [ADR-0007](docs/adr/0007-postgresql-and-redis.md) |
 | `frontend` | React + TypeScript dashboard served by nginx | [ADR-0009](docs/adr/0009-react-frontend.md) |
 
@@ -48,7 +50,7 @@ Search reads only from PostgreSQL/Redis, never from the providers, and pages wit
 ## Requirements
 
 - JDK 21
-- Docker (for the planned compose stack and Testcontainers-based integration tests)
+- Docker (for the compose stack and the Testcontainers-based integration tests)
 - Git, and optionally the [GitHub CLI](https://cli.github.com/) (`gh`)
 - [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) for the AI-assisted workflow
 - `jq` or `python3` recommended (used by the Claude Code hooks to parse JSON)
@@ -63,8 +65,17 @@ Search reads only from PostgreSQL/Redis, never from the providers, and pages wit
 ./mvnw verify -Pslow-tests                      # also the slow 1,000,000-record tests
 ```
 
-`docker compose up --build` currently starts **gds-mock** only (port 8081, with a healthcheck). The rest of the stack
-(aggregator, frontend, PostgreSQL, Redis) is added in later PRs.
+**Docker** — `docker compose up --build` starts **PostgreSQL**, **gds-mock** (port 8081) and **flight-aggregator**
+(port 8080), each with a healthcheck. The aggregator runs its first ingestion about 10 s after it is healthy, then
+every 15 min:
+
+```bash
+docker compose up --build -d --wait
+curl http://localhost:8080/api/v1/ingestions/latest      # the initial run, with its report
+curl -X POST http://localhost:8080/api/v1/ingestions     # start one now (409 if one is running)
+```
+
+The search API, Redis and the frontend are added in later PRs.
 
 See [docs/usage.md](docs/usage.md) for the endpoints that currently exist and their configuration.
 
@@ -131,7 +142,7 @@ gds-mock/             mock GDS providers (Spring Boot), base package com.andresp
     chaos/                     latency, injected errors, outage switch
     shared/                    provider id, request errors, Problem Details handler
   Dockerfile                 multi-stage image (build context = repository root)
-docker-compose.yml    the stack (gds-mock for now)
+docker-compose.yml    the stack (PostgreSQL, gds-mock, flight-aggregator for now)
 .claude/              shared Claude Code config: settings + hooks, skills, agents
 .githooks/            versioned git hooks (pre-commit, pre-push)
 .github/              CI, CodeQL, Dependabot, PR template

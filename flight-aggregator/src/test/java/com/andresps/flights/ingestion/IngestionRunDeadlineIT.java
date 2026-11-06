@@ -15,20 +15,26 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.andresps.flights.aggregation.domain.model.ProviderId;
 import com.andresps.flights.ingestion.application.port.in.IngestFlightsUseCase;
+import com.andresps.flights.ingestion.application.port.in.PublicationGuard;
 import com.andresps.flights.ingestion.domain.FailureKind;
 import com.andresps.flights.ingestion.domain.IngestionReport;
 import com.andresps.flights.ingestion.domain.IngestionStatus;
 import com.andresps.flights.ingestion.domain.PartitionFailure;
+import com.andresps.flights.support.TestPostgres;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.UUID;
+import javax.sql.DataSource;
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -48,7 +54,16 @@ import org.springframework.test.context.DynamicPropertySource;
             "aggregator.resilience.default.read-timeout=10s",
             "aggregator.resilience.default.attempt-timeout=20s"
         })
+@Import(TestPostgres.class)
 class IngestionRunDeadlineIT {
+
+    @Autowired
+    private DataSource dataSource;
+
+    @BeforeEach
+    void emptyTables() {
+        TestPostgres.truncateAll(dataSource);
+    }
 
     private static final WireMockServer SERVER = startServer();
 
@@ -88,7 +103,7 @@ class IngestionRunDeadlineIT {
     @DisplayName("AC-13: at the run deadline Beta's requests are aborted as RUN_TIMEOUT; no request starts afterwards")
     void runDeadlineAbortsRealRequests() throws InterruptedException {
         long start = System.nanoTime();
-        IngestionReport report = ingestion.ingest();
+        IngestionReport report = ingestion.ingest(UUID.randomUUID(), PublicationGuard.ALWAYS);
         Duration elapsed = Duration.ofNanos(System.nanoTime() - start);
         int betaRequests = betaRequests();
         Thread.sleep(300);

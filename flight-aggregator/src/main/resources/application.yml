@@ -1,6 +1,14 @@
 spring:
   application:
     name: flight-aggregator
+  # PostgreSQL (spec 004). Local defaults; docker-compose overrides them with SPRING_DATASOURCE_* variables.
+  datasource:
+    url: jdbc:postgresql://localhost:5432/flights
+    username: flights
+    password: flights
+    hikari:
+      # A run holds one connection for its lock (ADR-0019) and up to max-concurrent-days write in parallel.
+      maximum-pool-size: 10
   mvc:
     problemdetails:
       enabled: true
@@ -18,13 +26,15 @@ management:
 # Provider ingestion (spec 003, ADR-0014..0016). Defaults are justified in the spec against the mock's 100-5000 ms
 # latency and 10 % error rate; docs/usage.md lists every property.
 aggregator:
+  # gds-mock serves the three providers; GDS_MOCK_URL (set by docker-compose) points all three at it at once, since
+  # environment variables cannot spell the dashed map keys.
   providers:
     mock-alpha:
-      base-url: http://localhost:8081
+      base-url: ${GDS_MOCK_URL:http://localhost:8081}
     mock-beta:
-      base-url: http://localhost:8081
+      base-url: ${GDS_MOCK_URL:http://localhost:8081}
     mock-gamma:
-      base-url: http://localhost:8081
+      base-url: ${GDS_MOCK_URL:http://localhost:8081}
       # Any resilience setting can be overridden per provider, e.g.:
       # resilience:
       #   read-timeout: 9s
@@ -34,6 +44,15 @@ aggregator:
     max-concurrent-days: 2
     max-concurrent-partitions: 2
     run-timeout: 10m
+    # Scheduled runs (spec 004): first run shortly after startup, then 15 min after each run ends (ADR-0006).
+    schedule:
+      enabled: true
+      initial-delay: 10s
+      fixed-delay: 15m
+  # Day snapshots and run history (spec 004, ADR-0017).
+  persistence:
+    max-stale-age: 2h
+    run-retention: 7d
   resilience:
     default:
       connect-timeout: 1s

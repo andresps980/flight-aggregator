@@ -5,8 +5,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.andresps.flights.aggregation.domain.model.ProviderId;
 import com.andresps.flights.ingestion.application.port.out.ProviderFeed;
 import com.andresps.flights.ingestion.application.service.IngestionSettings;
+import com.andresps.flights.ingestion.infrastructure.adapter.in.scheduling.ScheduleSettings;
 import com.andresps.flights.ingestion.infrastructure.adapter.out.provider.ResilienceSettings;
 import com.andresps.flights.ingestion.infrastructure.config.AggregatorProperties;
+import com.andresps.flights.support.TestPostgres;
 import java.math.BigDecimal;
 import java.net.URI;
 import java.time.Clock;
@@ -17,11 +19,13 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
 
 /** AC-23: configuration defaults, per-provider resilience overrides and wiring of one feed per configured provider. */
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.NONE,
         properties = "aggregator.providers.mock-gamma.resilience.read-timeout=9s")
+@Import(TestPostgres.class)
 class IngestionConfigurationIT {
 
     @Autowired
@@ -71,6 +75,20 @@ class IngestionConfigurationIT {
                 .extracting(ProviderFeed::provider)
                 .containsExactlyInAnyOrder(
                         new ProviderId("mock-alpha"), new ProviderId("mock-beta"), new ProviderId("mock-gamma"));
+    }
+
+    @Test
+    @DisplayName("spec 004: schedule defaults are a 10 s initial delay and a 15 min fixed delay (disabled in tests)")
+    void scheduleDefaults() {
+        assertThat(properties.ingestion().schedule())
+                .isEqualTo(new ScheduleSettings(false, Duration.ofSeconds(10), Duration.ofMinutes(15)));
+    }
+
+    @Test
+    @DisplayName("spec 004: persistence defaults are a 2 h max stale age and 7 days of run history")
+    void persistenceDefaults() {
+        assertThat(properties.persistence().maxStaleAge()).isEqualTo(Duration.ofHours(2));
+        assertThat(properties.persistence().runRetention()).isEqualTo(Duration.ofDays(7));
     }
 
     @Test
