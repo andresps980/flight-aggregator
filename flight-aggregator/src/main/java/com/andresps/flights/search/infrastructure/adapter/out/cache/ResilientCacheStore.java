@@ -81,6 +81,10 @@ public final class ResilientCacheStore implements CacheStore {
             metrics.error();
             LOG.debug("Search cache call failed: {}", e.toString());
             return Optional.empty();
+        } catch (Error e) {
+            // recorded so a half-open probe never keeps its permission, then propagated: not a cache problem
+            breaker.onError(breaker.getCurrentTimestamp() - start, breaker.getTimestampUnit(), e);
+            throw e;
         }
     }
 }

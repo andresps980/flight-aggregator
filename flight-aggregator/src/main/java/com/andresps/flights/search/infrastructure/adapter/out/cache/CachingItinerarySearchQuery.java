@@ -7,6 +7,7 @@ import com.andresps.flights.search.domain.SearchCriteria;
 import com.andresps.flights.search.domain.SearchSlice;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Objects;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,12 +34,12 @@ public final class CachingItinerarySearchQuery implements ItinerarySearchQuery {
             SearchCacheCodec codec,
             CacheMetrics metrics,
             Duration ttl) {
-        this.delegate = delegate;
-        this.versions = versions;
-        this.cache = cache;
-        this.codec = codec;
-        this.metrics = metrics;
-        this.ttl = ttl;
+        this.delegate = Objects.requireNonNull(delegate, "delegate");
+        this.versions = Objects.requireNonNull(versions, "versions");
+        this.cache = Objects.requireNonNull(cache, "cache");
+        this.codec = Objects.requireNonNull(codec, "codec");
+        this.metrics = Objects.requireNonNull(metrics, "metrics");
+        this.ttl = Objects.requireNonNull(ttl, "ttl");
     }
 
     @Override

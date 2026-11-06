@@ -1,11 +1,13 @@
 package com.andresps.flights.search.infrastructure.adapter.out.cache;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.andresps.flights.support.MutableClock;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
+import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -68,6 +70,24 @@ class ResilientCacheStoreTest {
         store.get("k");
         assertThat(store.get("k")).contains("v");
         assertThat(breaker.getState()).isEqualTo(CircuitBreaker.State.CLOSED);
+    }
+
+    @Test
+    @DisplayName("review: an Error is recorded by the breaker and propagated, not swallowed as a cache failure")
+    void errorsArePropagated() {
+        CacheStore broken = new CacheStore() {
+            @Override
+            public Optional<String> get(String key) {
+                throw new StackOverflowError("test");
+            }
+
+            @Override
+            public void put(String key, String value, Duration ttl) {}
+        };
+        ResilientCacheStore guarded = new ResilientCacheStore(broken, breaker, new CacheMetrics(registry));
+
+        assertThatThrownBy(() -> guarded.get("k")).isInstanceOf(StackOverflowError.class);
+        assertThat(breaker.getMetrics().getNumberOfFailedCalls()).isEqualTo(1);
     }
 
     @Test

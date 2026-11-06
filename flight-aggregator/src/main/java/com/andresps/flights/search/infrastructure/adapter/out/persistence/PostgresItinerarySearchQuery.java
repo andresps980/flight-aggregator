@@ -26,6 +26,9 @@ public final class PostgresItinerarySearchQuery implements ItinerarySearchQuery 
 
     @Override
     public SearchSlice find(SearchCriteria criteria, PagePosition after, int limit, Instant now) {
+        if (limit < 1) {
+            throw new IllegalArgumentException("limit must be positive, got " + limit);
+        }
         ItinerarySearchSql.SqlQuery query = ItinerarySearchSql.page(criteria, after, limit + 1, now);
         List<Row> rows = jdbc.sql(query.sql())
                 .params(query.params())

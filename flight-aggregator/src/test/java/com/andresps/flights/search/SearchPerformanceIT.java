@@ -173,6 +173,8 @@ class SearchPerformanceIT {
                 combination("date + maxPrice", "&date=" + day + "&maxPrice=" + max, null, null, day, max, null, true),
                 combination("carrier", "&carrier=" + c, null, null, null, null, c, true),
                 combination("origin", "&origin=" + o, o, null, null, null, null, true),
+                combination("origin + maxPrice", "&origin=" + o + "&maxPrice=" + max, o, null, null, max, null, true),
+                combination("carrier + maxPrice", "&carrier=" + c + "&maxPrice=" + max, null, null, null, max, c, true),
                 combination(
                         "origin + carrier + maxPrice",
                         "&origin=" + o + "&carrier=" + c + "&maxPrice=" + max,
@@ -183,6 +185,24 @@ class SearchPerformanceIT {
                         c,
                         false),
                 combination("route", "&origin=" + o + "&destination=" + d, o, d, null, null, null, false),
+                combination(
+                        "route + maxPrice",
+                        "&origin=" + o + "&destination=" + d + "&maxPrice=" + max,
+                        o,
+                        d,
+                        null,
+                        max,
+                        null,
+                        false),
+                combination(
+                        "route + date + maxPrice",
+                        "&origin=" + o + "&destination=" + d + "&date=" + day + "&maxPrice=" + max,
+                        o,
+                        d,
+                        day,
+                        max,
+                        null,
+                        false),
                 combination(
                         "route + date",
                         "&origin=" + o + "&destination=" + d + "&date=" + day,

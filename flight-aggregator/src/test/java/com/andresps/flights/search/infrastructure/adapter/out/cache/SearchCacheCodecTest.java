@@ -10,6 +10,7 @@ import com.andresps.flights.search.domain.Freshness;
 import com.andresps.flights.search.domain.ItineraryView;
 import com.andresps.flights.search.domain.PagePosition;
 import com.andresps.flights.search.domain.Route;
+import com.andresps.flights.search.domain.SearchCriteria;
 import com.andresps.flights.search.domain.SearchSlice;
 import com.andresps.flights.search.domain.SegmentView;
 import java.math.BigDecimal;
@@ -82,6 +83,31 @@ class SearchCacheCodecTest {
                 List.of(new Route("BCN", List.of("LHR")), new Route("MAD", List.of("JFK", "LHR"))));
 
         assertThat(codec.readCatalog(codec.write(catalog))).isEqualTo(catalog);
+    }
+
+    /**
+     * Pins the stored format. The cache values are the search records' JSON: if this test has to change (a field
+     * renamed, added or removed), bump the {@code v1} prefix in {@link SearchCacheKeys} in the same commit, so entries
+     * written by the previous version are never read with the new shape.
+     */
+    @Test
+    @DisplayName("review / ADR-0022: the cached format is pinned (a change must bump the key prefix)")
+    void formatIsPinned() {
+        SearchSlice slice = new SearchSlice(
+                List.of(view("K", "2026-11-07T10:00:00Z", "105.00")), new PagePosition(new BigDecimal("105.00"), 7L));
+
+        assertThat(codec.write(slice))
+                .isEqualTo("{\"items\":[{\"itineraryKey\":\"K\",\"origin\":\"MAD\",\"destination\":\"JFK\","
+                        + "\"departureDate\":\"2026-11-07\",\"departureAt\":\"2026-11-07T10:00:00Z\","
+                        + "\"arrivalAt\":\"2026-11-07T18:00:00Z\",\"carrier\":\"IB\",\"stops\":0,"
+                        + "\"segments\":[{\"flightNumber\":\"IB6251\",\"origin\":\"MAD\",\"destination\":\"JFK\","
+                        + "\"departureAt\":\"2026-11-07T10:00:00Z\",\"arrivalAt\":\"2026-11-07T18:00:00Z\"}],"
+                        + "\"basePrice\":100.00,\"finalPrice\":105.00,\"selectedProvider\":\"mock-alpha\","
+                        + "\"providers\":[\"mock-alpha\",\"mock-gamma\"],"
+                        + "\"freshness\":{\"status\":\"COMPLETE\",\"publishedAt\":\"2026-11-06T10:00:00Z\","
+                        + "\"missingProviders\":[],\"staleSince\":null}}],"
+                        + "\"next\":{\"finalPrice\":105.00,\"id\":7}}");
+        assertThat(SearchCacheKeys.search(1, SearchCriteria.none(), null, 20)).startsWith("search:v1:");
     }
 
     @Test
