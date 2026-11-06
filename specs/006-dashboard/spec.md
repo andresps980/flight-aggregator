@@ -212,6 +212,13 @@ No backend change beyond the OpenAPI follow-up above. Consumed endpoints (all sa
 - **Robustness**: every request has a timeout (10 s) via `AbortController`; unmounted or superseded requests are
   aborted.
 
+## Follow-ups (next PR)
+
+- **Providers table wraps mid-word** in the narrow left column ("COMPLE TED", "CLOS ED", "failure s"; visible in
+  `docs/images/dashboard*.png`), a side effect of `overflow-wrap: anywhere` on panels. Fix: table cells wrap only at
+  spaces, slightly smaller text, failures as a count; the table keeps scrolling inside its panel if it still does not
+  fit. The author retakes the screenshots then, together with the final ones.
+
 ## Open questions
 
 All resolved (2026-11-06):

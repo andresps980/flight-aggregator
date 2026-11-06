@@ -308,6 +308,74 @@ passed by comparing the file with itself** (the misleading green noted above). N
 - Code scanning: **0 alerts** in both languages (nothing to fix or dismiss).
 - The pre-push hook ran both gates before the push (`./mvnw verify` and the frontend checks): 78 s.
 
+## Incident: CI red after a docs-only push (flaky `HttpProviderFeedIT`)
+
+**Prompts:**
+
+````text
+CI is red on PR #8: "Build, tests & coverage" failed in the step "Unit + integration tests,
+architecture rules, coverage gate" — probably on the run triggered by your last docs-only push,
+after you reported the checks. Investigate:
+
+1. gh pr checks 8, then gh run view <run-id> --log-failed (and download the test-reports
+   artifact if needed) to find exactly which test(s) failed and why.
+2. If it is a flaky test (likely, since the last commit was docs-only), don't just re-run it:
+   find the root cause (timing, ordering, shared state, slower CI runner), fix it, and prove
+   the fix (e.g. run that test class repeatedly locally). Show me the diagnosis before fixing.
+3. From now on, after every push, wait for the CI run of the latest commit and report its
+   result, not an earlier run's.
+4. Record the incident in docs/ai/008.
+
+About the providers table wrapping mid-word: leave it for the next PR (I'll retake the
+screenshots there together with the final ones). Add it as a follow-up note.
+````
+
+````text
+Go ahead with fixes 1–3. Adjustments:
+- The deterministic reproduction (400 ms delayed first response: fails before, passes after) is
+  the key proof; for the stress check, 10 runs after the fix are enough, no need for 30 + 30.
+- Also add the rule "after every push, wait for the CI run of the pushed commit and report that
+  one (by SHA)" to CLAUDE.md's git workflow section, so it's a shared project rule, not only
+  your personal memory.
+- Accept the remaining risk on the timeout tests' own retry.
+Then ./mvnw verify, push, wait for the CI run of that commit and report it by SHA.
+````
+
+**What went wrong in the process.** The agent reported PR 8's checks as green from the run of `603e906`, then pushed
+a docs-only commit (`de8ac63`) and did not wait for its run. That run failed; the author found it. The rule "after
+every push, wait for the run of the pushed commit and report it by SHA" is now in CLAUDE.md (git workflow) and in the
+agent's memory.
+
+**What failed.** Run 42259407544, one test: `HttpProviderFeedIT.fetchesPartition` — `partition.attempts()` was 2,
+expected 1. The same code had passed one commit earlier; the commit only touched Markdown. Every other ERROR line in
+the log came from tests that provoke failures on purpose.
+
+**Diagnosis.**
+- The class tests the real retry/breaker code against WireMock with scaled-down timeouts: **300 ms read timeout**, 3
+  attempts. Any response slower than 300 ms is retried — an extra attempt.
+- `fetchesPartition` runs **first** in the class (JUnit's deterministic order, per the CI report) and took **1.283 s**,
+  against 25–45 ms for comparable warm fetches: one timed-out attempt plus a successful retry.
+- The first request pays the cold start (JDK HTTP client and parser class loading, WireMock's first request, JIT) in
+  a JVM that already holds the Spring contexts cached by earlier ITs, on a 2-vCPU runner; a GC pause or contention put
+  it past 300 ms. Locally the cold first test took 0.33 s (1.0 s with an interpreter-only, 1-CPU JVM) but never failed.
+- Not provable from the CI log: the adapter did not log retried attempts. Twelve other tests asserted exact counts
+  under the same 300 ms timeout without being about timeouts — the same latent flakiness.
+
+**Fix** (approved by the author; the timeout tests' own successful retry within 300 ms is an accepted residual risk):
+1. Tests that are not about timeouts use `NOT_ABOUT_TIMEOUTS` (5 s read, 10 s attempt, same retries and breaker);
+   only the timeout tests keep `SCALED`. Rule added to CLAUDE.md's testing conventions.
+2. `@BeforeAll` warm-up: one throwaway fetch through the same code, then WireMock's journal is reset.
+3. `HttpProviderFeed` logs every failed attempt at INFO (`Attempt 1/3 for mock-gamma 2026-11-06 failed: TIMEOUT (no
+   data for PT0.3S (read timeout))`), so the next extra attempt explains itself in the CI log.
+
+**Proof.**
+- Deterministic reproduction, `slowRunnerIsNotAnExtraAttempt` (first response delayed 400 ms, more than the 300 ms
+  timeout): with the old settings it fails exactly like CI (`expected: 1 but was: 2`); with the fix it passes (20/20
+  in the class).
+- Stress: the class 10 times in fresh JVMs with every CPU core busy (`yes` × 10): **0/10 failures**; the first test now
+  takes 41–69 ms (330 ms cold before the warm-up).
+- `./mvnw verify` and the CI run of the fix commit: below.
+
 ## Verification
 
 - `./mvnw verify` (both modules, unit + integration tests, ArchUnit, coverage gates, Spotless): **green in 65 s**
