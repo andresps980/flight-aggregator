@@ -27,3 +27,5 @@ New ADR: copy [`0000-template.md`](0000-template.md) or run `/adr` in Claude Cod
 | [0020](0020-search-indexes.md) | Minimal search index set, chosen by EXPLAIN on 1M rows | Accepted |
 | [0021](0021-search-cursor.md) | Opaque, unsigned keyset cursor with a filter fingerprint | Accepted |
 | [0022](0022-search-cache.md) | Redis cache-aside keyed by a transactional data version, as a decorator of the query ports | Accepted |
+| [0023](0023-real-time-by-polling.md) | Real-time dashboard by polling the latest ingestion run | Accepted |
+| [0024](0024-contract-generated-client-and-frontend-toolchain.md) | Contract-generated TypeScript client and the frontend toolchain | Accepted |

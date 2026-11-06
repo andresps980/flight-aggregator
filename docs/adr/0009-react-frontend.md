@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-11-04
-- **Related spec:** to be written (dashboard)
+- **Related spec:** [specs/006-dashboard](../../specs/006-dashboard/spec.md)
 
 ## Context
 
@@ -16,7 +16,7 @@ We will build a **React + TypeScript** single-page app with **Vite**, in a `fron
 
 - **No state-management libraries** (no Redux, Zustand, React Query…): component state and hooks are enough for a
   search form, a result list with "load more" (keyset cursor, ADR-0008) and ingestion status.
-- Typed API client over `fetch` mirroring the backend DTOs.
+- Typed API client over `fetch` mirroring the backend DTOs (*amended by [ADR-0024](0024-contract-generated-client-and-frontend-toolchain.md): the types are generated from the OpenAPI description*).
 - Production build served by **nginx** in its own container, which also proxies `/api` to `flight-aggregator`
   (same origin, no CORS configuration needed).
 
@@ -32,4 +32,5 @@ We will build a **React + TypeScript** single-page app with **Vite**, in a `fron
 - **Positive:** small, typed codebase; static assets with no Node runtime in production; simple compose topology.
 - **Negative / trade-offs:** caching/retry logic that React Query would provide is written by hand; the frontend is
   outside the Maven build, so it needs its own lint/test steps in CI.
-- **Follow-ups:** dashboard spec; add frontend build/test to CI when the module exists.
+- **Follow-ups:** dashboard spec; add frontend build/test to CI when the module exists. *Done in spec 006 (ADR-0023,
+  ADR-0024).*
