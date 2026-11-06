@@ -49,6 +49,17 @@
             <artifactId>postgresql</artifactId>
         </dependency>
 
+        <!-- Search cache (spec 005, ADR-0022): Lettuce client; Redis code stays in the cache adapter (ArchUnit) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+        <!-- OpenAPI description of the search API at /v3/api-docs and Swagger UI (spec 005, AC-24) -->
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+        </dependency>
+
         <dependency>
             <groupId>io.github.resilience4j</groupId>
             <artifactId>resilience4j-circuitbreaker</artifactId>
