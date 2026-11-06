@@ -2,9 +2,17 @@ package com.andresps.flights.search;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.andresps.flights.ingestion.domain.CircuitState;
+import com.andresps.flights.ingestion.domain.DayOutcome;
+import com.andresps.flights.ingestion.domain.FailureKind;
+import com.andresps.flights.ingestion.domain.IngestionStatus;
+import com.andresps.flights.ingestion.domain.IngestionTrigger;
+import com.andresps.flights.ingestion.domain.RunStatus;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
+import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
@@ -14,7 +22,8 @@ import tools.jackson.databind.node.ObjectNode;
 /**
  * Spec 005 AC-24: the OpenAPI description published by the application ({@code /v3/api-docs}) is the one committed in
  * {@code docs/api/openapi.json}, so the frontend and reviewers read the real contract. After an intended API change,
- * regenerate it with {@code -Dopenapi.write=true} and review the diff.
+ * regenerate it with {@code -Dopenapi.write=true} and review the diff. Spec 006 (backend follow-up) adds the ingestion
+ * endpoints and exact required/nullable properties, because the dashboard generates its TypeScript types from it.
  */
 class OpenApiContractIT extends SearchSpringTest {
 
@@ -86,5 +95,80 @@ class OpenApiContractIT extends SearchSpringTest {
         assertThat(spec.at("/components/schemas/ItineraryPageResponse/properties/nextCursor/description")
                         .asString())
                 .contains("shorter than");
+    }
+
+    @Test
+    @DisplayName("spec 006: ingestion endpoints are described with 202 + Location, 409 problem, 200/400/404")
+    void describesTheIngestionApi() {
+        JsonNode spec = published();
+        JsonNode post = spec.at("/paths/~1api~1v1~1ingestions/post");
+        JsonNode latest = spec.at("/paths/~1api~1v1~1ingestions~1latest/get");
+        JsonNode byId = spec.at("/paths/~1api~1v1~1ingestions~1{id}/get");
+
+        assertThat(post.get("responses").propertyNames()).containsExactlyInAnyOrder("202", "409");
+        assertThat(post.at("/responses/202/headers/Location").isMissingNode()).isFalse();
+        assertThat(post.at("/responses/202/content/application~1json/schema/$ref")
+                        .asString())
+                .endsWith("/IngestionRunResponse");
+        assertThat(post.at("/responses/409/content/application~1problem+json/schema/$ref")
+                        .asString())
+                .endsWith("/IngestionAlreadyRunningProblem");
+        assertThat(spec.at("/components/schemas/IngestionAlreadyRunningProblem/properties/runningIngestionId")
+                        .isMissingNode())
+                .isFalse();
+
+        assertThat(latest.get("responses").propertyNames()).containsExactlyInAnyOrder("200", "404");
+        assertThat(byId.get("responses").propertyNames()).containsExactlyInAnyOrder("200", "400", "404");
+        assertThat(latest.at("/responses/404/content/application~1problem+json").isMissingNode())
+                .isFalse();
+    }
+
+    @Test
+    @DisplayName("spec 006: documented enumerations match the Java enums they are written from")
+    void enumerationsMatchTheCode() {
+        JsonNode schemas = published().at("/components/schemas");
+
+        assertThat(enumOf(schemas, "IngestionRunResponse", "status")).isEqualTo(names(RunStatus.values()));
+        assertThat(enumOf(schemas, "IngestionRunResponse", "trigger")).isEqualTo(names(IngestionTrigger.values()));
+        assertThat(enumOf(schemas, "ReportDocument", "status")).isEqualTo(names(IngestionStatus.values()));
+        assertThat(enumOf(schemas, "ProviderDocument", "status")).isEqualTo(names(IngestionStatus.values()));
+        assertThat(enumOf(schemas, "ProviderDocument", "circuitState")).isEqualTo(names(CircuitState.values()));
+        assertThat(enumOf(schemas, "FailureDocument", "kind")).isEqualTo(names(FailureKind.values()));
+        assertThat(enumOf(schemas, "DayDocument", "outcome")).isEqualTo(names(DayOutcome.values()));
+    }
+
+    @Test
+    @DisplayName("spec 006: response properties are required (nullable where null), ProblemDetail is flat")
+    void responsePropertiesAreExact() {
+        JsonNode schemas = published().at("/components/schemas");
+
+        for (String name :
+                List.of("ItineraryPageResponse", "ItineraryResponse", "IngestionRunResponse", "DayDocument")) {
+            assertThat(schemas.at("/" + name + "/required").valueStream().map(JsonNode::asString))
+                    .as(name)
+                    .containsExactlyInAnyOrderElementsOf(
+                            schemas.at("/" + name + "/properties").propertyNames());
+        }
+        assertThat(schemas.at("/IngestionRunResponse/properties/finishedAt/type")
+                        .valueStream()
+                        .map(JsonNode::asString))
+                .contains("null");
+        assertThat(schemas.at("/ProblemDetail/properties/properties").isMissingNode())
+                .isTrue();
+        assertThat(schemas.at("/IngestionAlreadyRunningProblem/required")
+                        .valueStream()
+                        .map(JsonNode::asString))
+                .containsExactlyInAnyOrder("type", "title", "status", "detail", "instance");
+    }
+
+    private static List<String> enumOf(JsonNode schemas, String schema, String property) {
+        return schemas.at("/" + schema + "/properties/" + property + "/enum")
+                .valueStream()
+                .map(JsonNode::asString)
+                .toList();
+    }
+
+    private static List<String> names(Enum<?>[] values) {
+        return Arrays.stream(values).map(Enum::name).toList();
     }
 }

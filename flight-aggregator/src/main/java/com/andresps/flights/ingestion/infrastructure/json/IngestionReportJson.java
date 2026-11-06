@@ -12,6 +12,7 @@ import com.andresps.flights.ingestion.domain.IngestionReport;
 import com.andresps.flights.ingestion.domain.MalformedReason;
 import com.andresps.flights.ingestion.domain.PartitionFailure;
 import com.andresps.flights.ingestion.domain.ProviderReport;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -30,7 +31,8 @@ import tools.jackson.databind.json.JsonMapper;
 /**
  * The JSON form of an {@link IngestionReport} (spec 004): stored in {@code ingestion_run.report} and returned by the
  * REST API, so the database and the API show the same document. Instants and durations are ISO-8601 (exact); derived
- * figures (statuses, totals, {@code durationMs}) are included for readers and ignored when reading back.
+ * figures (statuses, totals, {@code durationMs}) are included for readers and ignored when reading back. The
+ * {@code @Schema} annotations only document the enumerated values in the OpenAPI description (spec 006).
  */
 public final class IngestionReportJson {
 
@@ -46,9 +48,13 @@ public final class IngestionReportJson {
         return JSON.readValue(json, ReportDocument.class).toDomain();
     }
 
+    @Schema(description = "Ingestion report of a finished run (spec 003, spec 004)")
     public record ReportDocument(
             String runId,
+
+            @Schema(allowableValues = {"COMPLETED", "PARTIAL", "FAILED"})
             String status,
+
             String startedAt,
             String finishedAt,
             String duration,
@@ -85,9 +91,13 @@ public final class IngestionReportJson {
         }
     }
 
+    @Schema(description = "What one provider delivered in the run")
     public record ProviderDocument(
             String provider,
+
+            @Schema(allowableValues = {"COMPLETED", "PARTIAL", "FAILED"})
             String status,
+
             int partitionsRequested,
             int partitionsSucceeded,
             int partitionsFailed,
@@ -95,7 +105,12 @@ public final class IngestionReportJson {
             int attempts,
             String duration,
             long durationMs,
+
+            @Schema(
+                    description = "State of the provider's circuit breaker at the end of the run",
+                    allowableValues = {"CLOSED", "OPEN", "HALF_OPEN"})
             String circuitState,
+
             long recordsReceived,
             long offersReceived,
             SortedMap<String, Long> malformed) {
@@ -131,7 +146,25 @@ public final class IngestionReportJson {
         }
     }
 
-    public record FailureDocument(String day, String kind, int attempts, String detail) {
+    @Schema(description = "A partition (provider, day) that could not be fetched")
+    public record FailureDocument(
+            String day,
+
+            @Schema(
+                    allowableValues = {
+                        "TIMEOUT",
+                        "SERVER_ERROR",
+                        "CLIENT_ERROR",
+                        "IO_ERROR",
+                        "MALFORMED_DOCUMENT",
+                        "CIRCUIT_OPEN",
+                        "RUN_TIMEOUT",
+                        "UNEXPECTED_ERROR"
+                    })
+            String kind,
+
+            int attempts,
+            String detail) {
 
         static FailureDocument of(PartitionFailure failure) {
             return new FailureDocument(
@@ -143,11 +176,15 @@ public final class IngestionReportJson {
         }
     }
 
+    @Schema(description = "What the run did with one horizon day")
     public record DayDocument(
             String day,
             List<String> contributing,
             List<String> missing,
+
+            @Schema(allowableValues = {"REPLACED", "PUBLISHED_INCOMPLETE", "KEPT_STALE", "NO_DATA", "WRITE_FAILED"})
             String outcome,
+
             boolean published,
             int storedItineraries,
             int misfiledItineraries,
