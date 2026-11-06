@@ -7,11 +7,14 @@ import com.andresps.flights.aggregation.domain.model.ProviderId;
 import com.andresps.flights.aggregation.domain.pricing.MarkupPolicy;
 import com.andresps.flights.aggregation.domain.validation.ItineraryValidator;
 import com.andresps.flights.ingestion.application.port.in.IngestFlightsUseCase;
+import com.andresps.flights.ingestion.application.port.in.PublicationGuard;
+import com.andresps.flights.ingestion.application.port.in.RunLockLostException;
 import com.andresps.flights.ingestion.application.port.out.DayAggregationSink;
 import com.andresps.flights.ingestion.application.port.out.PartitionFetchException;
 import com.andresps.flights.ingestion.application.port.out.ProviderFeed;
 import com.andresps.flights.ingestion.domain.CircuitState;
 import com.andresps.flights.ingestion.domain.DayAggregation;
+import com.andresps.flights.ingestion.domain.DayPublication;
 import com.andresps.flights.ingestion.domain.DayReport;
 import com.andresps.flights.ingestion.domain.FailureKind;
 import com.andresps.flights.ingestion.domain.IngestionReport;
@@ -57,7 +60,12 @@ import org.slf4j.LoggerFactory;
  * <p>Provider failures never fail the run: they become {@link PartitionFailure}s in the report. When the run deadline
  * expires, unfinished partitions are cancelled (their threads interrupted) and reported as {@code RUN_TIMEOUT}.
  *
- * <p>Must not be invoked concurrently (ADR-0006): the guard belongs to the trigger.
+ * <p>Each finished day goes to the sink, which decides what happens to the stored snapshot (spec 004); a day where
+ * every provider failed is reported to it as unavailable. Before each day is handed over the caller's
+ * {@link PublicationGuard} is asked: once it says the run lost its lock, nothing more is published, days not yet
+ * started are skipped, and the call ends with {@link RunLockLostException} (ADR-0019).
+ *
+ * <p>Must not be invoked concurrently (ADR-0006): {@code IngestionRunService} guards it with the run lock.
  */
 public final class IngestionService implements IngestFlightsUseCase {
 
@@ -92,8 +100,9 @@ public final class IngestionService implements IngestFlightsUseCase {
     }
 
     @Override
-    public IngestionReport ingest() {
-        UUID runId = UUID.randomUUID();
+    public IngestionReport ingest(UUID runId, PublicationGuard guard) {
+        Objects.requireNonNull(runId, "runId");
+        Objects.requireNonNull(guard, "guard");
         Instant startedAt = clock.instant();
         LocalDate reference = LocalDate.ofInstant(startedAt, ZoneOffset.UTC);
         List<LocalDate> days = IntStream.rangeClosed(1, settings.horizonDays())
@@ -101,8 +110,12 @@ public final class IngestionService implements IngestFlightsUseCase {
                 .toList();
 
         // "Now" is read once per run and shared by every day (ADR-0011).
-        Run run = new Run(days.size(), ItineraryValidator.withDefaultRules(clock));
+        Run run = new Run(runId, guard, days.size(), ItineraryValidator.withDefaultRules(clock));
         List<DayReport> dayReports = run.execute(days);
+        if (run.lockLost) {
+            LOG.error("Ingestion {} lost its lock and stopped publishing", runId);
+            throw new RunLockLostException();
+        }
 
         AggregationStatistics statistics = dayReports.stream()
                 .map(DayReport::statistics)
@@ -132,6 +145,9 @@ public final class IngestionService implements IngestFlightsUseCase {
     /** State of one run: deadline, concurrency limits and per-provider tallies. */
     private final class Run {
 
+        private final UUID runId;
+        private final PublicationGuard guard;
+        private volatile boolean lockLost;
         private final int partitionsPerProvider;
         private final ItineraryValidator validator;
         private final long deadline;
@@ -140,7 +156,9 @@ public final class IngestionService implements IngestFlightsUseCase {
         private final Map<ProviderId, ProviderTally> tallies = new LinkedHashMap<>();
         private ExecutorService executor;
 
-        Run(int partitionsPerProvider, ItineraryValidator validator) {
+        Run(UUID runId, PublicationGuard guard, int partitionsPerProvider, ItineraryValidator validator) {
+            this.runId = runId;
+            this.guard = guard;
             this.partitionsPerProvider = partitionsPerProvider;
             this.validator = validator;
             this.deadline = System.nanoTime() + settings.runTimeout().toNanos();
@@ -187,10 +205,13 @@ public final class IngestionService implements IngestFlightsUseCase {
         }
 
         private DayReport runDay(LocalDate day) throws InterruptedException {
-            if (!dayPermits.tryAcquire(remainingNanos(), TimeUnit.NANOSECONDS)) {
+            if (lockLost || !dayPermits.tryAcquire(remainingNanos(), TimeUnit.NANOSECONDS)) {
                 return dayNotStarted(day);
             }
             try {
+                if (lockLost) {
+                    return dayNotStarted(day);
+                }
                 return aggregateDay(day);
             } finally {
                 dayPermits.release();
@@ -203,7 +224,9 @@ public final class IngestionService implements IngestFlightsUseCase {
                 tallies.get(feed.provider()).record(PartitionOutcome.runTimeout(feed.provider(), day));
                 missing.add(feed.provider());
             }
-            return new DayReport(day, new TreeSet<>(), missing, false, AggregationStatistics.empty());
+            DayPublication publication = publish(
+                    day, new AggregationResult(List.of(), AggregationStatistics.empty()), new TreeSet<>(), missing);
+            return new DayReport(day, new TreeSet<>(), missing, publication, AggregationStatistics.empty());
         }
 
         private DayReport aggregateDay(LocalDate day) throws InterruptedException {
@@ -230,8 +253,8 @@ public final class IngestionService implements IngestFlightsUseCase {
             }
 
             AggregationResult result = aggregator.result();
-            boolean published = !contributing.isEmpty() && publish(day, result, contributing, missing);
-            return new DayReport(day, contributing, missing, published, result.statistics());
+            DayPublication publication = publish(day, result, contributing, missing);
+            return new DayReport(day, contributing, missing, publication, result.statistics());
         }
 
         private void consume(
@@ -252,18 +275,26 @@ public final class IngestionService implements IngestFlightsUseCase {
             }
         }
 
-        /** A sink failure loses that day's publication, not the run: the day is reported as not published. */
-        private boolean publish(
+        /**
+         * Hands the day to the sink (as unavailable when no provider contributed), unless the run lost its lock. A sink
+         * failure loses that day, not the run: it is reported as {@code WRITE_FAILED}.
+         */
+        private DayPublication publish(
                 LocalDate day,
                 AggregationResult result,
                 SortedSet<ProviderId> contributing,
                 SortedSet<ProviderId> missing) {
+            if (lockLost || !guard.mayPublish()) {
+                lockLost = true;
+                return DayPublication.noData();
+            }
             try {
-                sink.publish(new DayAggregation(day, result, contributing, missing));
-                return true;
+                return contributing.isEmpty()
+                        ? sink.unavailable(runId, day)
+                        : sink.publish(new DayAggregation(runId, day, result, contributing, missing));
             } catch (RuntimeException e) {
-                LOG.error("Publishing {} failed; the day is reported as not published", day, e);
-                return false;
+                LOG.error("Publishing {} failed; the day is reported as WRITE_FAILED", day, e);
+                return DayPublication.writeFailed();
             }
         }
 

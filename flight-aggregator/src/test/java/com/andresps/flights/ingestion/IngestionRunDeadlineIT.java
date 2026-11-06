@@ -25,7 +25,9 @@ import com.github.tomakehurst.wiremock.WireMockServer;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.UUID;
+import javax.sql.DataSource;
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -54,6 +56,14 @@ import org.springframework.test.context.DynamicPropertySource;
         })
 @Import(TestPostgres.class)
 class IngestionRunDeadlineIT {
+
+    @Autowired
+    private DataSource dataSource;
+
+    @BeforeEach
+    void emptyTables() {
+        TestPostgres.truncateAll(dataSource);
+    }
 
     private static final WireMockServer SERVER = startServer();
 

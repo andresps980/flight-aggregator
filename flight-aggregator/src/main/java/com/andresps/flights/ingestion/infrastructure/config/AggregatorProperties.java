@@ -1,6 +1,7 @@
 package com.andresps.flights.ingestion.infrastructure.config;
 
 import com.andresps.flights.ingestion.application.service.IngestionSettings;
+import com.andresps.flights.ingestion.infrastructure.adapter.in.scheduling.ScheduleSettings;
 import com.andresps.flights.ingestion.infrastructure.adapter.out.provider.CircuitBreakerSettings;
 import com.andresps.flights.ingestion.infrastructure.adapter.out.provider.ResilienceSettings;
 import com.andresps.flights.ingestion.infrastructure.adapter.out.provider.RetrySettings;
@@ -25,13 +26,16 @@ import org.springframework.boot.context.properties.bind.Name;
  * aggregator.providers.&lt;id&gt;.resilience.*      per-provider overrides of aggregator.resilience.default.*
  * aggregator.ingestion.*                        horizon, markup, concurrency, run deadline
  * aggregator.resilience.default.*               timeouts, retry and circuit breaker of every provider
+ * aggregator.ingestion.schedule.*               scheduled runs (spec 004)
+ * aggregator.persistence.*                      max stale age of a day snapshot, run history (spec 004)
  * </pre>
  */
 @ConfigurationProperties("aggregator")
 public record AggregatorProperties(
         Map<String, ProviderProperties> providers,
         @DefaultValue IngestionProperties ingestion,
-        @DefaultValue ResilienceProperties resilience) {
+        @DefaultValue ResilienceProperties resilience,
+        @DefaultValue PersistenceProperties persistence) {
 
     public AggregatorProperties {
         Map<String, ProviderProperties> copy = new LinkedHashMap<>(providers == null ? Map.of() : providers);
@@ -50,6 +54,7 @@ public record AggregatorProperties(
         });
         // fail fast on invalid values: resolve everything once
         ingestion.validate();
+        persistence.validate();
         ResilienceProperties defaults = resilience;
         copy.forEach((id, provider) -> resolve(defaults, id, provider));
     }
@@ -90,7 +95,8 @@ public record AggregatorProperties(
             @DefaultValue("5") BigDecimal markupPercentage,
             @DefaultValue("2") int maxConcurrentDays,
             @DefaultValue("2") int maxConcurrentPartitions,
-            @DefaultValue("10m") Duration runTimeout) {
+            @DefaultValue("10m") Duration runTimeout,
+            @DefaultValue ScheduleSettings schedule) {
 
         // Validated by the enclosing record: the binder may build intermediate instances of nested records.
         void validate() {
@@ -105,6 +111,23 @@ public record AggregatorProperties(
             return named(
                     "aggregator.ingestion.",
                     () -> new IngestionSettings(horizonDays, maxConcurrentDays, maxConcurrentPartitions, runTimeout));
+        }
+    }
+
+    /** Spec 004: how long a stale day snapshot is kept against partial data (ADR-0017), and how long runs are kept. */
+    public record PersistenceProperties(
+            @DefaultValue("2h") Duration maxStaleAge,
+            @DefaultValue("7d") Duration runRetention) {
+
+        void validate() {
+            if (maxStaleAge == null || maxStaleAge.isNegative() || maxStaleAge.isZero()) {
+                throw new IllegalArgumentException(
+                        "aggregator.persistence.max-stale-age must be positive, got " + maxStaleAge);
+            }
+            if (runRetention == null || runRetention.isNegative() || runRetention.isZero()) {
+                throw new IllegalArgumentException(
+                        "aggregator.persistence.run-retention must be positive, got " + runRetention);
+            }
         }
     }
 

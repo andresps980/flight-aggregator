@@ -3,9 +3,7 @@ package com.andresps.flights.ingestion;
 import static com.andresps.flights.ingestion.Reconciliation.assertAggregationReconciles;
 import static com.andresps.flights.ingestion.Reconciliation.assertReconciles;
 import static com.andresps.flights.ingestion.RecordedGdsMock.DAYS;
-import static com.andresps.flights.ingestion.RecordedGdsMock.PROVIDERS;
 import static com.andresps.flights.ingestion.RecordedGdsMock.stats;
-import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.options;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.andresps.flights.ingestion.application.port.in.StartIngestionUseCase;
@@ -19,75 +17,21 @@ import com.andresps.flights.ingestion.domain.IngestionTrigger;
 import com.andresps.flights.ingestion.domain.RunStatus;
 import com.andresps.flights.ingestion.infrastructure.adapter.out.persistence.SnapshotFixtures;
 import com.andresps.flights.support.StoredData;
-import com.andresps.flights.support.TestPostgres;
-import com.github.tomakehurst.wiremock.WireMockServer;
-import io.github.resilience4j.circuitbreaker.CircuitBreaker;
-import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
-import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
-import javax.sql.DataSource;
-import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Import;
-import org.springframework.context.annotation.Primary;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 
 /**
  * Spec 004 AC-24 (with AC-12, AC-13, AC-14): the whole pipeline inside the application: WireMock serving the feeds
  * recorded from gds-mock → ingestion → PostgreSQL; stored rows and the persisted report reconcile with the recorded
  * expected figures.
  */
-@SpringBootTest(
-        webEnvironment = SpringBootTest.WebEnvironment.NONE,
-        properties = {
-            "spring.main.allow-bean-definition-overriding=true",
-            "aggregator.ingestion.max-concurrent-days=7",
-            "aggregator.ingestion.max-concurrent-partitions=7",
-            "aggregator.ingestion.run-timeout=30s",
-            "aggregator.resilience.default.read-timeout=2s",
-            "aggregator.resilience.default.attempt-timeout=10s",
-            "aggregator.resilience.default.retry.initial-backoff=10ms"
-        })
-@Import(TestPostgres.class)
-class IngestionPipelineIT {
-
-    private static final WireMockServer SERVER = startServer();
-
-    private static WireMockServer startServer() {
-        WireMockServer server = new WireMockServer(options().dynamicPort());
-        server.start();
-        RecordedGdsMock.stubAll(server);
-        return server;
-    }
-
-    @DynamicPropertySource
-    static void providers(DynamicPropertyRegistry registry) {
-        PROVIDERS.forEach(p -> registry.add("aggregator.providers." + p + ".base-url", SERVER::baseUrl));
-    }
-
-    @TestConfiguration
-    static class FixedClock {
-        @Bean
-        @Primary
-        Clock clock() {
-            return RecordedGdsMock.CLOCK;
-        }
-    }
-
-    @AfterAll
-    static void stopServer() {
-        SERVER.stop();
-    }
+class IngestionPipelineIT extends RecordedFeedsSpringTest {
 
     @Autowired
     private StartIngestionUseCase ingestions;
@@ -98,18 +42,10 @@ class IngestionPipelineIT {
     @Autowired
     private DaySnapshotStore snapshots;
 
-    @Autowired
-    private DataSource dataSource;
-
-    @Autowired
-    private CircuitBreakerRegistry breakers;
-
     private StoredData stored;
 
     @BeforeEach
-    void reset() {
-        TestPostgres.truncateAll(dataSource);
-        breakers.getAllCircuitBreakers().forEach(CircuitBreaker::reset);
+    void storedData() {
         stored = new StoredData(dataSource);
     }
 
@@ -151,7 +87,8 @@ class IngestionPipelineIT {
     @Test
     @DisplayName("AC-12: a run deletes past days and runs older than 7 days; AC-13: the table is analyzed afterwards")
     void retentionAndStatistics() {
-        LocalDate yesterday = LocalDate.now(RecordedGdsMock.CLOCK).minusDays(1);
+        LocalDate yesterday = LocalDate.ofInstant(RecordedGdsMock.CLOCK.instant(), java.time.ZoneOffset.UTC)
+                .minusDays(1);
         snapshots.replace(
                 SnapshotFixtures.complete(yesterday, UUID.randomUUID(), SnapshotFixtures.itineraries(yesterday, 3)));
         IngestionRun ancient = IngestionRun.started(

@@ -2,24 +2,18 @@ package com.andresps.flights.ingestion.infrastructure.adapter.out.persistence;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.andresps.flights.support.TestPostgres;
+import com.andresps.flights.ingestion.RecordedFeedsSpringTest;
 import java.util.List;
-import javax.sql.DataSource;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
-/** Spec 004 AC-1: Flyway creates the schema at startup, and a migrated database gets nothing more. */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
-@Import(TestPostgres.class)
-class MigrationsIT {
-
-    @Autowired
-    private DataSource dataSource;
+/**
+ * Spec 004 AC-1: Flyway creates the schema when the application starts (the shared recorded-feeds context), and a
+ * migrated database gets nothing more.
+ */
+class MigrationsIT extends RecordedFeedsSpringTest {
 
     private List<String> columns(String table) {
         return JdbcClient.create(dataSource)

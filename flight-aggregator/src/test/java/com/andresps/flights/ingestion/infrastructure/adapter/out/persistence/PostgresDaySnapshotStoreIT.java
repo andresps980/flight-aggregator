@@ -69,11 +69,12 @@ class PostgresDaySnapshotStoreIT {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("loaders")
-    @DisplayName("AC-10: every field round-trips exactly (instants, prices at scale 2, providers, segments in order)")
+    @DisplayName(
+            "AC-10: every field round-trips exactly (instants, prices at scale 2 up to the Money maximum, providers, segments in order)")
     void roundTrip(ItineraryBulkLoader loader) {
         AggregatedItinerary connecting = itinerary(DAY, 0);
         AggregatedItinerary direct = itinerary(DAY, 1);
-        AggregatedItinerary expensive = withPrices(itinerary(DAY, 2), "999999999.99", "1049999999.99");
+        AggregatedItinerary expensive = withPrices(itinerary(DAY, 2), "952380952.38", "999999999.99");
 
         new PostgresDaySnapshotStore(dataSource, loader)
                 .replace(complete(DAY, RUN_A, List.of(connecting, direct, expensive)));

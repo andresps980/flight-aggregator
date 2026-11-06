@@ -13,7 +13,9 @@ import com.andresps.flights.support.TestPostgres;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.util.UUID;
+import javax.sql.DataSource;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -41,6 +43,14 @@ import tools.jackson.databind.json.JsonMapper;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @Import(TestPostgres.class)
 class IngestionReconciliationE2EIT {
+
+    @Autowired
+    private DataSource dataSource;
+
+    @BeforeEach
+    void emptyTables() {
+        TestPostgres.truncateAll(dataSource);
+    }
 
     private static final String MOCK_URL = System.getProperty("e2e.gds-mock.url", "http://localhost:8081");
     private static final RestClient MOCK = RestClient.create(MOCK_URL);

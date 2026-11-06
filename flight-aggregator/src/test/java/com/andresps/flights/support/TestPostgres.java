@@ -65,6 +65,8 @@ public class TestPostgres {
             pool.setUsername(CONTAINER.getUsername());
             pool.setPassword(CONTAINER.getPassword());
             pool.setMaximumPoolSize(8);
+            // Lets the batched-INSERT loader be measured at its best (ADR-0018); no effect on COPY.
+            pool.addDataSourceProperty("reWriteBatchedInserts", "true");
             Flyway.configure().dataSource(pool).load().migrate();
             dataSource = pool;
         }

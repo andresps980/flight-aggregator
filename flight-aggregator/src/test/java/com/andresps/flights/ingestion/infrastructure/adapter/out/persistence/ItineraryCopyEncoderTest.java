@@ -93,7 +93,8 @@ class ItineraryCopyEncoderTest {
         String encoded = encode(List.of(row, itinerary(DAY, 2)));
 
         String[] lines = encoded.split("\n", -1);
-        assertThat(lines).hasSize(3).last().isEqualTo("");
+        assertThat(lines).hasSize(3);
+        assertThat(lines[2]).isEmpty();
         assertThat(lines[0].split("\t", -1)).hasSize(ItineraryCopyEncoder.COLUMNS.size());
         assertThat(lines[0]).doesNotContain("\r");
         assertThat(ItineraryCopyEncoder.text("a\tb\nc\rd\\e")).isEqualTo("a\\tb\\nc\\rd\\\\e");

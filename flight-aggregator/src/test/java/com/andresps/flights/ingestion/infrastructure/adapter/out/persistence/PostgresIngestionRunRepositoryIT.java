@@ -7,7 +7,7 @@ import com.andresps.flights.ingestion.domain.IngestionReport;
 import com.andresps.flights.ingestion.domain.IngestionRun;
 import com.andresps.flights.ingestion.domain.IngestionTrigger;
 import com.andresps.flights.ingestion.domain.RunStatus;
-import com.andresps.flights.ingestion.infrastructure.json.IngestionReportJsonTest;
+import com.andresps.flights.support.ReportFixtures;
 import com.andresps.flights.support.TestPostgres;
 import java.time.Duration;
 import java.time.Instant;
@@ -39,7 +39,7 @@ class PostgresIngestionRunRepositoryIT {
         runs.create(started);
         assertThat(runs.findById(id)).contains(started);
 
-        IngestionReport report = IngestionReportJsonTest.fullReport(id);
+        IngestionReport report = ReportFixtures.fullReport(id);
         IngestionRun finished = started.finished(report, NOW.plusSeconds(12));
         runs.update(finished);
 

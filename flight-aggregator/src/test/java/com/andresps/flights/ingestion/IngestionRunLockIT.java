@@ -5,7 +5,6 @@ import static com.andresps.flights.ingestion.RecordedGdsMock.PROVIDERS;
 import static com.andresps.flights.ingestion.RecordedGdsMock.feed;
 import static com.andresps.flights.ingestion.RecordedGdsMock.ok;
 import static com.andresps.flights.ingestion.RecordedGdsMock.request;
-import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.options;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -18,9 +17,6 @@ import com.andresps.flights.ingestion.domain.IngestionTrigger;
 import com.andresps.flights.ingestion.domain.RunStatus;
 import com.andresps.flights.ingestion.infrastructure.adapter.out.persistence.PostgresAdvisoryRunLock;
 import com.andresps.flights.support.StoredData;
-import com.andresps.flights.support.TestPostgres;
-import com.github.tomakehurst.wiremock.WireMockServer;
-import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -31,73 +27,26 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
-import javax.sql.DataSource;
-import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Import;
-import org.springframework.context.annotation.Primary;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 
 /**
  * Spec 004 AC-17/AC-18 with the real advisory lock: concurrent triggers in this instance, and a lock held by another
  * "instance" (a second lock on the same database).
  */
-@SpringBootTest(
-        webEnvironment = SpringBootTest.WebEnvironment.NONE,
-        properties = {
-            "spring.main.allow-bean-definition-overriding=true",
-            "aggregator.ingestion.horizon-days=1",
-            "aggregator.resilience.default.read-timeout=3s",
-            "aggregator.resilience.default.attempt-timeout=10s"
-        })
-@Import(TestPostgres.class)
-class IngestionRunLockIT {
-
-    private static final WireMockServer SERVER = startServer();
-
-    private static WireMockServer startServer() {
-        WireMockServer server = new WireMockServer(options().dynamicPort());
-        server.start();
-        PROVIDERS.forEach(provider -> server.stubFor(request(provider, DAYS.getFirst())
-                .willReturn(ok(provider, feed(provider, DAYS.getFirst())).withFixedDelay(500))));
-        return server;
-    }
-
-    @DynamicPropertySource
-    static void providers(DynamicPropertyRegistry registry) {
-        PROVIDERS.forEach(p -> registry.add("aggregator.providers." + p + ".base-url", SERVER::baseUrl));
-    }
-
-    @TestConfiguration
-    static class FixedClock {
-        @Bean
-        @Primary
-        Clock clock() {
-            return RecordedGdsMock.CLOCK;
-        }
-    }
-
-    @AfterAll
-    static void stopServer() {
-        SERVER.stop();
-    }
+class IngestionRunLockIT extends RecordedFeedsSpringTest {
 
     @Autowired
     private StartIngestionUseCase ingestions;
 
-    @Autowired
-    private DataSource dataSource;
-
+    /** Feeds answer after 300 ms (below the 1 s read timeout), so a run is still in progress when the next trigger comes. */
     @BeforeEach
-    void emptyTables() {
-        TestPostgres.truncateAll(dataSource);
+    void slowFeeds() {
+        SERVER.resetAll();
+        PROVIDERS.forEach(provider -> DAYS.forEach(day -> SERVER.stubFor(request(provider, day)
+                .willReturn(ok(provider, feed(provider, day)).withFixedDelay(300)))));
     }
 
     @Test

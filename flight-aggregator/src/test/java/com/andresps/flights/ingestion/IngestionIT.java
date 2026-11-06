@@ -16,7 +16,6 @@ import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
-import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.options;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.andresps.flights.aggregation.domain.model.ProviderId;
@@ -29,94 +28,28 @@ import com.andresps.flights.ingestion.domain.IngestionStatus;
 import com.andresps.flights.ingestion.domain.PartitionFailure;
 import com.andresps.flights.ingestion.domain.ProviderReport;
 import com.andresps.flights.support.StoredData;
-import com.andresps.flights.support.TestPostgres;
-import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.stubbing.Scenario;
-import io.github.resilience4j.circuitbreaker.CircuitBreaker;
-import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
-import java.time.Clock;
 import java.time.LocalDate;
 import java.util.Arrays;
 import java.util.UUID;
-import javax.sql.DataSource;
-import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Import;
-import org.springframework.context.annotation.Primary;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 
 /**
  * The ingestion flow end to end inside the application: real adapters, resilience and use case, against WireMock
- * serving feeds recorded from gds-mock. Timeouts and backoffs are scaled down; the open-wait is long so that breaker
- * state can be observed across runs.
+ * serving feeds recorded from gds-mock (shared setup in {@link RecordedFeedsSpringTest}).
  */
-@SpringBootTest(
-        webEnvironment = SpringBootTest.WebEnvironment.NONE,
-        properties = {
-            "spring.main.allow-bean-definition-overriding=true",
-            "aggregator.ingestion.max-concurrent-days=7",
-            "aggregator.ingestion.max-concurrent-partitions=7",
-            "aggregator.ingestion.run-timeout=30s",
-            "aggregator.resilience.default.connect-timeout=500ms",
-            "aggregator.resilience.default.read-timeout=1s",
-            "aggregator.resilience.default.attempt-timeout=5s",
-            "aggregator.resilience.default.retry.initial-backoff=10ms",
-            "aggregator.resilience.default.circuit-breaker.open-wait=60s"
-        })
-@Import(TestPostgres.class)
-class IngestionIT {
-
-    private static final WireMockServer SERVER = startServer();
-
-    private static WireMockServer startServer() {
-        WireMockServer server = new WireMockServer(options().dynamicPort());
-        server.start();
-        return server;
-    }
-
-    @DynamicPropertySource
-    static void providers(DynamicPropertyRegistry registry) {
-        PROVIDERS.forEach(p -> registry.add("aggregator.providers." + p + ".base-url", SERVER::baseUrl));
-    }
-
-    @TestConfiguration
-    static class FixedClock {
-        @Bean
-        @Primary
-        Clock clock() {
-            return RecordedGdsMock.CLOCK;
-        }
-    }
-
-    @AfterAll
-    static void stopServer() {
-        SERVER.stop();
-    }
+class IngestionIT extends RecordedFeedsSpringTest {
 
     @Autowired
     private IngestFlightsUseCase ingestion;
 
-    @Autowired
-    private DataSource dataSource;
-
     private StoredData store;
 
-    @Autowired
-    private CircuitBreakerRegistry breakers;
-
     @BeforeEach
-    void reset() {
-        SERVER.resetAll();
-        RecordedGdsMock.stubAll(SERVER);
-        breakers.getAllCircuitBreakers().forEach(CircuitBreaker::reset);
-        TestPostgres.truncateAll(dataSource);
+    void storedData() {
         store = new StoredData(dataSource);
     }
 

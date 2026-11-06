@@ -4,102 +4,38 @@ import static com.andresps.flights.ingestion.RecordedGdsMock.DAYS;
 import static com.andresps.flights.ingestion.RecordedGdsMock.PROVIDERS;
 import static com.andresps.flights.ingestion.RecordedGdsMock.feed;
 import static com.andresps.flights.ingestion.RecordedGdsMock.ok;
-import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.options;
+import static com.andresps.flights.ingestion.RecordedGdsMock.request;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
-import com.andresps.flights.support.TestPostgres;
-import com.github.tomakehurst.wiremock.WireMockServer;
-import io.github.resilience4j.circuitbreaker.CircuitBreaker;
-import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
-import java.time.Clock;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.UUID;
-import javax.sql.DataSource;
-import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Import;
-import org.springframework.context.annotation.Primary;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.web.client.RestClient;
 import tools.jackson.databind.JsonNode;
 
 /**
  * Spec 004 AC-21..AC-23 over real HTTP: {@code POST /api/v1/ingestions}, {@code GET /api/v1/ingestions/{id}} and
- * {@code /latest}. Provider feeds answer after {@value #LATENCY_MS} ms, so a run stays in progress long enough to be
- * observed.
+ * {@code /latest}. Provider feeds answer after {@value #LATENCY_MS} ms (below the 1 s read timeout), so a run stays
+ * in progress long enough to be observed.
  */
-@SpringBootTest(
-        webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = {
-            "spring.main.allow-bean-definition-overriding=true",
-            "aggregator.ingestion.horizon-days=1",
-            "aggregator.resilience.default.read-timeout=3s",
-            "aggregator.resilience.default.attempt-timeout=10s"
-        })
-@Import(TestPostgres.class)
-class IngestionApiIT {
+class IngestionApiIT extends RecordedFeedsSpringTest {
 
-    private static final int LATENCY_MS = 800;
-    private static final WireMockServer SERVER = startServer();
-
-    private static WireMockServer startServer() {
-        WireMockServer server = new WireMockServer(options().dynamicPort());
-        server.start();
-        return server;
-    }
-
-    @DynamicPropertySource
-    static void providers(DynamicPropertyRegistry registry) {
-        PROVIDERS.forEach(p -> registry.add("aggregator.providers." + p + ".base-url", SERVER::baseUrl));
-    }
-
-    /** A ticking clock that starts at the recorded fixtures' reference instant, so feeds match the requested day. */
-    @TestConfiguration
-    static class RecordedTime {
-        @Bean
-        @Primary
-        Clock clock() {
-            return Clock.offset(Clock.systemUTC(), Duration.between(Instant.now(), RecordedGdsMock.CLOCK.instant()));
-        }
-    }
-
-    @AfterAll
-    static void stopServer() {
-        SERVER.stop();
-    }
-
-    @Value("${local.server.port}")
-    private int port;
-
-    @Autowired
-    private DataSource dataSource;
-
-    @Autowired
-    private CircuitBreakerRegistry breakers;
+    private static final int LATENCY_MS = 400;
 
     private RestClient http;
 
     @BeforeEach
-    void reset() {
-        TestPostgres.truncateAll(dataSource);
-        breakers.getAllCircuitBreakers().forEach(CircuitBreaker::reset);
+    void slowFeeds() {
         SERVER.resetAll();
-        PROVIDERS.forEach(provider -> SERVER.stubFor(request(provider, DAYS.getFirst())
-                .willReturn(ok(provider, feed(provider, DAYS.getFirst())).withFixedDelay(LATENCY_MS))));
+        PROVIDERS.forEach(provider -> DAYS.forEach(day -> SERVER.stubFor(request(provider, day)
+                .willReturn(ok(provider, feed(provider, day)).withFixedDelay(LATENCY_MS)))));
         http = RestClient.builder()
                 .baseUrl("http://localhost:" + port)
                 .defaultStatusHandler(status -> true, (req, res) -> {})
@@ -151,9 +87,10 @@ class IngestionApiIT {
         JsonNode finished = get("/api/v1/ingestions/" + id).getBody();
         assertThat(finished.get("finishedAt").asString()).isNotBlank();
         assertThat(finished.get("durationMs").asLong()).isPositive();
-        assertThat(finished.get("report").get("days")).hasSize(1);
-        assertThat(finished.get("report").get("days").get(0).get("outcome").asString())
-                .isEqualTo("REPLACED");
+        assertThat(finished.get("report").get("days")).hasSize(DAYS.size());
+        finished.get("report")
+                .get("days")
+                .forEach(day -> assertThat(day.get("outcome").asString()).isEqualTo("REPLACED"));
         assertThat(finished.get("report").get("providers")).hasSize(3);
     }
 

@@ -22,5 +22,5 @@ New ADR: copy [`0000-template.md`](0000-template.md) or run `/adr` in Claude Cod
 | [0015](0015-atomic-partition-buffers.md) | Atomic partitions through a per-attempt buffer | Accepted |
 | [0016](0016-day-partitioned-aggregation.md) | Aggregate one horizon day at a time, with summed statistics | Accepted |
 | [0017](0017-day-snapshot-replacement.md) | Replace each day's snapshot atomically; keep a more complete snapshot when a provider is missing | Accepted |
-| [0018](0018-bulk-load.md) | Bulk load of day snapshots | Proposed |
+| [0018](0018-bulk-load.md) | Bulk load day snapshots with PostgreSQL COPY | Accepted |
 | [0019](0019-ingestion-run-lock.md) | No concurrent ingestion runs across instances, with a PostgreSQL session advisory lock | Accepted |
