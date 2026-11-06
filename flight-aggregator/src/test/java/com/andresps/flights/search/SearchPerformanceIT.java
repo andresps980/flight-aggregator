@@ -17,6 +17,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.Supplier;
@@ -83,7 +84,7 @@ class SearchPerformanceIT {
     private record Stats(double medianMs, double p95Ms) {
         @Override
         public String toString() {
-            return String.format("%.2f / %.2f", medianMs, p95Ms);
+            return String.format(Locale.ROOT, "%.2f / %.2f", medianMs, p95Ms);
         }
     }
 
@@ -127,10 +128,14 @@ class SearchPerformanceIT {
 
         report.append("## Bulk load (COPY, 1M rows, 7 days)\n\n")
                 .append("| Indexes | First load | Replacement |\n|---|---:|---:|\n")
-                .append(String.format("| PK, unique key, departure_date | %.1f s | |%n", without.toMillis() / 1000.0))
                 .append(String.format(
+                        Locale.ROOT, "| PK, unique key, departure_date | %.1f s | |%n", without.toMillis() / 1000.0))
+                .append(String.format(
+                        Locale.ROOT,
                         "| + search indexes (%s) | %.1f s | %.1f s |%n%n",
-                        String.join(", ", names), with.toMillis() / 1000.0, replacement.toMillis() / 1000.0))
+                        String.join(", ", names),
+                        with.toMillis() / 1000.0,
+                        replacement.toMillis() / 1000.0))
                 .append("Search index definitions:\n\n```sql\n")
                 .append(String.join(";\n", searchIndexes))
                 .append(";\n```\n\n");
@@ -159,7 +164,8 @@ class SearchPerformanceIT {
         String day = FIRST_DAY.plusDays(2).toString();
         String max = "200"; // below the median final price
         String aboveAll = "999999";
-        report.append(String.format("Busiest route %s-%s: %s rows; busiest carrier %s.%n%n", o, d, route.get("n"), c));
+        report.append(String.format(
+                Locale.ROOT, "Busiest route %s-%s: %s rows; busiest carrier %s.%n%n", o, d, route.get("n"), c));
         return List.of(
                 combination("none", "", null, null, null, null, null, true),
                 combination("maxPrice", "&maxPrice=" + max, null, null, null, max, null, true),
@@ -258,8 +264,13 @@ class SearchPerformanceIT {
                 Stats keysetStats = timeQuery(jdbc, keyset.sql(), keyset.params());
                 Stats offsetStats = timeQuery(jdbc, first.sql() + " OFFSET " + offset, first.params());
                 report.append(String.format(
+                        Locale.ROOT,
                         "| %s | %,d | %,d | %s | %s |%n",
-                        combination.name(), matching, page, keysetStats, offsetStats));
+                        combination.name(),
+                        matching,
+                        page,
+                        keysetStats,
+                        offsetStats));
                 if (page == DEEP_PAGE && combination.name().equals("none")) {
                     assertThat(keysetStats.medianMs()).isLessThan(offsetStats.medianMs());
                 }
@@ -305,7 +316,8 @@ class SearchPerformanceIT {
                     cached.add(hit);
                 }
             }
-            report.append(String.format("| `%s` | %s | %s |%n", request, summarize(uncached), summarize(cached)));
+            report.append(String.format(
+                    Locale.ROOT, "| `%s` | %s | %s |%n", request, summarize(uncached), summarize(cached)));
         }
         report.append('\n');
     }
