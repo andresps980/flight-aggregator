@@ -90,7 +90,8 @@ null, `last_run_id uuid` (latest run that covered the day).
 
 `ingestion_run`: `id uuid` PK, `trigger` (`SCHEDULED` | `MANUAL`), `status` (`RUNNING` | `COMPLETED` | `PARTIAL` |
 `FAILED` | `ABORTED`), `started_at`, `finished_at` null, `report jsonb` null (spec 003 report + per-day outcome,
-written when the run finishes); index on `started_at` for `latest`.
+written when the run finishes), `failure text` null (error of a `FAILED` / lock-lost run); index on `started_at` for
+`latest`.
 
 ## Acceptance criteria
 
