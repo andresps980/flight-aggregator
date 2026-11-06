@@ -1,6 +1,6 @@
 # Spec 004: Persistence and the end-to-end ingestion pipeline
 
-- **Status:** Approved
+- **Status:** Implemented
 - **Branch:** feat/004-persistence-and-pipeline
 - **Related ADRs:** [ADR-0006](../../docs/adr/0006-scheduled-pre-ingestion.md),
   [ADR-0007](../../docs/adr/0007-postgresql-and-redis.md), [ADR-0008](../../docs/adr/0008-keyset-pagination.md),

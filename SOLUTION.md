@@ -22,6 +22,12 @@ links to the ADRs, which hold the full reasoning.
 | Incremental deduplication keyed by a deterministic itinerary key, total-order tie-break | [ADR-0011](docs/adr/0011-incremental-deduplication.md) |
 | One `gds-mock` app serving the three providers, chaos per provider, no dependency on the aggregator | [ADR-0012](docs/adr/0012-single-gds-mock-application.md) |
 | Mock data generated lazily per request from per-itinerary seeds, streamed, never materialised | [ADR-0013](docs/adr/0013-stateless-seeded-streamed-generation.md) |
+| Provider resilience: Resilience4j core, deadlines, per-provider breakers | [ADR-0014](docs/adr/0014-provider-resilience.md) |
+| Atomic partitions through a per-attempt buffer | [ADR-0015](docs/adr/0015-atomic-partition-buffers.md) |
+| Aggregate one horizon day at a time, statistics summed | [ADR-0016](docs/adr/0016-day-partitioned-aggregation.md) |
+| Each day is an atomic snapshot; a less complete day never wipes a more complete one (kept stale, at most 2 h) | [ADR-0017](docs/adr/0017-day-snapshot-replacement.md) |
+| Bulk load with PostgreSQL `COPY` (measured 1.8× faster than batched inserts) | [ADR-0018](docs/adr/0018-bulk-load.md) |
+| No concurrent runs across instances: session advisory lock on a dedicated connection | [ADR-0019](docs/adr/0019-ingestion-run-lock.md) |
 
 ### Core domain (spec 001)
 
@@ -167,6 +173,68 @@ real in-memory sink, which keeps every published day.
 Reproduce it: start gds-mock with `--gds.world.volume=1000000` (deterministic profile), then run
 `./mvnw -pl flight-aggregator verify -Pe2e-tests -Dit.test=IngestionReconciliationE2EIT "-DargLine=-Xmx1536m"`.
 
+*Superseded by spec 004:* results now go to PostgreSQL day by day, and the container heap is 768 MB (below).
+
+### Persistence and the ingestion pipeline (spec 004)
+
+PostgreSQL replaces the in-memory result store; runs are triggered by a scheduler and by `POST /api/v1/ingestions`,
+never overlap, and are persisted with their report. Diagrams: [architecture.md](docs/architecture.md#persistence-and-the-ingestion-pipeline-spec-004).
+
+| Decision | Where |
+|---|---|
+| Hexagonal split: `IngestionRunService` (plain Java) owns the run lifecycle through three outbound ports (`IngestionRunLock`, `IngestionRunRepository`, `SnapshotMaintenance`) and an injected `Executor`; `DaySnapshotPublisher` implements the existing `DayAggregationSink` and applies a plain-Java `SnapshotPolicy` over a `DaySnapshotStore` port. The scheduler and the controller are inbound adapters; everything PostgreSQL-specific is in `adapter/out/persistence` (ArchUnit rule). | spec 004 |
+| A day is the unit of replacement: one transaction deletes its rows, `COPY`s the new ones and upserts `day_snapshot`. A publication replaces only if it is at least as complete as the stored snapshot (or that one has been stale for 2 h); otherwise the old snapshot is kept and marked stale. | [ADR-0017](docs/adr/0017-day-snapshot-replacement.md) |
+| `COPY` text format through PgJDBC, streamed from a 64 KiB buffer. | [ADR-0018](docs/adr/0018-bulk-load.md) |
+| Session `pg_try_advisory_lock` held on a dedicated connection for the whole run; checked before each day is published (a lost lock stops the run, `FAILED`); orphaned `RUNNING` rows become `ABORTED` when the next run takes the lock. | [ADR-0019](docs/adr/0019-ingestion-run-lock.md) |
+| The run id is chosen by the run service (so `POST` returns it at once) and passed to the ingestion use case with a `PublicationGuard`. | spec 004 |
+| `ANALYZE itinerary` after each run's writes, so the planner's statistics follow the snapshots (for the search PR). | spec 004, AC-13 |
+| Retention at the start of every run: days before today, runs older than 7 days. | spec 004, AC-12 |
+| The in-memory store was removed from the application; an in-memory `DaySnapshotStore` fake remains in the tests. | spec 004, Q5 |
+
+**SOLID, pragmatically.** SRP: the policy decides, the publisher applies, the store executes SQL, the run service
+orchestrates the lifecycle. OCP: the bulk-load technique is an `ItineraryBulkLoader` behind the store (the batched
+alternative lives in tests for the benchmark). ISP: `DaySnapshotStore` (day writes) and `SnapshotMaintenance`
+(retention, statistics) are separate ports, implemented by one adapter. DIP: the use cases own every port. **Not
+abstracted:** the scheduler uses Spring's `TaskScheduler` directly (it is an inbound adapter); the report JSON mapping
+is one concrete class shared by the persistence adapter and the REST response, so the API shows what is stored.
+
+**Measured at 1,000,000 itineraries** (Apple M1 Max, Docker with 6 CPUs / 16 GB, `postgres:17`):
+
+| | Result |
+|---|---|
+| Bulk load, `COPY` (1,000,006 rows as 7 days, `BulkLoadBenchmarkIT`) | **10.4 s** first load, **13.8 s** replacement |
+| Bulk load, batched `INSERT` + `reWriteBatchedInserts` / without | 18.9 s / 24.5 s; 31.0 s / 34.7 s |
+| Full run in compose (gds-mock deterministic, 946,230 itineraries stored, 7 days `REPLACED`) | **19.2 s** at `-Xmx512m`, **21.2 s** at `-Xmx768m` (first run and replacement alike) |
+| Smallest heap that completes | **512 MB** (container peak 717 MiB); 384 MB runs out of memory |
+| Chosen heap | **`-Xmx768m`** (1.5× the floor), container peak ≈ 0.99 GiB, was 1,536 MB with the in-memory store |
+| Table size | 558 MB (456 MB rows + 103 MB indexes), 618 bytes per row |
+| Default compose stack (100,000, chaos on) | first scheduled run `COMPLETED` in 17.5 s, 94,543 rows |
+
+- The heap is now the ingestion working set only (2 days in flight); the store writes and drops each day.
+- With 384 MB the JVM exits on `OutOfMemoryError` and the container restarts (compose restart policy); the run it
+  left `RUNNING` was marked `ABORTED` by the next run, as AC-15 specifies, observed live during the measurement.
+- `./mvnw verify` (both modules, all unit and integration tests, coverage, formatting): **54 s** on the same laptop.
+  The flight-aggregator ITs start 4 cached Spring contexts (six IT classes share the recorded-feeds one) and one
+  PostgreSQL container for the whole build.
+
+Reproduce: `./mvnw -pl flight-aggregator verify -Pslow-tests -Dit.test=BulkLoadBenchmarkIT` for the load;
+`GDS_WORLD_VOLUME=1000000 GDS_MOCK_PROFILE=deterministic AGGREGATOR_JAVA_TOOL_OPTIONS="-Xmx512m" docker compose up
+--build -d --wait`, then `curl -X POST localhost:8080/api/v1/ingestions` for the run.
+
+**Found while implementing:**
+- A test configuration that replaced the `Clock` bean by *name* was silently overridden by the application's own
+  `clock` bean once it was `@Import`ed instead of nested: the run used the real date and asked for the wrong days.
+  Test clocks now use a distinct bean name plus `@Primary`.
+- `Money` caps every amount at 9 integer digits, the final price included, so `numeric(12,2)` has room to spare; the
+  round-trip test first tried a final price the domain cannot produce.
+- PostgreSQL stores microseconds: run instants are truncated to microseconds before they are stored, so a run reads
+  back equal to what the service returned.
+- Closing a `@SpringBootTest` context from inside a test breaks the test framework's context cache, so the
+  scheduling IT starts its own application with `SpringApplicationBuilder` and closes it, then checks that no run
+  starts or stays `RUNNING` afterwards.
+- A shared Testcontainers container returned as a Spring `@ServiceConnection` bean is stopped by Spring when any
+  context closes; the shared test container ignores `stop()` (Ryuk removes it when the JVM exits).
+
 ### AI tools used
 
 The code is developed with **Claude Code** under versioned guardrails ([ADR-0005](docs/adr/0005-ai-assisted-development.md)):
@@ -177,6 +245,11 @@ The code is developed with **Claude Code** under versioned guardrails ([ADR-0005
 - Hooks: git guard, Spotless after edits, `./mvnw verify` before finishing a turn.
 
 Every prompt and agent run is logged in [docs/ai/](docs/ai/README.md).
+
+PRs are merged with **merge commits, not squash**, to keep the spec-driven history visible on `main`: each feature
+branch has a `docs:` commit with the spec and ADRs, a `test:` commit with the tests written first, then the
+implementation and review fixes. The test-first commits are **intentionally red** (the tests don't compile or fail
+until the implementation lands); every merge result is green.
 
 ## 2. Data modelling and pagination up to 1,000,000 rows
 
@@ -208,14 +281,35 @@ Every prompt and agent run is logged in [docs/ai/](docs/ai/README.md).
 - **Untrusted amounts are bounded** (fewer than 10 integer digits, at most 10 decimals), so input like `1E999999999`
   is rejected cheaply instead of triggering huge `BigDecimal` arithmetic.
 
-*To be completed:* table design and indexes, batch sizes, and load/latency measurements at 100k and 1M rows.
+### Read model in PostgreSQL (spec 004)
+
+One **denormalized row per aggregated itinerary** in `itinerary` (columns in [architecture.md](docs/architecture.md#schema)):
+
+- **Every search filter and the sort key are scalar columns of the same row**: `origin`, `destination`, `airline`,
+  `final_price` (what users filter and sort on), `departure_date`/`departure_at`. A composite B-tree such as
+  `(origin, destination, final_price, id)` can then answer a filtered, price-ordered page with one index range scan
+  and `LIMIT`, with no join. The search spec adds and measures those indexes (each one slows the bulk load).
+- **`id bigint` identity** is the keyset tie-breaker with `final_price` (ADR-0008). Ids change when a day is replaced,
+  so a cursor taken before a replacement continues by position and may skip or repeat a result; the search spec
+  documents it.
+- **Segments as JSONB**, read as is: they are only displayed, so a `segment` table (2–3× the rows) and its join on
+  every read buy nothing.
+- **`itinerary_key` unique** (spec 001's key, which includes departure instants) guards against duplicates;
+  **`departure_date`** (UTC date of the first departure, i.e. the provider partition) is the unit of snapshot
+  replacement and retention: one indexed `DELETE` each.
+- **Prices `numeric(12,2)`**, EUR (ADR-0010); providers as `text[]` (sorted), the run id and timestamps for audit.
+- Day status in `day_snapshot` (complete or not, missing providers, stale since), runs in `ingestion_run` (report as
+  JSONB), both queryable by the dashboard.
+- Size measured at 1M: **618 bytes per row, 558 MB** with today's indexes; loaded in 10–14 s with `COPY` (above).
+- Partitioning by `departure_date` was considered and deferred (ADR-0017): it would make retention instant and avoid
+  dead tuples, at the cost of DDL on every run; at ≈ 1M rows plain deletes and autovacuum are enough.
 
 ## 3. System limitations and trade-offs
 
 Known from the accepted decisions:
 
 - Search data is up to one ingestion interval stale (15 min by default) — [ADR-0006](docs/adr/0006-scheduled-pre-ingestion.md).
-- "No concurrent ingestion runs" is guaranteed for a single instance only — [ADR-0006](docs/adr/0006-scheduled-pre-ingestion.md).
+  A day missing a provider keeps its previous snapshot for up to 2 h (ADR-0017).
 - Keyset pagination has no "jump to page N" and no exact total count — [ADR-0008](docs/adr/0008-keyset-pagination.md).
 - EUR only, single-airline itineraries, fixed 45 min / 24 h connection thresholds — [ADR-0010](docs/adr/0010-domain-assumptions.md).
 - One-way itineraries only: visiting an airport twice (including a return to the origin) is discarded as
@@ -248,9 +342,6 @@ Known from the accepted decisions:
 
 Ingestion (spec 003):
 
-- The ingestion has no trigger yet (no scheduler, no endpoint) and keeps results in memory. The in-memory sink holds
-  every published day, i.e. the whole world, which dominates the heap at 1M (measurements above). The PostgreSQL
-  adapter (next spec) writes and drops.
 - A partition is buffered as parsed offers until its attempt completes (ADR-0015), and a retry re-downloads the whole
   partition. There is no resume and no disk spooling.
 - Breaker state is per JVM instance and lives in memory: a restart closes every breaker, and replicas don't share
@@ -279,6 +370,25 @@ Ingestion (spec 003):
     same flight across providers.
 - Gamma local times in a DST gap or overlap are resolved by `java.time` defaults (shifted forward in a gap, earlier
   offset in an overlap).
-- "No concurrent runs" isn't enforced yet: the use case documents it and the trigger (next spec) will guard it.
+Persistence and pipeline (spec 004):
+
+- **Partial days favour completeness over freshness.** While a day is stale (a provider missing), the contributing
+  providers' fresh prices for that day are ignored, for at most `max-stale-age` (2 h). A per-provider merge would be
+  fresher but cannot be exact, because rows keep only the selected offer (ADR-0017).
+- **Dead tuples.** Every run replaces up to 7 days, so `itinerary` accumulates dead rows until autovacuum catches up:
+  after two 1M replacements in a row there were 1.9 M dead tuples next to 0.95 M live ones. That costs disk and some
+  scan efficiency, not correctness. Production would tune autovacuum for this table or move to day partitions
+  (ADR-0017).
+- **One bad row fails its day.** `COPY` has no per-row errors; the day is `WRITE_FAILED` and keeps its previous
+  snapshot.
+- **The run lock is a PostgreSQL session lock.** It needs a direct connection or a session-mode pooler (not PgBouncer
+  in transaction mode), holds one pooled connection for up to 10 min, and a lost lock is detected at the next day
+  boundary, so at most one day can overlap with another instance's run (that day is still atomic) — ADR-0019.
+- **The ingestion endpoints are unauthenticated**, like the rest of the API for now; anyone who can reach the service
+  can start a run (at most one at a time).
+- **Runs started by `POST` are not cancellable**, and the history keeps only the last 7 days.
+- **A run cut short by a crash** stays `RUNNING` until the next run marks it `ABORTED`; with the default schedule that
+  is at most 15 min (plus the restart).
+- **Graceful shutdown** interrupts a run in progress and waits up to 30 s for it to store its `FAILED` state.
 
 *To be completed:* what would change for production.

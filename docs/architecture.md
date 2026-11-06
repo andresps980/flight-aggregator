@@ -63,7 +63,7 @@ flowchart LR
             att --> parser[FeedParser<br/>Alpha JSON · Beta StAX · Gamma CSV]
             parser --> buf[(PartitionBuffer<br/>per attempt)]
         end
-        sink[InMemoryDayAggregationStore]
+        sink[DayAggregationSink<br/>DaySnapshotPublisher, spec 004]
     end
 
     mock[(gds-mock<br/>/provider/flights?date=)]
@@ -83,8 +83,103 @@ flowchart LR
    attempt. Attempts go through the provider's circuit breaker and are retried for provider failures only.
 4. Only a completed attempt returns its partition (atomicity). The coordinator feeds each partition to the day's
    aggregator as soon as it arrives, then drops it.
-5. When every partition of the day has finished, the day is published (if any provider contributed) and released.
-   The day statistics are summed into the report.
+5. When every partition of the day has finished, the day is handed to the sink (as *unavailable* if no provider
+   contributed) and released. The day statistics are summed into the report.
+
+## Persistence and the ingestion pipeline (spec 004)
+
+Runs are triggered by the scheduler or `POST /api/v1/ingestions`, never overlap across instances, and write each day
+as an atomic snapshot in PostgreSQL ([ADR-0017](adr/0017-day-snapshot-replacement.md),
+[ADR-0018](adr/0018-bulk-load.md), [ADR-0019](adr/0019-ingestion-run-lock.md)).
+
+```mermaid
+flowchart LR
+    sched[IngestionScheduler<br/>adapter/in/scheduling] -- "SCHEDULED" --> run
+    rest[IngestionController<br/>adapter/in/web] -- "MANUAL (202 / 409)" --> run
+    rest -- "GET {id}, latest" --> query[IngestionRunQueryService]
+
+    subgraph application["application (plain Java)"]
+        run[IngestionRunService<br/>StartIngestionUseCase] -- "ingest(runId, guard)<br/>on a virtual thread" --> ing[IngestionService]
+        ing -- "publish / unavailable" --> pub[DaySnapshotPublisher<br/>SnapshotPolicy: replace or keep stale]
+    end
+
+    subgraph persistence["adapter/out/persistence (PostgreSQL only here)"]
+        lock[PostgresAdvisoryRunLock<br/>session lock, dedicated connection]
+        runs[PostgresIngestionRunRepository<br/>report as JSONB]
+        store[PostgresDaySnapshotStore<br/>DELETE + COPY + upsert, one transaction]
+    end
+
+    run --> lock
+    run --> runs
+    run -- "retention, ANALYZE" --> store
+    query --> runs
+    pub --> store
+    store --> db[(PostgreSQL)]
+    lock --> db
+    runs --> db
+```
+
+A run, in order:
+
+1. `pg_try_advisory_lock` on a connection kept for the whole run; if another instance holds it, a tick is skipped and
+   `POST` answers `409` with the running id.
+2. Any `RUNNING` row left by a dead process is marked `ABORTED`; the new run is stored `RUNNING` and `POST` returns.
+3. On a virtual thread: delete days before today and runs older than 7 days; ingest (spec 003). Before each day is
+   handed over, the lease checks that its session still holds the lock; if not, nothing more is published and the run
+   ends `FAILED`.
+4. Each day: the publisher drops itineraries departing on another UTC day (counted as misfiled), asks the
+   `SnapshotPolicy`, and either replaces the day (delete its rows, `COPY` the new ones, upsert `day_snapshot`, one
+   transaction) or keeps the stored snapshot and marks it stale. Readers see the old or the new day, never a mix.
+5. `ANALYZE itinerary`, store the final status and report, release the lock.
+
+### Schema
+
+```mermaid
+erDiagram
+    itinerary {
+        bigint id PK "identity; keyset tie-breaker with final_price"
+        text itinerary_key UK "spec 001 key"
+        date departure_date "UTC date of first departure; indexed"
+        char3 origin
+        char3 destination
+        timestamptz departure_at
+        timestamptz arrival_at
+        char2 airline
+        smallint stops
+        numeric base_price
+        numeric final_price
+        text selected_provider
+        text_array providers
+        jsonb segments "ordered legs, read as is"
+        uuid run_id
+        timestamptz created_at
+    }
+    day_snapshot {
+        date departure_date PK
+        uuid run_id "run that wrote it"
+        text_array providers
+        text_array missing_providers
+        boolean complete
+        integer itineraries
+        timestamptz stale_since "null when fresh"
+        uuid last_run_id
+    }
+    ingestion_run {
+        uuid id PK
+        text trigger "SCHEDULED or MANUAL"
+        text status "RUNNING ... ABORTED"
+        timestamptz started_at "indexed"
+        timestamptz finished_at
+        jsonb report
+        text failure
+    }
+    day_snapshot ||--o{ itinerary : "departure_date"
+```
+
+One denormalized row per itinerary: every search filter and the sort key are scalar columns of the same row, so a
+search page is a single index range scan with no join; segments are only displayed, so they travel as JSONB. The
+search spec adds the composite indexes. `day_snapshot` and `itinerary` share `departure_date` but have no foreign key:
+the day is written in one transaction anyway, and retention deletes both.
 
 ## Dependency rule
 
