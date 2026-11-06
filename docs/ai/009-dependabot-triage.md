@@ -70,3 +70,21 @@ alerts as tolerable risk is left to the author (it changes the repository's secu
 | Step | Commit on `main` | CI | CodeQL |
 |---|---|---|---|
 | #9 merged by the author (18:01 UTC) | `872e3a2` | run 42266919025: success (Spotless, build/tests/coverage, frontend) | run 42266918866: success |
+| #12 (this branch: ignore rules + docs) merged; its own PR CI on `174a123`: run 42267763229 success, CodeQL 42267763535 success | `77c2f42` | run 42268252537: success | run 42268252426: success |
+
+Three **Dependabot Updates** runs on `77c2f42` also succeeded (42268260959, 42268261386, 42268261211), so Dependabot
+accepted the new `ignore` configuration.
+
+**How #10 and #11 were actually closed.** The `@dependabot close` comments (18:04 UTC) got no reply or reaction from
+Dependabot. Both PRs were closed by `dependabot[bot]` at 18:10 UTC, right after #12 merged, with *"Looks like these
+dependencies are no longer being updated by Dependabot, so this is no longer needed"* (#10) and *"Looks like
+typescript is no longer being updated by Dependabot"* (#11): **the ignore rules closed them**, not the commands. Same
+outcome; noted so the record says what happened. Next time: the ignore rule alone is enough to close a declined
+Dependabot PR once merged.
+
+## Open item for the author
+
+The `minimatch` security update keeps reporting "not possible" on Dependabot security runs until `typescript-eslint`
+moves to `minimatch` 11. The usual way to stop the repeated attempts is to dismiss those Dependabot alerts in the
+Security tab as *tolerable risk* (dev-only lint tooling, see docs/frontend.md → *Version constraints*). Not done by the
+agent: it changes the repository's security state.
