@@ -1,0 +1,234 @@
+# 008 — Dashboard: React + TypeScript + Vite, live ingestion status, nginx, frontend guardrails (spec 006)
+
+- **Date:** 2026-11-06
+- **Tool:** Claude Code (Claude Opus 5.5)
+- **Branch / PR:** `feat/006-dashboard` (PR 8 of the repository)
+
+## Prompts
+
+### 1. Kick-off
+
+````text
+We continue the assessment. Read CLAUDE.md, docs/exercise.md, SOLUTION.md, docs/adr/
+(especially the frontend ADR), docs/ai/, specs/ (spec 005 is the API contract) and
+docs/api/openapi.json before planning. Same conventions as previous PRs: English, SDD,
+docs/ai/ session record, SOLUTION.md updates, merge-commit history. This is PR 8 in the repo.
+Note: I'm a backend developer with little frontend experience — favour simple, idiomatic,
+well-explained code over clever abstractions, and document it so I can explain it.
+
+Goal: the frontend dashboard required by the statement ("search, filter, and visualize these
+itineraries in real-time"): minimal React + TypeScript + Vite (no state-management or heavy
+UI libraries), served by nginx, plus a small backend follow-up.
+
+0. Backend follow-up first (own commits): document the ingestion endpoints in OpenAPI with the
+   correct 202/409/404 responses instead of excluding them, and update the contract test.
+
+1. Run /spec-feature to write specs/006-dashboard/spec.md. Cover at least:
+   - Search panel: origin and destination dropdowns from GET /api/v1/catalog (destinations
+     filtered by the selected origin using the catalog routes), date picker limited to catalog
+     dates (showing their freshness), max price, carrier; filters reflected in the URL so a
+     search can be shared/reloaded.
+   - Results: cheapest first; each row shows route, stops, segments (flight numbers,
+     departure/arrival times), final price prominently, base price and markup, selected
+     provider and the other providers that offered it, and a freshness badge
+     (COMPLETE / INCOMPLETE / STALE). Decide and document how times are displayed (UTC
+     clearly labelled, or local airport time if the API provides offsets).
+   - Pagination: "load more" or infinite scroll using nextCursor; per the contract, a page may
+     be short or empty while hasMore is true, so the UI keeps paging; no total count shown.
+   - Real-time: a data/ingestion status panel polling GET /api/v1/ingestions/latest (status,
+     per-provider result, circuit breaker state, last run time); a "Refresh data" button
+     calling POST /api/v1/ingestions (handles 202 and 409); when a newer run completes, the
+     UI offers to reload results ("New data available").
+   - A simple visualization of the current results (e.g. price distribution or offers by
+     provider/carrier) — only if it can be done with plain SVG/CSS or one small, justified
+     library.
+   - Loading, empty and error states (ProblemDetail messages shown readably); basic accessibility
+     (labels, keyboard navigation).
+   - Optional, behind a build/runtime flag and clearly separated: a "demo controls" panel to
+     toggle gds-mock provider outages via its admin API (proxied by nginx), useful for
+     demonstrating resiliency live. Propose it; I'll decide.
+   - Delivery: nginx serves the static build and proxies /api to the aggregator (same origin,
+     no CORS); multi-stage Dockerfile (node build → nginx); frontend service added to
+     docker-compose with a healthcheck.
+   Show me the spec with open questions and wait for my approval.
+
+2. Design guidance: TypeScript types generated from docs/api/openapi.json (e.g.
+   openapi-typescript) so the client can't drift from the contract; a thin API client module;
+   components small and focused; state in React hooks only. Pin the Node LTS version
+   (.nvmrc / engines / Dockerfile). Use /adr if a significant choice is made.
+
+3. Tooling integration (the repo's guardrails must cover the frontend too):
+   - CI: a frontend job (npm ci, lint, typecheck, unit tests with coverage threshold, build);
+     add npm to Dependabot; add javascript-typescript to CodeQL.
+   - Claude Code hooks: format TS/TSX/CSS (e.g. Prettier) after edits; the Stop hook and the
+     pre-push hook also run the frontend checks when frontend files changed.
+   - Update CLAUDE.md with the frontend commands and conventions.
+
+4. After I approve the spec, /implement-spec 006 on feat/006-dashboard. Tests first:
+   Vitest + React Testing Library with mocked HTTP (e.g. MSW or a small fetch mock): filters
+   build the right query; destination list depends on origin; paging with nextCursor,
+   including short/empty pages with hasMore; ProblemDetail errors displayed; status panel
+   polling; refresh button with 202 and 409; "new data available" flow; URL state round-trip.
+   After writing the tests (before implementing), stop and show me the list grouped by AC.
+
+5. Run code-reviewer and spec-reviewer, fix findings, record in docs/ai/. Write
+   docs/frontend.md: structure, data flow, how to run it locally (Vite dev server proxying
+   to the backend) and a short walkthrough of the main components, aimed at a backend
+   developer. Update README (quick start, screenshot if possible), docs/usage.md and SOLUTION.md.
+
+6. Verify: ./mvnw verify and the frontend checks green (report durations);
+   docker compose up --build brings all five services up healthy, the dashboard loads at the
+   documented URL, searches return data after the first ingestion, and the refresh button
+   works. Then /pr-description, push after my OK, and check CI and code scanning as before.
+````
+
+### 2. Spec approval with changes
+
+````text
+Spec approved with these answers:
+
+Q1 yes. Q2 yes. Q3 yes. Q4 yes.
+Q5 change: show "New data available" only for runs that published data (COMPLETED or
+PARTIAL). A FAILED run shows a warning in the status panel instead (data may be stale); the
+freshness badges already reflect stale days after a reload.
+Q6 provider (it shows the aggregation result). Q7 yes. Q8 yes.
+Q9 approved: runtime flag DEMO_CONTROLS, on by default in compose; label the panel clearly as
+a demo control acting on gds-mock.
+Q10 yes. Q11 yes. Q12 yes.
+Q13 a real screenshot; if browser automation doesn't work, tell me and I'll take it manually.
+
+Mark the spec Approved, write the ADRs, set up the tooling and write the tests first; stop
+with the test list grouped by AC.
+````
+
+### 3. Test review checkpoint
+
+````text
+Test list approved. I applied the .claude/settings.json change myself (format-frontend hook
+in PostToolUse, plus npm run / npm ci permissions). Commit it in a build: commit, and record
+in docs/ai/ that the auto-mode classifier blocked the agent from modifying its own settings
+and a human applied the change — mention it in SOLUTION.md's AI section as an example of the
+guardrails working. Accepting the 7 moderate dev-only npm audit advisories as a documented
+limitation is fine.
+
+Then implement against the tests and continue with the remaining steps (reviewers, docs
+including docs/frontend.md, verification with docker compose, PR description; push after my OK).
+````
+
+## Clarifications (open questions of the spec)
+
+| # | Question | Answer |
+|---|---|---|
+| Q1 | Times: UTC labelled (the API has no airport offsets)? | Yes |
+| Q2 | "Load more" with page size 20, auto-continue over ≤ 5 empty pages? | Yes |
+| Q3 | Polling 30 s idle, 3 s while running, paused in a hidden tab? | Yes |
+| Q4 | Search on submit (and at load from the URL), not per control change? | Yes |
+| Q5 | Banner for any finished newer run? | **Changed**: only for runs that published data (COMPLETED / PARTIAL); FAILED warns in the status panel |
+| Q6 | Price histogram + results by provider? | Provider (it shows the aggregation result) |
+| Q7 | `<select>` of catalog dates instead of a native date picker? | Yes |
+| Q8 | Port 3000? | Yes |
+| Q9 | Demo controls behind a runtime flag, on in compose? | Approved; panel clearly labelled as acting on gds-mock |
+| Q10 | Node 26 (Active LTS)? | Yes |
+| Q11 | The listed npm dependencies (asked first, per the working agreement)? | Yes |
+| Q12 | ADR-0023 (polling) and ADR-0024 (client and toolchain)? | Yes |
+| Q13 | Screenshot via browser automation? | Real screenshot; if automation fails, the author takes it |
+
+## Skills, agents and hooks involved
+
+- Skills: `spec-feature`, `adr` (ADR-0023, ADR-0024; ADR-0009 amended), `implement-spec`, `dataviz` (form, mark specs,
+  palette validation for the two charts: one hue, `#2a78d6` light / `#3987e5` dark, validator passed in both modes),
+  `pr-description`; `chrome-browser` was loaded for the screenshot but no browser tools were available.
+- Agents: `code-reviewer`, `spec-reviewer` (run in parallel while the compose stack was building).
+- Hooks: `format-frontend.sh` (new, Prettier after edits), `format-java.sh`, `verify-on-stop.sh` (now one gate per
+  area), `guard-git.sh`, `SessionStart`; git `pre-commit` caught an unformatted `styles.css` before a commit.
+
+## The guardrails stopping the agent
+
+While setting up the tooling, the agent tried to edit `.claude/settings.json` to register the new Prettier hook and
+allow `npm run` / `npm ci`. **Claude Code's auto-mode classifier blocked the edit as self-modification**: an agent
+changing its own hooks and permissions. The agent wrote the hook script itself (`.claude/hooks/format-frontend.sh`),
+reported the exact JSON to add, and continued with the rest. **The author applied the change by hand**; the agent
+committed it (`build: register the Prettier hook and allow npm run / npm ci (applied by the author)`). This is the
+intended division of labour: the agent cannot widen its own permissions; a human reviews and applies such changes.
+
+## What was done
+
+- **Backend follow-up**: ingestion endpoints documented in OpenAPI (`202` + `Location`, `409` with
+  `runningIngestionId`, `200`/`400`/`404`); springdoc widened to `/api/v1/**`; an `OpenApiCustomizer` makes response
+  properties required/nullable, flattens `ProblemDetail`, writes nullable references as `anyOf`; contract IT extended
+  (responses, enum values match the Java enums, required/nullable); ArchUnit rule against `@JsonInclude` on responses.
+- **Spec 006** with 30 acceptance criteria; ADR-0023, ADR-0024.
+- **Tooling**: frontend toolchain, CI job (types diff, Prettier, ESLint, tsc, coverage, build, image smoke test),
+  CodeQL `javascript-typescript`, Dependabot npm + Docker, Prettier hook, Stop / pre-push hooks per gate
+  (`classify_paths`, tested), pre-commit Prettier, CLAUDE.md.
+- **Tests first** (red commit): 112 Vitest tests grouped by AC plus 19 image checks; then the implementation.
+- **Implementation**: API client, four hooks, ten components, pure modules, CSS; nginx, entrypoint, Dockerfile, compose.
+- **Docs**: `docs/frontend.md` (for a backend developer), README, `docs/usage.md`, `docs/architecture.md`,
+  SOLUTION.md.
+
+## Notable corrections during the session
+
+- **Peer dependencies**: ESLint 10 is not supported by `eslint-plugin-jsx-a11y`, TypeScript 7 not by
+  `typescript-eslint` / `openapi-typescript`: pinned ESLint 9 and TypeScript 5.9 instead of `--legacy-peer-deps`.
+- **A contract bug found by the generated types**: `report` came out as never-null; springdoc's `$ref` + `type: null`
+  is read as "both" in OpenAPI 3.1. Fixed in the backend (`anyOf`), regenerated, checked by the contract IT.
+- **A misleading green**: an edit to the customizer silently did not apply (Spotless had re-wrapped the target line),
+  and the IT passed with `-Dopenapi.write=true` because it rewrote the file it compared against. Found by checking the
+  regenerated file, then by debugging output; the new assertion was confirmed red before the fix.
+- **msw 3** renamed `onUnhandledRequest` to `onUnhandledFrame`; the old option was ignored, so unexpected requests
+  only warned. Found by `tsc`.
+- **Two tests adjusted** after implementation, recorded in their own commit: result rows are selected by name (the
+  segments are a nested list), and the keyboard test picks the origin with `selectOptions` (user-event does not
+  simulate arrow keys on a native `<select>`).
+- **React lint `set-state-in-effect`** flagged five effects; the design changed to start searches from events and to
+  remount the form by key instead of syncing props into state.
+- **Prettier and `.editorconfig`**: Prettier inherited 4-space indentation; the frontend pins 2.
+- **Healthcheck**: `localhost` resolved to `::1` inside the nginx container; the compose stack showed `frontend`
+  unhealthy while serving. Fixed (`127.0.0.1`) and covered by the smoke test.
+
+## Review findings and how they were handled
+
+### `code-reviewer` (verdict: needs changes; nothing blocking)
+
+| # | Finding | Action |
+|---|---|---|
+| 1 | Overlapping polls: a superseded poll's `catch` read the *new* controller and set "status unavailable" | **Fixed** (controller per poll); test reproduces it on the old code |
+| 2 | A poll in flight during *Refresh data* could replace the new RUNNING run and reschedule at 30 s | **Fixed** (refresh aborts it); test reproduces it on the old code |
+| 3 | Search dispatches after `await` relied on abort semantics | **Fixed**: explicit "still the current search?" check |
+| 4 | Focus lost after every search (form remounted by a key from the filters) | **Fixed**: key = back/forward counter; test |
+| 5 | `type="number"` hides non-numeric input (`""`), so the search ran without a price limit | **Fixed**: text + `inputMode="decimal"`; test |
+| 6 | Tests not in StrictMode | **Fixed**: `renderApp` wraps in `StrictMode` |
+| 7 | OpenAPI drift only caught in CI | **Fixed**: `check:api` in `npm run check`; `openapi.json` classified as frontend (test case) |
+| 8 | Customizer's "required" rule relies on names and on Jackson writing nulls | Guarded: ArchUnit rule (no `@JsonInclude` on `*Response`/`*Document`), null-safe components |
+| — | Nice to have: merge request headers; stop on `hasMore` without cursor; de-duplicate items across pages; skip identical history entries; simpler `useCatalog`; validate upstream URLs in the entrypoint; security headers on `/api`; no `eval` in the Stop hook; reinstall when the lock file changes; CI timeout | **Done** |
+| — | CSRF on demo/refresh POSTs | Documented in SOLUTION.md (local demo; production: auth, `Origin` check, flag off) |
+| — | Baseline is the last *polled* run (≤ 30 s old) | Documented in ADR-0023 (conservative: at most an unnecessary reload) |
+| — | Move `OpenApiContractIT` out of the `search` package; path filters for the CI image build; pre-commit checks the working tree | Not changed (cosmetic / same as the existing Spotless check); noted here |
+
+### `spec-reviewer` (verdict: spec satisfied; AC-25 / AC-30 manual)
+
+| Gap | Action |
+|---|---|
+| Overlapping polls flag "unavailable" (same as code review #1) | **Fixed** |
+| Max-price error not announced | **Fixed**: `role="alert"` |
+| AC-11 wording ambiguous | Spec text clarified |
+| Tooling ACs have no AC-named tests | `classify-paths.test.sh` now names AC-29; AC-26 – AC-28 are configuration, verified in CI |
+| Small scope additions (Docker in Dependabot, X-Frame-Options, pre-commit Prettier, URL overrides) | Kept: hardening/tooling, listed in the PR |
+
+## Verification
+
+- `./mvnw verify` (both modules, unit + integration tests, ArchUnit, coverage gates, Spotless): **green in 65 s**
+  (flight-aggregator 507 unit + 180 integration tests, 50 s; gds-mock 146 + 41, 14 s).
+- `npm run check` (types regenerated and diffed, Prettier, ESLint, `tsc`, 118 Vitest tests with coverage): **green in
+  7 s**, coverage 99.7 % lines / 95.5 % branches. `npm run build`: 243 kB JS (76 kB gzipped).
+- `frontend/docker/smoke-test.sh`: **22/22** in 10 s. Hook tests: classify-paths 15/15, guard-git 39/39.
+- `docker compose up --build` (AC-25, AC-30, by hand, twice — before and after the review fixes): five services
+  healthy (the first time `frontend` stayed unhealthy: the `localhost` healthcheck, fixed); a rebuild from cached
+  layers took 18 s. Through nginx on <http://localhost:3000>: the dashboard and `/config.json`
+  (`demoControls: true`); after the first scheduled run (94,543 itineraries) searches return data; `POST
+  /api/v1/ingestions` → `202`, then `409` with `runningIngestionId`; `/actuator` not proxied; restarting the
+  aggregator → `502` meanwhile, `200` after (upstream re-resolved). Outage demo: Beta down through `/gds-admin`, manual
+  run → `PARTIAL`, Beta `FAILED 0/7` with breaker `OPEN`, days `KEPT_STALE`, search items `STALE`; Beta recovered.
+- **Not done by the agent: the UI in a real browser and the README screenshot.** No browser automation tools were
+  available in the session (the Claude in Chrome tools were not exposed); the author takes the screenshot. The UI
+  behaviour is covered by the jsdom tests.

@@ -11,16 +11,15 @@ that boots with `docker compose up --build`.
 
 Full statement: [docs/exercise.md](docs/exercise.md). Design write-up: [SOLUTION.md](SOLUTION.md).
 
-> **Status:** search API. Implemented: the framework-free aggregation domain
+> **Status:** complete stack. Implemented: the framework-free aggregation domain
 > ([spec 001](specs/001-itinerary-aggregation/spec.md)), the mock providers ([spec 002](specs/002-gds-mock/spec.md)),
 > resilient provider ingestion ([spec 003](specs/003-provider-ingestion/spec.md)), and PostgreSQL persistence with
 > scheduled and on-demand runs and a first `docker compose` stack ([spec 004](specs/004-persistence-and-pipeline/spec.md)),
-> and the search API with keyset pagination, a catalog and a Redis cache ([spec 005](specs/005-search-api/spec.md)).
-> The frontend lands in the next PR.
+> the search API with keyset pagination, a catalog and a Redis cache ([spec 005](specs/005-search-api/spec.md)),
+> and the dashboard with live ingestion status ([spec 006](specs/006-dashboard/spec.md)).
 
 ## Components
 
-Target architecture. Each component is built in a later PR and described here once it exists.
 
 | Component | Role | Decision |
 |---|---|---|
@@ -28,7 +27,7 @@ Target architecture. Each component is built in a later PR and described here on
 | `flight-aggregator` | Scheduled + on-demand **ingestion** from the 3 providers in parallel, **deduplication** and pricing in the domain, day snapshots in PostgreSQL, **search API** with filters, keyset pagination and a catalog (**implemented**) | [ADR-0006](docs/adr/0006-scheduled-pre-ingestion.md), [ADR-0010](docs/adr/0010-domain-assumptions.md), [ADR-0021](docs/adr/0021-search-cursor.md) |
 | PostgreSQL | Source of truth for itineraries and ingestion runs (**implemented**: Flyway schema, COPY bulk load, advisory run lock, search indexes) | [ADR-0007](docs/adr/0007-postgresql-and-redis.md), [ADR-0020](docs/adr/0020-search-indexes.md) |
 | Redis | Search and catalog cache, keyed by a data version that every ingestion write bumps; optional at runtime (**implemented**) | [ADR-0022](docs/adr/0022-search-cache.md) |
-| `frontend` | React + TypeScript dashboard served by nginx | [ADR-0009](docs/adr/0009-react-frontend.md) |
+| `frontend` | React + TypeScript dashboard served by nginx: search with URL state, keyset "load more", live ingestion status with refresh, charts, demo outage controls (**implemented**) | [ADR-0009](docs/adr/0009-react-frontend.md), [ADR-0023](docs/adr/0023-real-time-by-polling.md), [ADR-0024](docs/adr/0024-contract-generated-client-and-frontend-toolchain.md) |
 
 ```mermaid
 flowchart LR
@@ -51,6 +50,7 @@ Search reads only from PostgreSQL/Redis, never from the providers, and pages wit
 ## Requirements
 
 - JDK 21
+- Node 26 (only to work on the frontend outside Docker; see `frontend/.nvmrc`)
 - Docker (for the compose stack and the Testcontainers-based integration tests)
 - Git, and optionally the [GitHub CLI](https://cli.github.com/) (`gh`)
 - [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) for the AI-assisted workflow
@@ -66,9 +66,14 @@ Search reads only from PostgreSQL/Redis, never from the providers, and pages wit
 ./mvnw verify -Pslow-tests                      # also the slow 1,000,000-record tests
 ```
 
-**Docker** — `docker compose up --build` starts **PostgreSQL**, **Redis**, **gds-mock** (port 8081) and
-**flight-aggregator** (port 8080), each with a healthcheck. The aggregator runs its first ingestion about 10 s after
-it is healthy, then every 15 min:
+**Docker** — `docker compose up --build` starts **PostgreSQL**, **Redis**, **gds-mock** (port 8081),
+**flight-aggregator** (port 8080) and the **dashboard** (port 3000), each with a healthcheck. The aggregator runs its
+first ingestion about 10 s after it is healthy, then every 15 min.
+
+**Open the dashboard at <http://localhost:3000>**: search and filter (the filters live in the URL), page with
+"Load more", watch the data status panel, press *Refresh data* to run an ingestion now, and use the *Demo controls*
+panel to take a mock provider down and watch the breaker open and days go stale
+([docs/frontend.md](docs/frontend.md)). The same API through curl:
 
 ```bash
 docker compose up --build -d --wait
@@ -79,13 +84,13 @@ curl -X POST http://localhost:8080/api/v1/ingestions                            
 ```
 
 The OpenAPI description is at `http://localhost:8080/swagger-ui.html` (committed copy:
-[docs/api/openapi.json](docs/api/openapi.json)). The frontend is added in the next PR.
+[docs/api/openapi.json](docs/api/openapi.json)); the dashboard's TypeScript types are generated from it.
 
 See [docs/usage.md](docs/usage.md) for the endpoints that currently exist and their configuration.
 
 ## Quality gates
 
-Applied to every Maven module.
+Applied to every Maven module, and the equivalent to the frontend.
 
 | Gate | Tool | Where |
 |---|---|---|
@@ -94,8 +99,12 @@ Applied to every Maven module.
 | Integration tests (`*IT`) | `@SpringBootTest` on a random port (Failsafe) | `verify`, CI |
 | Architecture & SOLID rules | ArchUnit (`ArchitectureTest` per module) | `verify`, CI |
 | Coverage ≥ 80 % lines / 70 % branches | JaCoCo (merged unit + IT, per module) | `verify`, CI (summary + PR comment) |
-| Vulnerable dependencies | Dependency Review, Dependabot | CI on PRs, weekly |
-| Static security analysis | CodeQL (`security-and-quality`) | CI on PRs, weekly |
+| Frontend: format, lint, types | Prettier, ESLint (`jsx-a11y`, `react-hooks`), `tsc` strict | `npm run check`, pre-commit (Prettier), Claude hooks, CI |
+| Frontend: tests ≥ 80 % lines / 70 % branches | Vitest + React Testing Library + MSW | `npm run check`, pre-push, CI |
+| Frontend: contract | types generated from `docs/api/openapi.json`, regenerated and diffed | CI |
+| Frontend: image | `frontend/docker/smoke-test.sh` (headers, proxy scope, demo flag, non-root) | CI |
+| Vulnerable dependencies | Dependency Review, Dependabot (Maven, npm, Docker, Actions) | CI on PRs, weekly |
+| Static security analysis | CodeQL (`security-and-quality`, Java and JavaScript/TypeScript) | CI on PRs, weekly |
 
 Coverage report: `<module>/target/site/jacoco/index.html`.
 
@@ -123,7 +132,8 @@ Everything in the repository is written in English (see [CLAUDE.md](CLAUDE.md)).
 | Agent | `test-engineer` | Writes tests and closes coverage gaps |
 | Hook | `guard-git.sh` | Blocks commit/push on `main`, force-push and `--no-verify` |
 | Hook | `format-java.sh` | Spotless after every Java/POM edit, scoped to the edited module |
-| Hook | `verify-on-stop.sh` | `./mvnw verify` before Claude finishes, if any module changed |
+| Hook | `format-frontend.sh` | Prettier after every edit under `frontend/` |
+| Hook | `verify-on-stop.sh` | `./mvnw verify` and/or the frontend checks before Claude finishes, for whatever changed |
 | Hook | `session-start.sh` | Activates `.githooks`, reports the current branch |
 
 Project rules for Claude live in [CLAUDE.md](CLAUDE.md). The prompts and agents used to build the solution are
@@ -146,7 +156,11 @@ gds-mock/             mock GDS providers (Spring Boot), base package com.andresp
     chaos/                     latency, injected errors, outage switch
     shared/                    provider id, request errors, Problem Details handler
   Dockerfile                 multi-stage image (build context = repository root)
-docker-compose.yml    the stack (PostgreSQL, Redis, gds-mock, flight-aggregator for now)
+frontend/             dashboard (React + TypeScript + Vite), served by nginx; see docs/frontend.md
+  src/api/                   generated API types + the fetch client
+  src/hooks/, src/components/  state and presentation
+  docker/                    nginx config, entrypoint (runtime config), image smoke test
+docker-compose.yml    the whole stack (PostgreSQL, Redis, gds-mock, flight-aggregator, frontend)
 .claude/              shared Claude Code config: settings + hooks, skills, agents
 .githooks/            versioned git hooks (pre-commit, pre-push)
 .github/              CI, CodeQL, Dependabot, PR template
@@ -162,6 +176,7 @@ specs/                one spec per feature (SDD)
 - [Architecture Decision Records](docs/adr/README.md)
 - [Specs](specs/README.md)
 - [Usage](docs/usage.md)
+- [Frontend](docs/frontend.md) — structure, data flow, how to run it, walkthrough for backend developers
 - [API OpenAPI description](docs/api/openapi.json) (search and ingestion)
 - [AI-assisted development log](docs/ai/README.md)
 - [Repository bootstrap & GitHub setup](docs/github-setup.md)

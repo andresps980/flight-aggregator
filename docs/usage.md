@@ -1,9 +1,10 @@
 # Usage
 
-> The aggregator ingests the three providers on a schedule and on demand, and stores the deduplicated itineraries in
-> PostgreSQL ([spec 003](../specs/003-provider-ingestion/spec.md), [spec 004](../specs/004-persistence-and-pipeline/spec.md)).
-> The search API comes in the next spec. The mock GDS providers ([spec 002](../specs/002-gds-mock/spec.md)) are
-> documented [below](#gds-mock-mock-gds-providers).
+> The aggregator ingests the three providers on a schedule and on demand, stores the deduplicated itineraries in
+> PostgreSQL ([spec 003](../specs/003-provider-ingestion/spec.md), [spec 004](../specs/004-persistence-and-pipeline/spec.md))
+> and serves them through the search API ([spec 005](../specs/005-search-api/spec.md)) and the
+> [dashboard](#dashboard-spec-006) ([spec 006](../specs/006-dashboard/spec.md)). The mock GDS providers
+> ([spec 002](../specs/002-gds-mock/spec.md)) are documented [below](#gds-mock-mock-gds-providers).
 
 ## Build and test
 
@@ -13,7 +14,9 @@
 | Also run the slow volume tests (tagged `slow`: 1,000,000-record generation and streaming) | `./mvnw verify -Pslow-tests` |
 | Also run the end-to-end ingestion test (tagged `e2e`, needs gds-mock running in the `deterministic` profile) | `./mvnw -pl flight-aggregator verify -Pe2e-tests` |
 | Also run the 1M-row bulk load benchmark (tagged `slow`, ADR-0018) | `./mvnw -pl flight-aggregator verify -Pslow-tests -Dit.test=BulkLoadBenchmarkIT` |
-| Start the stack (PostgreSQL, gds-mock, flight-aggregator) | `docker compose up --build` |
+| Frontend checks (Prettier, ESLint, tsc, Vitest with coverage gate) | `cd frontend && npm ci && npm run check` |
+| Frontend image smoke test (needs Docker) | `bash frontend/docker/smoke-test.sh` |
+| Start the stack (PostgreSQL, Redis, gds-mock, flight-aggregator, frontend) | `docker compose up --build` |
 
 Integration tests start one PostgreSQL container (`postgres:17`, Testcontainers) for the whole build, so Docker must
 be running.
@@ -36,7 +39,7 @@ creates or migrates the schema at startup; the first ingestion runs 10 s after s
 ### Docker Compose
 
 ```bash
-docker compose up --build        # postgres + redis + gds-mock + flight-aggregator
+docker compose up --build        # postgres + redis + gds-mock + flight-aggregator + frontend
 ```
 
 | Service | Port | Notes |
@@ -45,6 +48,7 @@ docker compose up --build        # postgres + redis + gds-mock + flight-aggregat
 | `redis` | `6379` (`REDIS_PORT`) | `redis:8`, search cache only: no persistence, `maxmemory 256mb`, `allkeys-lru` |
 | `gds-mock` | `8081` | Chaos on by default; `GDS_MOCK_PROFILE=deterministic` turns it off, `GDS_WORLD_VOLUME=1000000` for the full volume |
 | `flight-aggregator` | `8080` | Starts when the other three are healthy; healthy on `/actuator/health/readiness`; restarts if the JVM exits on `OutOfMemoryError` |
+| `frontend` | `3000` (`FRONTEND_PORT`) | nginx serving the dashboard and proxying `/api`; starts when the aggregator is healthy; healthy on `/healthz`; `DEMO_CONTROLS` (default `true`) shows the demo panel and proxies `/gds-admin` |
 
 Variables for the aggregator: `INGESTION_INITIAL_DELAY` (default `10s`), `INGESTION_FIXED_DELAY` (`15m`),
 `AGGREGATOR_JAVA_TOOL_OPTIONS` (default `-Xmx768m -XX:+ExitOnOutOfMemoryError`, see SOLUTION.md). The compose file
@@ -296,6 +300,38 @@ As in gds-mock, per-provider keys contain a dash, so override them with command-
 ```bash
 ./mvnw -pl flight-aggregator spring-boot:run \
   -Dspring-boot.run.arguments="--aggregator.providers.mock-beta.resilience.read-timeout=9s --aggregator.ingestion.max-concurrent-days=1"
+```
+
+## Dashboard (spec 006)
+
+Open <http://localhost:3000> after `docker compose up --build` (or run the Vite dev server, see
+[frontend.md](frontend.md#run-it)). Structure, data flow and a code walkthrough: [frontend.md](frontend.md).
+
+| Feature | Behaviour |
+|---|---|
+| Search | Origin, destination (only those served from the chosen origin), departure date (catalog dates with their freshness), max price (EUR, ≤ 2 decimals) and carrier; runs on *Search* / Enter |
+| Shareable URL | The filters are the URL's query, with the API's names: `http://localhost:3000/?origin=MAD&destination=JFK&maxPrice=650`; reload and back / forward rerun that search |
+| Results | Cheapest first; route, carrier, stops, duration, segments, **final price**, base price and markup, selected provider and the others, freshness badge. **Times in UTC** |
+| Paging | *Load more* follows `nextCursor`; no total. Empty or short pages while `hasMore` is true are followed automatically (up to 5 empty pages in a row) |
+| Data status | Latest run (status, trigger, times, stored itineraries), per provider (result, partitions, breaker, failures), per day; polled every 30 s, every 3 s while a run is `RUNNING`, paused in a hidden tab; a `FAILED` run warns that data may be stale |
+| Refresh data | Starts a run (`POST /api/v1/ingestions`); a run in progress answers "already running" (`409`) |
+| New data available | Offered (never automatic) when a run that published data finishes after the results were loaded; *Reload results* refreshes the catalog and the search |
+| Charts | Price distribution and results by selected provider, of the loaded results |
+| Demo controls | With `DEMO_CONTROLS=true` (compose default): toggle a gds-mock provider outage, then *Refresh data* to watch the provider fail, its breaker open and its days go `STALE` |
+
+Container settings (`frontend` service):
+
+| Variable | Default | Effect |
+|---|---|---|
+| `FRONTEND_PORT` (compose) | `3000` | Host port of the dashboard |
+| `DEMO_CONTROLS` | `true` in compose, `false` in the image | Demo panel and the `/gds-admin/providers…` proxy to gds-mock; when off, `/gds-admin/` answers `404` |
+| `AGGREGATOR_URL` | `http://flight-aggregator:8080` | Upstream for `/api/` |
+| `GDS_MOCK_URL` | `http://gds-mock:8081` | Upstream for the demo controls |
+
+```bash
+DEMO_CONTROLS=false FRONTEND_PORT=8000 docker compose up --build -d --wait   # no demo panel, on port 8000
+curl -s localhost:3000/config.json                                          # {"demoControls": true}
+curl -s localhost:3000/api/v1/catalog | head -c 200                         # the API through nginx
 ```
 
 ## gds-mock (mock GDS providers)
