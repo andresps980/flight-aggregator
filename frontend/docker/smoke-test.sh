@@ -48,6 +48,8 @@ check "contains no Node.js runtime" bash -c "! docker exec $off_id sh -c 'comman
 
 echo "--- AC-23: static files and headers"
 check "/healthz answers 200" test "$(status "$off/healthz")" = 200
+check "the compose healthcheck command succeeds inside the container" \
+  docker exec "$off_id" wget -qO- http://127.0.0.1:8080/healthz
 check "/ serves the app" bash -c "curl -fs $off/ | grep -q '<div id=\"root\">'"
 check "an unknown path falls back to index.html (URL state)" \
   bash -c "curl -fs '$off/some/deep/link?origin=MAD' | grep -q '<div id=\"root\">'"
@@ -65,6 +67,11 @@ echo "--- AC-23: proxy"
 check "/api/ is proxied to the aggregator (502 while it is down)" test "$(status "$off/api/v1/catalog")" = 502
 check "/actuator is not proxied" bash -c "! curl -fs $off/actuator/health | grep -q status"
 check "Swagger UI is not proxied" bash -c "curl -fs $off/swagger-ui.html | grep -q '<div id=\"root\">'"
+
+check "/api/ responses carry the security headers too" \
+  bash -c "curl -s -D - -o /dev/null $off/api/v1/catalog | grep -qi '^x-content-type-options: nosniff'"
+check "an upstream URL with a path is refused at start" \
+  bash -c "! docker run --rm -e AGGREGATOR_URL='http://x:8080/; evil' $image true"
 
 echo "--- AC-22: demo controls flag"
 check "DEMO_CONTROLS=false: config.json says off" bash -c "curl -fs $off/config.json | grep -q '\"demoControls\": *false'"

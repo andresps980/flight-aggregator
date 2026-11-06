@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tests for classify_paths in .claude/hooks/lib.sh (which gates a change affects).
+# Tests for classify_paths in .claude/hooks/lib.sh: which quality gates a change affects (spec 006 AC-29).
 # Usage: bash .claude/hooks/tests/classify-paths.test.sh
 set -uo pipefail
 source "$(cd "$(dirname "$0")/.." && pwd)/lib.sh"
@@ -29,6 +29,7 @@ expect "backend" .mvn/wrapper/maven-wrapper.properties
 expect "frontend" frontend/src/App.tsx
 expect "frontend" frontend/package.json
 expect "frontend" frontend/nginx/default.conf.template
+expect "frontend" docs/api/openapi.json
 expect "" docs/frontend.md
 expect "" specs/006-dashboard/spec.md
 expect "" .github/workflows/ci.yml README.md

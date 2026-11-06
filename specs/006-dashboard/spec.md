@@ -1,6 +1,6 @@
 # Spec 006: Dashboard — search, filter and visualise itineraries, live ingestion status
 
-- **Status:** Approved
+- **Status:** Implemented
 - **Branch:** feat/006-dashboard
 - **Related ADRs:** [ADR-0006](../../docs/adr/0006-scheduled-pre-ingestion.md),
   [ADR-0008](../../docs/adr/0008-keyset-pagination.md), [ADR-0009](../../docs/adr/0009-react-frontend.md),
@@ -89,7 +89,8 @@ the file are exact. `OpenApiContractIT` checks it.
 - **AC-10 (empty)** — Given a search with no results (`items: []`, `hasMore: false`), then a clear "No itineraries
   match these filters" message is shown, not an empty table.
 - **AC-11 (loading)** — While a search is in flight its button shows a busy state and a second submit is ignored;
-  results of a superseded search (filters changed and resubmitted before the first answered) are never displayed.
+  when a newer search replaces one still in flight (back/forward, "Reload results"), the older one's results are
+  never displayed.
 
 **Pagination** ([ADR-0008](../../docs/adr/0008-keyset-pagination.md), spec 005 *Paging rule for clients*)
 - **AC-12 (load more)** — Given `hasMore: true`, then a "Load more" button is shown; activating it requests the same

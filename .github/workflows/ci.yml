@@ -91,6 +91,7 @@ jobs:
   frontend:
     name: Frontend (format, lint, types, tests & coverage, build, image)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: frontend
@@ -107,8 +108,7 @@ jobs:
 
       - name: Generated API types match docs/api/openapi.json
         run: |
-          npm run gen:api
-          git diff --exit-code -- src/api/schema.d.ts \
+          npm run check:api \
             || { echo "::error::src/api/schema.d.ts is out of date: run 'npm run gen:api' in frontend/ and commit it"; exit 1; }
 
       - name: Format (Prettier)

@@ -47,6 +47,8 @@ with a reload action; a `FAILED` run shows a warning in the status panel instead
 - **Positive:** no backend change; works through any proxy; trivially testable with fake timers; the load is bounded
   (≤ 1 request / 3 s / visible tab during a run, 1 / 30 s otherwise, served by a primary-key lookup).
 - **Negative / trade-offs:** up to 30 s of delay before the dashboard notices a scheduled run started (3 s once it
-  knows one is running); every open tab polls independently.
+  knows one is running); every open tab polls independently. The baseline of a search is the latest run *as last
+  polled*, so a run that finished in the seconds before a search can still trigger "New data available" once:
+  conservative (an unnecessary reload, never a missed one).
 - **Follow-ups:** SSE if runs become frequent or many dashboards are open; an `ETag` on `/latest` would make idle
   polls cheaper still.

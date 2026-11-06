@@ -27,22 +27,24 @@ fingerprint() {
 
 failures=""
 
-# gate <name> <command> -- <pathspec>...: runs <command> unless the paths are unchanged or already green.
+# gate <name> <pathspec...> -- <command...>: runs the command unless the paths are unchanged or already green.
 gate() {
-  local name="$1" command="$2" print
-  shift 3
-  print="$(fingerprint "$@")"
+  local name="$1" print log
+  shift
+  local -a paths=()
+  while [ "$1" != "--" ]; do paths+=("$1"); shift; done
+  shift # what remains in "$@" is the command
+  print="$(fingerprint "${paths[@]}")"
   [ -n "$print" ] || return 0
   local marker="target/.claude-last-green-$name"
   if [ -f "$marker" ] && [ "$(cat "$marker")" = "$print" ]; then
     return 0
   fi
-  local log
   log="$(mktemp)"
-  if eval "$command" >"$log" 2>&1; then
+  if "$@" >"$log" 2>&1; then
     mkdir -p target && echo "$print" >"$marker"
   else
-    failures+="$name checks FAILED ($command). Fix them before finishing. Last lines of the log:"$'\n'
+    failures+="$name checks FAILED ($*). Fix them before finishing. Last lines of the log:"$'\n'
     failures+="$(tail -n 60 "$log")"$'\n\n'
   fi
   rm -f "$log"
@@ -50,10 +52,11 @@ gate() {
 
 # Multi-module Maven build: the root pom plus every module's pom.xml and src/ (the frontend is not a Maven module).
 if [ -x ./mvnw ]; then
-  gate backend "./mvnw -q -B verify" -- pom.xml ':(glob)*/pom.xml' ':(glob)*/src/**' ':(exclude)frontend/**'
+  gate backend pom.xml ':(glob)*/pom.xml' ':(glob)*/src/**' ':(exclude)frontend/**' -- ./mvnw -q -B verify
 fi
 if [ -f frontend/package.json ]; then
-  gate frontend "run_frontend_checks" -- frontend
+  # docs/api/openapi.json: the frontend's types are generated from it (npm run check verifies they match).
+  gate frontend frontend docs/api/openapi.json -- run_frontend_checks
 fi
 
 [ -z "$failures" ] && exit 0

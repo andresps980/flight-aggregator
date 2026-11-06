@@ -34,7 +34,8 @@ class OpenApiConfiguration {
      *
      * <ul>
      *   <li>Every property of a response record ({@code *Response}, report {@code *Document}) is required: Jackson
-     *       writes every record component, {@code null} included. Properties that can be {@code null} are marked
+     *       writes every record component, {@code null} included. The rule relies on that naming convention and on
+     *       no response record using {@code @JsonInclude(NON_NULL)}; {@code ArchitectureTest} checks the second. Properties that can be {@code null} are marked
      *       {@code nullable} on the record, so a client sees {@code string | null}, never an optional field.
      *   <li>A nullable reference to another schema is written {@code anyOf: [{$ref}, {type: null}]}: springdoc emits
      *       {@code $ref} next to {@code type: null}, which in OpenAPI 3.1 means "both" and makes generators drop the
@@ -46,6 +47,9 @@ class OpenApiConfiguration {
     @Bean
     OpenApiCustomizer exactResponseSchemas() {
         return openApi -> {
+            if (openApi.getComponents() == null || openApi.getComponents().getSchemas() == null) {
+                return;
+            }
             Map<String, Schema> schemas = openApi.getComponents().getSchemas();
             schemas.forEach((name, schema) -> {
                 Map<String, Schema> properties = schema.getProperties();

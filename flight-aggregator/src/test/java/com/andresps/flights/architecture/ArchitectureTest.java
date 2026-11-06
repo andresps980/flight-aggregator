@@ -23,6 +23,21 @@ import org.springframework.web.bind.annotation.RestController;
 @AnalyzeClasses(packages = "com.andresps.flights", importOptions = ImportOption.DoNotIncludeTests.class)
 class ArchitectureTest {
 
+    /**
+     * The OpenAPI customizer documents every property of a {@code *Response} / report {@code *Document} as required,
+     * because Jackson writes every record component (spec 006). Omitting nulls would make that description wrong.
+     */
+    @ArchTest
+    static final ArchRule response_records_always_write_every_property = noClasses()
+            .that()
+            .haveSimpleNameEndingWith("Response")
+            .or()
+            .haveSimpleNameEndingWith("Document")
+            .should()
+            .dependOnClassesThat()
+            .haveFullyQualifiedName("com.fasterxml.jackson.annotation.JsonInclude")
+            .because("OpenApiConfiguration marks their properties required (spec 006)");
+
     @ArchTest
     static final ArchRule domain_does_not_depend_on_outer_layers = noClasses()
             .that()

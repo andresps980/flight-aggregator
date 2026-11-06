@@ -18,7 +18,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "coverage": "vitest run --coverage",
-    "check": "npm run format:check && npm run lint && npm run typecheck && npm run coverage"
+    "check": "npm run check:api && npm run format:check && npm run lint && npm run typecheck && npm run coverage",
+    "check:api": "npm run gen:api && git diff --exit-code -- src/api/schema.d.ts"
   },
   "dependencies": {
     "react": "^19.3.1",

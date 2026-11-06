@@ -15,4 +15,4 @@ starts here.
 | [003](003-provider-ingestion/spec.md) | Provider ingestion: streaming adapters, parallel resilient ingestion, report | Implemented |
 | [004](004-persistence-and-pipeline/spec.md) | Persistence (PostgreSQL read model, day snapshots), scheduled and on-demand ingestion runs, docker compose | Implemented |
 | [005](005-search-api/spec.md) | Search API: filters, keyset pagination, indexes, Redis cache, catalog, OpenAPI | Implemented |
-| [006](006-dashboard/spec.md) | Dashboard: search panel, results with keyset paging, live ingestion status and refresh, visualisation; nginx, compose, frontend CI | Approved |
+| [006](006-dashboard/spec.md) | Dashboard: search panel, results with keyset paging, live ingestion status and refresh, visualisation; nginx, compose, frontend CI | Implemented |
