@@ -193,6 +193,7 @@ As in gds-mock, per-provider keys contain a dash, so override them with command-
 | `aggregator.ingestion.schedule.fixed-delay` | `15m` | Wait after each scheduled run ends before the next |
 | `aggregator.persistence.max-stale-age` | `2h` | How long a stale day snapshot is kept against partial data before partial data replaces it |
 | `aggregator.persistence.run-retention` | `7d` | Ingestion runs older than this are deleted at the start of each run |
+| `spring.datasource.hikari.maximum-pool-size` | `10` | Keep ≥ `max-concurrent-days` + 2: each day in flight writes on its own connection (the run lock uses a separate, non-pooled one) |
 | `spring.datasource.url` / `username` / `password` | `jdbc:postgresql://localhost:5432/flights` / `flights` / `flights` | PostgreSQL (`SPRING_DATASOURCE_*` in compose) |
 | `GDS_MOCK_URL` (environment) | `http://localhost:8081` | Base URL of all three providers at once (compose: `http://gds-mock:8081`) |
 | `aggregator.resilience.default.connect-timeout` | `1s` | TCP connect timeout |

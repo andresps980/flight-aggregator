@@ -70,7 +70,7 @@ class PostgresDaySnapshotStoreIT {
     @ParameterizedTest(name = "{0}")
     @MethodSource("loaders")
     @DisplayName(
-            "AC-10: every field round-trips exactly (instants, prices at scale 2 up to the Money maximum, providers, segments in order)")
+            "spec 004 AC-10: every field round-trips exactly (instants, prices at scale 2 up to the Money maximum, providers, segments in order)")
     void roundTrip(ItineraryBulkLoader loader) {
         AggregatedItinerary connecting = itinerary(DAY, 0);
         AggregatedItinerary direct = itinerary(DAY, 1);
@@ -87,7 +87,7 @@ class PostgresDaySnapshotStoreIT {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("loaders")
-    @DisplayName("AC-11: hostile text (tab, newline, quote, backslash, braces, comma) is stored exactly")
+    @DisplayName("spec 004 AC-11: hostile text (tab, newline, quote, backslash, braces, comma) is stored exactly")
     void hostileTextRoundTrips(ItineraryBulkLoader loader) {
         ProviderId hostile = new ProviderId("evil\t\"x\",{y}\\z\nnext\rline NULL \\N");
         AggregatedItinerary base = itinerary(DAY, 1);
@@ -104,7 +104,8 @@ class PostgresDaySnapshotStoreIT {
     }
 
     @Test
-    @DisplayName("AC-2: replacing a day is atomic: a concurrent reader sees the old or the new snapshot, never a mix")
+    @DisplayName(
+            "spec 004 AC-2: replacing a day is atomic: a concurrent reader sees the old or the new snapshot, never a mix")
     void replacementIsAtomic() throws InterruptedException {
         store.replace(complete(DAY, RUN_A, itineraries(DAY, 5_000)));
         store.replace(complete(OTHER_DAY, RUN_A, itineraries(OTHER_DAY, 100)));
@@ -141,7 +142,7 @@ class PostgresDaySnapshotStoreIT {
     }
 
     @Test
-    @DisplayName("AC-4: a partial snapshot is recorded incomplete with its missing providers")
+    @DisplayName("spec 004 AC-4: a partial snapshot is recorded incomplete with its missing providers")
     void incompleteSnapshot() {
         store.replace(write(DAY, RUN_A, itineraries(DAY, 10), providers(BETA)));
 
@@ -157,7 +158,7 @@ class PostgresDaySnapshotStoreIT {
     }
 
     @Test
-    @DisplayName("AC-3/AC-6: marking a day stale keeps its rows; the first stale instant is kept across runs")
+    @DisplayName("spec 004 AC-3/AC-6: marking a day stale keeps its rows; the first stale instant is kept across runs")
     void markStale() {
         store.replace(complete(DAY, RUN_A, itineraries(DAY, 10)));
         Instant first = Instant.parse("2026-11-05T12:15:00Z");
@@ -173,7 +174,8 @@ class PostgresDaySnapshotStoreIT {
     }
 
     @Test
-    @DisplayName("AC-8 (error): a write failing mid-load rolls back the whole day; the previous snapshot is intact")
+    @DisplayName(
+            "spec 004 AC-8 (error): a write failing mid-load rolls back the whole day; the previous snapshot is intact")
     void failedWriteRollsBack() {
         store.replace(complete(DAY, RUN_A, itineraries(DAY, 50)));
         List<AggregatedItinerary> withDuplicate = new ArrayList<>(itineraries(DAY, 200));
@@ -188,7 +190,8 @@ class PostgresDaySnapshotStoreIT {
     }
 
     @Test
-    @DisplayName("AC-12: days before a date are deleted with their snapshot status; that day and later are kept")
+    @DisplayName(
+            "spec 004 AC-12: days before a date are deleted with their snapshot status; that day and later are kept")
     void deleteDaysBefore() {
         store.replace(complete(DAY, RUN_A, itineraries(DAY, 5)));
         store.replace(complete(OTHER_DAY, RUN_A, itineraries(OTHER_DAY, 5)));
@@ -201,7 +204,7 @@ class PostgresDaySnapshotStoreIT {
     }
 
     @Test
-    @DisplayName("AC-13: refreshing statistics analyzes the itinerary table")
+    @DisplayName("spec 004 AC-13: refreshing statistics analyzes the itinerary table")
     void refreshStatistics() {
         Instant before =
                 jdbc.sql("SELECT now()").query(OffsetDateTime.class).single().toInstant();

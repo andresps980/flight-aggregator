@@ -64,7 +64,7 @@ class DaySnapshotPersistenceIT {
     }
 
     @Test
-    @DisplayName("AC-3: a partial day keeps the previous complete snapshot and marks it stale")
+    @DisplayName("spec 004 AC-3: a partial day keeps the previous complete snapshot and marks it stale")
     void partialDayKeepsPreviousData() {
         publisher.publish(day(RUN_1, itineraries(DAY, 30)));
         clock.advance(Duration.ofMinutes(15));
@@ -81,7 +81,7 @@ class DaySnapshotPersistenceIT {
     }
 
     @Test
-    @DisplayName("AC-4: a partial day without previous data is published as incomplete")
+    @DisplayName("spec 004 AC-4: a partial day without previous data is published as incomplete")
     void partialDayWithoutPreviousDataIsPublished() {
         DayPublication publication = publisher.publish(day(RUN_1, itineraries(DAY, 10), BETA));
 
@@ -94,7 +94,7 @@ class DaySnapshotPersistenceIT {
     }
 
     @Test
-    @DisplayName("AC-2/AC-3: the next complete day replaces a stale snapshot and clears the stale mark")
+    @DisplayName("spec 004 AC-2/AC-3: the next complete day replaces a stale snapshot and clears the stale mark")
     void completeDayClearsStale() {
         publisher.publish(day(RUN_1, itineraries(DAY, 30)));
         publisher.publish(day(RUN_2, itineraries(DAY, 10), BETA));
@@ -107,7 +107,7 @@ class DaySnapshotPersistenceIT {
     }
 
     @Test
-    @DisplayName("AC-5: a snapshot stale for longer than max-stale-age is replaced by the partial day")
+    @DisplayName("spec 004 AC-5: a snapshot stale for longer than max-stale-age is replaced by the partial day")
     void staleTooLongIsReplaced() {
         publisher.publish(day(RUN_1, itineraries(DAY, 30)));
         publisher.publish(day(RUN_2, itineraries(DAY, 10), BETA));
@@ -121,7 +121,7 @@ class DaySnapshotPersistenceIT {
     }
 
     @Test
-    @DisplayName("AC-6: a day where every provider failed keeps its snapshot, marked stale")
+    @DisplayName("spec 004 AC-6: a day where every provider failed keeps its snapshot, marked stale")
     void unavailableDayKeepsSnapshot() {
         publisher.publish(day(RUN_1, itineraries(DAY, 30)));
 
@@ -134,7 +134,7 @@ class DaySnapshotPersistenceIT {
     }
 
     @Test
-    @DisplayName("AC-9: misfiled itineraries are not stored; stored + misfiled = itineraries produced")
+    @DisplayName("spec 004 AC-9: misfiled itineraries are not stored; stored + misfiled = itineraries produced")
     void misfiledAreNotStored() {
         List<AggregatedItinerary> produced = new ArrayList<>(itineraries(DAY, 20));
         produced.add(itinerary(DAY.plusDays(1), 0));

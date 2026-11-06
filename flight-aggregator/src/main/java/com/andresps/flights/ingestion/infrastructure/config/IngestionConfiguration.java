@@ -29,15 +29,18 @@ import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import java.time.Clock;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.TreeMap;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import javax.sql.DataSource;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.jdbc.autoconfigure.JdbcConnectionDetails;
 import org.springframework.context.ApplicationListener;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.event.ContextClosedEvent;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 /**
@@ -121,9 +124,11 @@ class IngestionConfiguration {
         return new PostgresIngestionRunRepository(dataSource);
     }
 
+    /** Its own non-pooled connections (ADR-0019): closing a lease always ends its session. */
     @Bean
-    PostgresAdvisoryRunLock ingestionRunLock(DataSource dataSource) {
-        return new PostgresAdvisoryRunLock(dataSource);
+    PostgresAdvisoryRunLock ingestionRunLock(JdbcConnectionDetails connection) {
+        return PostgresAdvisoryRunLock.connectingTo(
+                connection.getJdbcUrl(), connection.getUsername(), connection.getPassword());
     }
 
     // ----- use cases -----
@@ -149,8 +154,13 @@ class IngestionConfiguration {
                 properties.ingestionSettings());
     }
 
+    /**
+     * Depends on the {@code DataSource} on purpose: beans are destroyed before their dependencies, so the executor (which
+     * lets a run in progress store its final state) is closed while the pool is still open.
+     */
     @Bean
-    IngestionRunExecutor ingestionRunExecutor() {
+    IngestionRunExecutor ingestionRunExecutor(DataSource dataSource) {
+        Objects.requireNonNull(dataSource, "dataSource");
         return new IngestionRunExecutor();
     }
 
@@ -204,5 +214,15 @@ class IngestionConfiguration {
     @Bean
     ApplicationListener<ApplicationReadyEvent> startIngestionSchedule(IngestionScheduler ingestionScheduler) {
         return event -> ingestionScheduler.start();
+    }
+
+    /**
+     * Stops the schedule as soon as the context starts closing. Otherwise the task scheduler's lifecycle stop phase
+     * (which runs before beans are destroyed) would wait for the tick, and the tick waits for its run: shutdown would
+     * last a whole run. Interrupting the tick here lets the run executor, destroyed next, interrupt the run itself.
+     */
+    @Bean
+    ApplicationListener<ContextClosedEvent> stopIngestionSchedule(IngestionScheduler ingestionScheduler) {
+        return event -> ingestionScheduler.close();
     }
 }

@@ -562,6 +562,19 @@ class IngestionServiceTest {
             assertThat(sink.published()).hasSize(1);
             assertThat(sink.unavailable()).isEmpty();
         }
+
+        @Test
+        @DisplayName("spec 004 AC-19: a guard that fails to answer counts as a lost lock")
+        void failingGuardCountsAsLost() {
+            PublicationGuard broken = () -> {
+                throw new IllegalStateException("connection used concurrently (test)");
+            };
+            IngestionService service = new IngestionService(
+                    List.of(alpha, beta, gamma), sink, PercentageMarkupPolicy.defaultPolicy(), CLOCK, SETTINGS);
+
+            assertThatThrownBy(() -> service.ingest(RUN_ID, broken)).isInstanceOf(RunLockLostException.class);
+            assertThat(sink.published()).isEmpty();
+        }
     }
 
     @Nested

@@ -275,6 +275,16 @@ public final class IngestionService implements IngestFlightsUseCase {
             }
         }
 
+        /** A guard that cannot answer is treated as a lost lock: publishing without the lock is never safe. */
+        private boolean mayPublish() {
+            try {
+                return guard.mayPublish();
+            } catch (RuntimeException e) {
+                LOG.error("Checking the run lock failed; treating it as lost", e);
+                return false;
+            }
+        }
+
         /**
          * Hands the day to the sink (as unavailable when no provider contributed), unless the run lost its lock. A sink
          * failure loses that day, not the run: it is reported as {@code WRITE_FAILED}.
@@ -284,7 +294,7 @@ public final class IngestionService implements IngestFlightsUseCase {
                 AggregationResult result,
                 SortedSet<ProviderId> contributing,
                 SortedSet<ProviderId> missing) {
-            if (lockLost || !guard.mayPublish()) {
+            if (lockLost || !mayPublish()) {
                 lockLost = true;
                 return DayPublication.noData();
             }

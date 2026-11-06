@@ -181,4 +181,38 @@ Added by the author: a follow-up for the search spec (ids change on replacement,
 
 ## Review findings and how they were handled
 
-*Filled in after the review.*
+Both agents ran on the branch after the implementation and docs commits. Fixes are in one `fix:` commit.
+
+### `code-reviewer` (verdict: needs changes)
+
+| # | Finding | Severity | Outcome |
+|---|---|---|---|
+| 1 | Day coordinators call `isHeld` concurrently on the one lock connection (JDBC connections and Hikari's statement list are not thread-safe); a `RuntimeException` there escaped and failed the run | Blocking | **Fixed:** every use of the lease connection is serialised with a `ReentrantLock` (no virtual-thread pinning); `isHeld` treats any failure as "lost"; `IngestionService` also treats a throwing guard as a lost lock (new tests: 50 concurrent checks, failing guard) |
+| 2 | A failed unlock on a live session returned the pooled connection *still holding the lock* | Blocking | **Fixed:** the lock uses its own **non-pooled** connections (`PostgresAdvisoryRunLock.connectingTo`, from `JdbcConnectionDetails`), so closing a lease always ends the session; ADR-0019 updated |
+| 3 | A run interrupted at shutdown kept its interrupt flag through the bookkeeping, so the final `update` could fail and leave it `RUNNING` | Blocking | **Fixed:** the flag is cleared for statistics + final state + unlock and restored afterwards (unit test). The new IT that closes the application mid-run then exposed a **second, real bug**: the task scheduler's lifecycle stop waited for the tick, which waited for the run, so shutdown took a whole run and the executor never interrupted anything. The schedule is now stopped on `ContextClosedEvent`; the IT checks the run ends `FAILED`, stored, with no lock left |
+| 4 | Flaky `IngestionApiIT`: the final state is stored just before the lock is released, so the next test's `POST` could get a 409 | Should fix | **Fixed:** `@AfterEach` also waits for no advisory lock |
+| 5 | Raw exception text (SQL, hosts) stored in `failure` and served by the API | Should fix | **Fixed:** the failure names the error type only; details stay in the log under the run id |
+| 6 | After a lost lock, the day being written can still commit while another instance runs (no fencing token) | Should fix | **Documented** (SOLUTION.md, ADR-0019): each day stays atomic and concurrent writers of a day are serialised by PostgreSQL; a fencing check in the write was judged not worth it here |
+| 7 | Docker's 10 s stop timeout is shorter than the 30 s shutdown wait | Should fix | **Fixed:** `stop_grace_period: 40s` |
+| 8 | Executor-before-DataSource shutdown order only held by creation order | Should fix | **Fixed:** the executor bean declares the `DataSource` dependency |
+| 9 | A retention failure stopped the whole run | Nice to have | **Fixed:** retention is best effort (logged, retried next run; unit test) |
+| 10 | Pool size not related to concurrent days | Nice to have | **Documented** in usage.md and SOLUTION.md (pool ≥ days + 2) |
+| 11 | Prices with scale > 2 would be rounded by `numeric(12,2)` | Nice to have | **No change:** `Money` always has scale 2 (domain invariant) |
+| 12 | HTTP vocabulary (title, properties) in `shared.domain.ConflictException` | Nice to have | **No change:** kept as generic problem metadata so the shared handler needs no feature knowledge; noted as a trade-off |
+| 13 | Unauthenticated `POST` | Nice to have | Already a limitation in SOLUTION.md |
+| 14 | Scheduler uses `Instant.now()`, not the injected clock | Nice to have | **Commented:** the task scheduler runs on wall-clock time on purpose |
+
+### `spec-reviewer` (verdict: gaps found, all minor; every automatable AC implemented and tested)
+
+| # | Finding | Outcome |
+|---|---|---|
+| G1 | AC-25 manual check only partly recorded | **Fixed:** SOLUTION.md records healthy services, start order, queryable rows, 202/409 and survival across `down`/`up` |
+| D1 | `Location` is absolute, spec shows a relative path | **Spec amended** (absolute, built from the request) |
+| D2 | Extra `failure` member in the run response | **Spec amended** |
+| D3 | A complete day did not replace a snapshot listing a provider no longer configured | **Fixed:** `SnapshotPolicy` replaces whenever no provider is missing (new test); AC-2 wording clarified |
+| D4 | No INFO log for `NO_DATA` | **Fixed** |
+| T1 | Fixed sleeps in two tests | **Fixed:** bounded `await().during(...)` |
+| T2 | No end-to-end test of a lost lock | **Added:** `IngestionRunLockIT.lockLostMidRun` kills the lock's session mid-run; the run is `FAILED`, nothing published |
+| T3 | AC numbers shared by specs 003 and 004 | **Fixed:** every spec 004 test name starts with "spec 004" |
+| T4 | 409 `instance` and virtual threads not asserted | **Added** (`IngestionApiIT`, `IngestionRunExecutorTest`) |
+| T5 | The "without rewrite" benchmark figure is not reproducible from the test | **Documented** how it was measured |

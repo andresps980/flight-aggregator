@@ -16,7 +16,10 @@ can die mid-run.
 
 We will take a **session-level `pg_try_advisory_lock(<constant key>)`** before a run starts:
 
-- The lock is held on a **dedicated JDBC connection** that the run keeps for its whole duration. A session lock
+- The lock is held on a **dedicated JDBC connection** that the run keeps for its whole duration, opened outside the
+  pool (a non-pooled data source on the same URL), so closing it always ends the session and the lock can never be
+  handed back to a pool still held (e.g. if the unlock times out). Day coordinators check it concurrently, so every
+  use of that connection is serialised. A session lock
   belongs to the connection, not to a transaction or a thread. Borrowing pooled connections would release it, or
   leak it to an unrelated borrower, as soon as the connection went back to the pool. The connection is closed (lock
   released) in a `finally` when the run ends, whatever the outcome.
@@ -48,7 +51,7 @@ We will take a **session-level `pg_try_advisory_lock(<constant key>)`** before a
 ## Consequences
 
 - **Positive:** correct across instances, released automatically by crashes, no new dependency, and no clock or TTL.
-- **Negative / trade-offs:** a run holds one pooled connection for up to 10 min (the pool is sized for it). Advisory
+- **Negative / trade-offs:** a run holds one extra database connection for up to 10 min. Advisory
   locks are PostgreSQL-specific, so they live in the persistence adapter. With a transaction-pooling proxy
   (PgBouncer in transaction mode), session locks don't work; the database would have to be reached directly or in
   session mode. A lost lock is detected at the next day boundary, not instantly, so at most the day being written

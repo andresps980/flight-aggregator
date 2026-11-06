@@ -100,8 +100,8 @@ written when the run finishes), `failure text` null (error of a `FAILED` / lock-
   tables above exist with their constraints; given an already migrated database, startup applies nothing.
 
 **Day snapshot semantics** ([ADR-0017](../../docs/adr/0017-day-snapshot-replacement.md))
-- **AC-2** — Given a day published with every provider contributing, then that day's rows are replaced by the new
-  ones **atomically**: a concurrent reader of the day sees either the whole previous snapshot or the whole new one,
+- **AC-2** — Given a day published with every provider contributing (even if the stored snapshot lists a provider no
+  longer configured), then that day's rows are replaced by the new ones **atomically**: a concurrent reader of the day sees either the whole previous snapshot or the whole new one,
   never a mix nor an empty day; `day_snapshot` records it as complete, not stale, with the run id and row count.
 - **AC-3** — Given a day that already has a snapshot, and a publication of that day whose contributing providers do
   **not** include every provider of the existing snapshot, then the existing rows are kept unchanged and the day is
@@ -180,11 +180,14 @@ written when the run finishes), `failure text` null (error of a `FAILED` / lock-
 
 ## API contract
 
-`POST /api/v1/ingestions` (no body) → `202`, header `Location: /api/v1/ingestions/3f2a…`
+`POST /api/v1/ingestions` (no body) → `202`, header `Location: http://host:port/api/v1/ingestions/3f2a…` (absolute,
+built from the request)
 ```json
 { "id": "3f2a6c1e-…", "trigger": "MANUAL", "status": "RUNNING",
-  "startedAt": "2026-11-06T10:00:00Z", "finishedAt": null, "durationMs": null, "report": null }
+  "startedAt": "2026-11-06T10:00:00Z", "finishedAt": null, "durationMs": null, "failure": null, "report": null }
 ```
+`failure` names the error type of a `FAILED` / `ABORTED` run (never the exception message, which may carry SQL or
+hosts); `null` otherwise.
 `409`:
 ```json
 { "type": "about:blank", "title": "Ingestion already running", "status": 409,

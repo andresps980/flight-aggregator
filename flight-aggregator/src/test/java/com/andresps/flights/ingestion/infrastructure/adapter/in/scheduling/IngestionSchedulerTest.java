@@ -66,7 +66,7 @@ class IngestionSchedulerTest {
 
     @Test
     @DisplayName(
-            "AC-20: the first run starts initial-delay after start, each next one fixed-delay after the last ended")
+            "spec 004 AC-20: the first run starts initial-delay after start, each next one fixed-delay after the last ended")
     void initialDelayThenFixedDelayAfterCompletion() {
         var scheduler = new IngestionScheduler(
                 timedRuns(), taskScheduler, new ScheduleSettings(true, Duration.ofMillis(100), Duration.ofMillis(200)));
@@ -83,19 +83,18 @@ class IngestionSchedulerTest {
     }
 
     @Test
-    @DisplayName("AC-20: with scheduling disabled no run starts on its own")
-    void disabled() throws InterruptedException {
+    @DisplayName("spec 004 AC-20: with scheduling disabled no run starts on its own")
+    void disabled() {
         var scheduler = new IngestionScheduler(
                 timedRuns(), taskScheduler, new ScheduleSettings(false, Duration.ofMillis(10), Duration.ofMillis(10)));
 
         scheduler.start();
-        Thread.sleep(300);
 
-        assertThat(starts).isEmpty();
+        await().during(Duration.ofMillis(300)).atMost(Duration.ofSeconds(1)).until(starts::isEmpty);
     }
 
     @Test
-    @DisplayName("AC-17/AC-20: a tick while a run is in progress is skipped and scheduling continues")
+    @DisplayName("spec 004 AC-17/AC-20: a tick while a run is in progress is skipped and scheduling continues")
     void skippedTick() {
         AtomicInteger attempts = new AtomicInteger();
         StartIngestionUseCase alwaysBusy = trigger -> {
@@ -111,7 +110,7 @@ class IngestionSchedulerTest {
     }
 
     @Test
-    @DisplayName("AC-16/AC-20: an unexpected failure of one run does not stop the schedule")
+    @DisplayName("spec 004 AC-16/AC-20: an unexpected failure of one run does not stop the schedule")
     void failureDoesNotStopScheduling() {
         AtomicInteger attempts = new AtomicInteger();
         StartIngestionUseCase failing = trigger -> {
@@ -127,7 +126,7 @@ class IngestionSchedulerTest {
     }
 
     @Test
-    @DisplayName("AC-20: delays must be positive")
+    @DisplayName("spec 004 AC-20: delays must be positive")
     void invalidSettings() {
         org.assertj.core.api.Assertions.assertThatThrownBy(
                         () -> new ScheduleSettings(true, Duration.ofMillis(-1), Duration.ofMillis(10)))

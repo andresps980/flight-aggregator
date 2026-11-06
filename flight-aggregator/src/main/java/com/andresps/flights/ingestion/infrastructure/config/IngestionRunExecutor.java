@@ -28,7 +28,9 @@ final class IngestionRunExecutor implements Executor, AutoCloseable {
 
     @Override
     public void close() {
-        virtualThreads.shutdownNow();
+        LOG.info(
+                "Stopping ingestion runs: interrupting {} running",
+                virtualThreads.shutdownNow().size());
         try {
             if (!virtualThreads.awaitTermination(SHUTDOWN_WAIT.toMillis(), TimeUnit.MILLISECONDS)) {
                 LOG.warn("An ingestion run did not stop within {}", SHUTDOWN_WAIT);

@@ -28,8 +28,8 @@ import org.slf4j.LoggerFactory;
 /**
  * Starts ingestion runs (spec 004): takes the cross-instance lock (ADR-0019), marks runs orphaned by a dead process
  * {@code ABORTED}, stores the new run as {@code RUNNING} and executes it on the injected executor. The run applies the
- * retention, ingests with a guard that follows the lock, refreshes the planner statistics, stores its final state and
- * releases the lock, whatever happens.
+ * retention (best effort), ingests with a guard that follows the lock, refreshes the planner statistics, stores its
+ * final state and releases the lock, whatever happens.
  */
 public final class IngestionRunService implements StartIngestionUseCase {
 
@@ -81,7 +81,8 @@ public final class IngestionRunService implements StartIngestionUseCase {
             executor.execute(() -> execute(run, lease, completion));
         } catch (RuntimeException e) {
             try {
-                runs.update(run.failed("The run could not be scheduled: " + e.getMessage(), now()));
+                runs.update(run.failed(
+                        "The run could not be scheduled (" + e.getClass().getSimpleName() + ")", now()));
             } finally {
                 lease.close();
             }
@@ -91,40 +92,55 @@ public final class IngestionRunService implements StartIngestionUseCase {
         return new StartedIngestion(run, completion);
     }
 
-    /** Always stores the final state, releases the lock and completes the run, even when an {@link Error} escapes. */
+    /**
+     * Always refreshes the statistics, stores the final state, releases the lock and completes the run, even when an
+     * {@link Error} escapes. A run interrupted at shutdown still has its interrupt flag set here; it is cleared for this
+     * bookkeeping (an interrupted thread would abort the database calls) and restored afterwards.
+     */
     private void execute(IngestionRun run, RunLease lease, CompletableFuture<IngestionRun> completion) {
         IngestionRun finished = run;
         try {
             finished = ingest(run, lease);
         } catch (Error e) {
             LOG.error("Ingestion {} died with {}", run.id(), e.toString());
-            finished = run.failed(e.toString(), now());
+            finished = run.failed(unexpected(e), now());
             throw e;
         } finally {
+            boolean interrupted = Thread.interrupted();
             try {
+                refreshStatistics(run.id());
                 runs.update(finished);
             } catch (RuntimeException e) {
                 LOG.error("Ingestion {} ended {} but its state could not be stored", run.id(), finished.status(), e);
             } finally {
                 lease.close();
                 completion.complete(finished);
+                if (interrupted) {
+                    Thread.currentThread().interrupt();
+                }
             }
         }
     }
 
     private IngestionRun ingest(IngestionRun run, RunLease lease) {
         try {
-            applyRetention();
+            applyRetention(run.id());
             IngestionReport report = ingestion.ingest(run.id(), lease::isHeld);
             return run.finished(report, now());
         } catch (RunLockLostException e) {
             return run.failed(e.getMessage(), now());
         } catch (RuntimeException e) {
             LOG.error("Ingestion {} failed unexpectedly", run.id(), e);
-            return run.failed(e.toString(), now());
-        } finally {
-            refreshStatistics(run.id());
+            return run.failed(unexpected(e), now());
         }
+    }
+
+    /**
+     * The stored and served failure names the error type only: exception messages can carry SQL, host names or ports.
+     * The details are in the log, under the run id.
+     */
+    private static String unexpected(Throwable e) {
+        return "Unexpected error (" + e.getClass().getSimpleName() + "); details are logged with the run id";
     }
 
     /** PostgreSQL stores microseconds: instants are truncated so that a stored run reads back equal. */
@@ -132,12 +148,17 @@ public final class IngestionRunService implements StartIngestionUseCase {
         return clock.instant().truncatedTo(ChronoUnit.MICROS);
     }
 
-    private void applyRetention() {
-        LocalDate today = LocalDate.ofInstant(now(), ZoneOffset.UTC);
-        maintenance.deleteDaysBefore(today);
-        int deleted = runs.deleteStartedBefore(now().minus(runRetention));
-        if (deleted > 0) {
-            LOG.info("Deleted {} ingestion runs older than {}", deleted, runRetention);
+    /** Best effort: past days and old runs are harmless for one more run, so a failure here never stops ingestion. */
+    private void applyRetention(UUID runId) {
+        try {
+            LocalDate today = LocalDate.ofInstant(now(), ZoneOffset.UTC);
+            maintenance.deleteDaysBefore(today);
+            int deleted = runs.deleteStartedBefore(now().minus(runRetention));
+            if (deleted > 0) {
+                LOG.info("Deleted {} ingestion runs older than {}", deleted, runRetention);
+            }
+        } catch (RuntimeException e) {
+            LOG.warn("Ingestion {}: retention failed; it will be retried by the next run", runId, e);
         }
     }
 

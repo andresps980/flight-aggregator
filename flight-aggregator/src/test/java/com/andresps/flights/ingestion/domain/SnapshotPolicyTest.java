@@ -32,57 +32,81 @@ class SnapshotPolicyTest {
         return Optional.of(new DaySnapshot(DAY, UUID.randomUUID(), providers(ids), NOW.minusSeconds(900), staleSince));
     }
 
+    private static final TreeSet<ProviderId> NONE_MISSING = new TreeSet<>();
+    private static final TreeSet<ProviderId> SOME_MISSING = providers(new ProviderId("mock-delta"));
+
     @Test
-    @DisplayName("AC-2: a complete publication always replaces, whatever the existing snapshot")
+    @DisplayName("spec 004 AC-2: a complete publication always replaces, whatever the existing snapshot")
     void completeReplaces() {
-        assertThat(POLICY.decide(snapshot(null, ALPHA, BETA, GAMMA), providers(ALPHA, BETA, GAMMA), NOW))
+        assertThat(POLICY.decide(snapshot(null, ALPHA, BETA, GAMMA), providers(ALPHA, BETA, GAMMA), NONE_MISSING, NOW))
                 .isEqualTo(SnapshotDecision.REPLACE);
-        assertThat(POLICY.decide(snapshot(NOW.minusSeconds(60), ALPHA), providers(ALPHA, BETA, GAMMA), NOW))
+        assertThat(POLICY.decide(
+                        snapshot(NOW.minusSeconds(60), ALPHA), providers(ALPHA, BETA, GAMMA), NONE_MISSING, NOW))
                 .isEqualTo(SnapshotDecision.REPLACE);
     }
 
     @Test
-    @DisplayName("AC-4: a partial publication of a day without a snapshot is written")
+    @DisplayName("spec 004 AC-2: a complete publication replaces a snapshot that lists a provider no longer configured")
+    void completeReplacesSnapshotWithRemovedProvider() {
+        assertThat(POLICY.decide(
+                        snapshot(null, ALPHA, BETA, GAMMA, new ProviderId("mock-delta")),
+                        providers(ALPHA, BETA, GAMMA),
+                        NONE_MISSING,
+                        NOW))
+                .isEqualTo(SnapshotDecision.REPLACE);
+    }
+
+    @Test
+    @DisplayName("spec 004 AC-4: a partial publication of a day without a snapshot is written")
     void partialWithoutSnapshotIsWritten() {
-        assertThat(POLICY.decide(Optional.empty(), providers(ALPHA), NOW)).isEqualTo(SnapshotDecision.REPLACE);
+        assertThat(POLICY.decide(Optional.empty(), providers(ALPHA), SOME_MISSING, NOW))
+                .isEqualTo(SnapshotDecision.REPLACE);
     }
 
     @Test
-    @DisplayName("AC-4: a partial publication replaces a snapshot whose providers are all among its contributors")
+    @DisplayName(
+            "spec 004 AC-4: a partial publication replaces a snapshot whose providers are all among its contributors")
     void partialSupersetReplaces() {
-        assertThat(POLICY.decide(snapshot(null, ALPHA), providers(ALPHA, BETA), NOW))
+        assertThat(POLICY.decide(snapshot(null, ALPHA), providers(ALPHA, BETA), SOME_MISSING, NOW))
                 .isEqualTo(SnapshotDecision.REPLACE);
-        assertThat(POLICY.decide(snapshot(null, ALPHA, BETA), providers(ALPHA, BETA), NOW))
+        assertThat(POLICY.decide(snapshot(null, ALPHA, BETA), providers(ALPHA, BETA), SOME_MISSING, NOW))
                 .as("same providers, fresher data")
                 .isEqualTo(SnapshotDecision.REPLACE);
     }
 
     @Test
-    @DisplayName("AC-3: a publication missing a provider of the existing snapshot keeps it stale")
+    @DisplayName("spec 004 AC-3: a publication missing a provider of the existing snapshot keeps it stale")
     void partialMissingASnapshotProviderKeeps() {
-        assertThat(POLICY.decide(snapshot(null, ALPHA, BETA, GAMMA), providers(ALPHA, GAMMA), NOW))
+        assertThat(POLICY.decide(snapshot(null, ALPHA, BETA, GAMMA), providers(ALPHA, GAMMA), SOME_MISSING, NOW))
                 .isEqualTo(SnapshotDecision.KEEP_STALE);
-        assertThat(POLICY.decide(snapshot(null, ALPHA, BETA), providers(ALPHA, GAMMA), NOW))
+        assertThat(POLICY.decide(snapshot(null, ALPHA, BETA), providers(ALPHA, GAMMA), SOME_MISSING, NOW))
                 .as("different, not more complete")
                 .isEqualTo(SnapshotDecision.KEEP_STALE);
     }
 
     @Test
-    @DisplayName("AC-5: a snapshot stale for longer than max-stale-age is replaced by a partial publication")
+    @DisplayName("spec 004 AC-5: a snapshot stale for longer than max-stale-age is replaced by a partial publication")
     void staleTooLongIsReplaced() {
-        assertThat(POLICY.decide(snapshot(NOW.minus(Duration.ofHours(2)), ALPHA, BETA, GAMMA), providers(ALPHA), NOW))
+        assertThat(POLICY.decide(
+                        snapshot(NOW.minus(Duration.ofHours(2)), ALPHA, BETA, GAMMA),
+                        providers(ALPHA),
+                        SOME_MISSING,
+                        NOW))
                 .as("exactly max-stale-age")
                 .isEqualTo(SnapshotDecision.REPLACE);
         assertThat(POLICY.decide(
-                        snapshot(NOW.minus(Duration.ofMinutes(119)), ALPHA, BETA, GAMMA), providers(ALPHA), NOW))
+                        snapshot(NOW.minus(Duration.ofMinutes(119)), ALPHA, BETA, GAMMA),
+                        providers(ALPHA),
+                        SOME_MISSING,
+                        NOW))
                 .isEqualTo(SnapshotDecision.KEEP_STALE);
     }
 
     @Test
-    @DisplayName("AC-5: max-stale-age must be positive; contributors must not be empty")
+    @DisplayName("spec 004 AC-5: max-stale-age must be positive; contributors must not be empty")
     void invariants() {
         assertThatThrownBy(() -> new SnapshotPolicy(Duration.ZERO)).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> POLICY.decide(Optional.empty(), providers(), NOW))
+        assertThatThrownBy(() -> POLICY.decide(Optional.empty(), providers(), SOME_MISSING, NOW))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 }

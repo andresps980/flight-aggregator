@@ -34,7 +34,7 @@ class ItineraryCopyEncoderTest {
     }
 
     @Test
-    @DisplayName("AC-10/AC-11: one line per itinerary, one tab-separated field per column, in column order")
+    @DisplayName("spec 004 AC-10/AC-11: one line per itinerary, one tab-separated field per column, in column order")
     void lineLayout() throws IOException {
         AggregatedItinerary connecting = itinerary(DAY, 0); // two segments, offered by alpha and beta
 
@@ -79,7 +79,8 @@ class ItineraryCopyEncoderTest {
     }
 
     @Test
-    @DisplayName("AC-11: tabs, newlines, carriage returns, backslashes and quotes cannot break a row or an array")
+    @DisplayName(
+            "spec 004 AC-11: tabs, newlines, carriage returns, backslashes and quotes cannot break a row or an array")
     void escaping() throws IOException {
         ProviderId hostile = new ProviderId("evil\t\"x\",{y}\\z\nnext\rline");
         AggregatedItinerary base = itinerary(DAY, 1);
@@ -104,7 +105,7 @@ class ItineraryCopyEncoderTest {
     }
 
     @Test
-    @DisplayName("AC-11: rows are streamed in chunks no larger than the buffer, never as one large buffer")
+    @DisplayName("spec 004 AC-11: rows are streamed in chunks no larger than the buffer, never as one large buffer")
     void streamsInBoundedChunks() throws IOException {
         var out = new ChunkRecorder();
 

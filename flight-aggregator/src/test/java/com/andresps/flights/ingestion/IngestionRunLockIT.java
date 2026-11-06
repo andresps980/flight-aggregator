@@ -31,6 +31,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
  * Spec 004 AC-17/AC-18 with the real advisory lock: concurrent triggers in this instance, and a lock held by another
@@ -50,7 +51,7 @@ class IngestionRunLockIT extends RecordedFeedsSpringTest {
     }
 
     @Test
-    @DisplayName("AC-17: two triggers at the same moment start exactly one run")
+    @DisplayName("spec 004 AC-17: two triggers at the same moment start exactly one run")
     void concurrentTriggers() throws Exception {
         CyclicBarrier together = new CyclicBarrier(2);
         Callable<StartedIngestion> trigger = () -> {
@@ -80,7 +81,8 @@ class IngestionRunLockIT extends RecordedFeedsSpringTest {
     }
 
     @Test
-    @DisplayName("AC-17/AC-18: while another instance holds the lock no run starts; once it releases it, one can")
+    @DisplayName(
+            "spec 004 AC-17/AC-18: while another instance holds the lock no run starts; once it releases it, one can")
     void lockHeldByAnotherInstance() {
         RunLease otherInstance =
                 new PostgresAdvisoryRunLock(dataSource).tryAcquire().orElseThrow();
@@ -101,7 +103,7 @@ class IngestionRunLockIT extends RecordedFeedsSpringTest {
     }
 
     @Test
-    @DisplayName("AC-18: the lock is released when a run finishes, so the next run starts")
+    @DisplayName("spec 004 AC-18: the lock is released when a run finishes, so the next run starts")
     void lockReleasedAfterRun() {
         UUID first = ingestions
                 .start(IngestionTrigger.MANUAL)
@@ -118,5 +120,26 @@ class IngestionRunLockIT extends RecordedFeedsSpringTest {
 
         assertThat(second.id()).isNotEqualTo(first);
         assertThat(new StoredData(dataSource).runStatuses()).containsExactly("COMPLETED", "COMPLETED");
+    }
+
+    @Test
+    @DisplayName("spec 004 AC-19: when the lock's session dies mid-run, the run publishes nothing more and ends FAILED")
+    void lockLostMidRun() {
+        // Feeds answer after 800 ms (below the 1 s read timeout): the session is killed before any day is published.
+        SERVER.resetAll();
+        PROVIDERS.forEach(provider -> DAYS.forEach(day -> SERVER.stubFor(request(provider, day)
+                .willReturn(ok(provider, feed(provider, day)).withFixedDelay(800)))));
+        StartedIngestion started = ingestions.start(IngestionTrigger.MANUAL);
+
+        JdbcClient.create(dataSource)
+                .sql("SELECT pg_terminate_backend(pid) FROM pg_locks WHERE locktype = 'advisory' AND granted")
+                .query(Boolean.class)
+                .list();
+        IngestionRun run = started.completion().orTimeout(30, TimeUnit.SECONDS).join();
+
+        assertThat(run.status()).isEqualTo(RunStatus.FAILED);
+        assertThat(run.failure()).containsIgnoringCase("lock lost");
+        assertThat(new StoredData(dataSource).rows()).as("no day published").isZero();
+        assertThat(new StoredData(dataSource).runStatuses()).containsExactly("FAILED");
     }
 }

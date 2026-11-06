@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
 import com.andresps.flights.FlightAggregatorApplication;
+import com.andresps.flights.support.StoredData;
 import com.andresps.flights.support.TestPostgres;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import java.time.Duration;
@@ -49,7 +50,12 @@ class IngestionSchedulingIT {
     private final JdbcClient jdbc = JdbcClient.create(TestPostgres.dataSource());
 
     private ConfigurableApplicationContext startApplication() {
+        return startApplication("6s");
+    }
+
+    private ConfigurableApplicationContext startApplication(String readTimeout) {
         List<String> args = new ArrayList<>(List.of(
+                "--aggregator.resilience.default.read-timeout=" + readTimeout,
                 "--spring.datasource.url=" + TestPostgres.jdbcUrl(),
                 "--spring.datasource.username=" + TestPostgres.username(),
                 "--spring.datasource.password=" + TestPostgres.password(),
@@ -77,8 +83,9 @@ class IngestionSchedulingIT {
     }
 
     @Test
-    @DisplayName("AC-20: runs start on their own after startup, follow the fixed delay, and stop with the application")
-    void scheduledRunsStartAndStopWithTheApplication() throws InterruptedException {
+    @DisplayName(
+            "spec 004 AC-20: runs start on their own after startup, follow the fixed delay, and stop with the application")
+    void scheduledRunsStartAndStopWithTheApplication() {
         TestPostgres.truncateAll(TestPostgres.dataSource());
 
         try (ConfigurableApplicationContext application = startApplication()) {
@@ -89,12 +96,36 @@ class IngestionSchedulingIT {
         }
 
         long runsAtClose = runs("true");
-        Thread.sleep(1000); // more than three fixed delays: a live schedule would have started more runs
-        assertThat(runs("true"))
-                .as("no run started after the application closed")
-                .isEqualTo(runsAtClose);
+        // more than three fixed delays: a live schedule would have started more runs
+        await().during(Duration.ofSeconds(1)).atMost(Duration.ofSeconds(3)).until(() -> runs("true") == runsAtClose);
         assertThat(runs("status = 'RUNNING'"))
                 .as("a run in progress at close ended instead of staying RUNNING")
                 .isZero();
+    }
+
+    @Test
+    @DisplayName(
+            "spec 004 AC-16/AC-20: closing the application during a run ends it FAILED, stored, with the lock released")
+    void closingDuringARunStoresItAsFailed() {
+        TestPostgres.truncateAll(TestPostgres.dataSource());
+        SERVER.resetAll();
+        PROVIDERS.forEach(provider ->
+                RecordedGdsMock.DAYS.forEach(day -> SERVER.stubFor(RecordedGdsMock.request(provider, day)
+                        .willReturn(RecordedGdsMock.ok(provider, RecordedGdsMock.feed(provider, day))
+                                .withFixedDelay(10_000)))));
+        try {
+            try (ConfigurableApplicationContext application = startApplication("30s")) {
+                await().atMost(Duration.ofSeconds(30)).until(() -> runs("status = 'RUNNING'") == 1);
+            }
+
+            assertThat(runs("status = 'RUNNING'")).as("not left RUNNING").isZero();
+            assertThat(scheduledRuns()).containsExactly("FAILED");
+            assertThat(new StoredData(TestPostgres.dataSource()).advisoryLocks())
+                    .as("lock released")
+                    .isZero();
+        } finally {
+            SERVER.resetAll();
+            RecordedGdsMock.stubAll(SERVER);
+        }
     }
 }

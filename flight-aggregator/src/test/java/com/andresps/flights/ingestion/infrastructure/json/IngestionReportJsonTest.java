@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 class IngestionReportJsonTest {
 
     @Test
-    @DisplayName("AC-14: a full report round-trips through JSON exactly")
+    @DisplayName("spec 004 AC-14: a full report round-trips through JSON exactly")
     void roundTrip() {
         IngestionReport report = ReportFixtures.fullReport(UUID.randomUUID());
 
@@ -22,7 +22,8 @@ class IngestionReportJsonTest {
     }
 
     @Test
-    @DisplayName("AC-14/AC-22: the JSON is readable: ISO instants, durations in ms, enums by name, derived totals")
+    @DisplayName(
+            "spec 004 AC-14/AC-22: the JSON is readable: ISO instants, durations in ms, enums by name, derived totals")
     void readableShape() {
         String json = IngestionReportJson.write(
                 ReportFixtures.fullReport(UUID.fromString("00000000-0000-0000-0000-000000000001")));

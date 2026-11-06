@@ -31,7 +31,8 @@ class PostgresIngestionRunRepositoryIT {
     }
 
     @Test
-    @DisplayName("AC-14: a RUNNING run is stored without report, then finished with status, end and the full report")
+    @DisplayName(
+            "spec 004 AC-14: a RUNNING run is stored without report, then finished with status, end and the full report")
     void lifecycleRoundTrip() {
         UUID id = UUID.randomUUID();
         IngestionRun started = IngestionRun.started(id, IngestionTrigger.MANUAL, NOW);
@@ -51,7 +52,7 @@ class PostgresIngestionRunRepositoryIT {
     }
 
     @Test
-    @DisplayName("AC-16: a failed run keeps its error message")
+    @DisplayName("spec 004 AC-16: a failed run keeps its error message")
     void failedRun() {
         IngestionRun failed = IngestionRun.started(UUID.randomUUID(), IngestionTrigger.SCHEDULED, NOW)
                 .failed("boom", NOW.plusSeconds(1));
@@ -63,7 +64,8 @@ class PostgresIngestionRunRepositoryIT {
     }
 
     @Test
-    @DisplayName("AC-22: latest is the most recently started run; running is the RUNNING one; unknown ids are empty")
+    @DisplayName(
+            "spec 004 AC-22: latest is the most recently started run; running is the RUNNING one; unknown ids are empty")
     void lookups() {
         IngestionRun older = IngestionRun.started(UUID.randomUUID(), IngestionTrigger.SCHEDULED, NOW.minusSeconds(900))
                 .failed("x", NOW.minusSeconds(800));
@@ -77,14 +79,14 @@ class PostgresIngestionRunRepositoryIT {
     }
 
     @Test
-    @DisplayName("AC-22/AC-23: with no runs, latest and running are empty")
+    @DisplayName("spec 004 AC-22/AC-23: with no runs, latest and running are empty")
     void noRuns() {
         assertThat(runs.findLatest()).isEmpty();
         assertThat(runs.findRunning()).isEmpty();
     }
 
     @Test
-    @DisplayName("AC-15: RUNNING rows are aborted with an end instant; finished rows are untouched")
+    @DisplayName("spec 004 AC-15: RUNNING rows are aborted with an end instant; finished rows are untouched")
     void abortRunning() {
         IngestionRun orphan = IngestionRun.started(UUID.randomUUID(), IngestionTrigger.SCHEDULED, NOW.minusSeconds(60));
         IngestionRun done = IngestionRun.started(UUID.randomUUID(), IngestionTrigger.SCHEDULED, NOW.minusSeconds(900))
@@ -99,7 +101,7 @@ class PostgresIngestionRunRepositoryIT {
     }
 
     @Test
-    @DisplayName("AC-12: runs started before an instant are deleted")
+    @DisplayName("spec 004 AC-12: runs started before an instant are deleted")
     void deleteStartedBefore() {
         IngestionRun old = IngestionRun.started(
                         UUID.randomUUID(), IngestionTrigger.SCHEDULED, NOW.minus(Duration.ofDays(8)))
@@ -117,7 +119,7 @@ class PostgresIngestionRunRepositoryIT {
     }
 
     @Test
-    @DisplayName("AC-14 (error): updating an unknown run fails instead of silently doing nothing")
+    @DisplayName("spec 004 AC-14 (error): updating an unknown run fails instead of silently doing nothing")
     void updateUnknown() {
         IngestionRun ghost = IngestionRun.started(UUID.randomUUID(), IngestionTrigger.MANUAL, NOW)
                 .failed("x", NOW);

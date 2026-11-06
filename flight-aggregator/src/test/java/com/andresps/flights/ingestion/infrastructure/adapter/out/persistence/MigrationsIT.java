@@ -25,7 +25,7 @@ class MigrationsIT extends RecordedFeedsSpringTest {
     }
 
     @Test
-    @DisplayName("AC-1: the application starts with the three tables and their columns")
+    @DisplayName("spec 004 AC-1: the application starts with the three tables and their columns")
     void schemaExists() {
         assertThat(columns("itinerary"))
                 .containsExactly(
@@ -61,7 +61,7 @@ class MigrationsIT extends RecordedFeedsSpringTest {
     }
 
     @Test
-    @DisplayName("AC-1: keys, types and indexes the writes and the search rely on")
+    @DisplayName("spec 004 AC-1: keys, types and indexes the writes and the search rely on")
     void constraintsAndIndexes() {
         JdbcClient jdbc = JdbcClient.create(dataSource);
         List<String> indexes = jdbc.sql("SELECT indexdef FROM pg_indexes WHERE tablename = 'itinerary'")
@@ -84,7 +84,7 @@ class MigrationsIT extends RecordedFeedsSpringTest {
     }
 
     @Test
-    @DisplayName("AC-1: an already migrated database applies nothing")
+    @DisplayName("spec 004 AC-1: an already migrated database applies nothing")
     void migratedDatabaseAppliesNothing() {
         int applied = Flyway.configure().dataSource(dataSource).load().migrate().migrationsExecuted;
 

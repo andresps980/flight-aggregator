@@ -63,7 +63,7 @@ public final class DaySnapshotPublisher implements DayAggregationSink {
             }
             Instant now = clock.instant().truncatedTo(ChronoUnit.MICROS);
             Optional<DaySnapshot> existing = store.find(day.day());
-            if (policy.decide(existing, day.contributing(), now) == SnapshotDecision.KEEP_STALE) {
+            if (policy.decide(existing, day.contributing(), day.missing(), now) == SnapshotDecision.KEEP_STALE) {
                 store.markStale(day.day(), day.runId(), now);
                 LOG.warn(
                         "{}: missing {}, kept the snapshot of run {} (providers {}) as stale",
@@ -90,6 +90,7 @@ public final class DaySnapshotPublisher implements DayAggregationSink {
     public DayPublication unavailable(UUID runId, LocalDate day) {
         try {
             if (store.find(day).isEmpty()) {
+                LOG.info("{}: every provider failed and nothing is stored: NO_DATA", day);
                 return DayPublication.noData();
             }
             store.markStale(day, runId, clock.instant().truncatedTo(ChronoUnit.MICROS));

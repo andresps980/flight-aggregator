@@ -83,7 +83,8 @@ class IngestionRunServiceTest {
     }
 
     @Test
-    @DisplayName("AC-14: the run is stored RUNNING (trigger, start) before ingesting, then with status, end and report")
+    @DisplayName(
+            "spec 004 AC-14: the run is stored RUNNING (trigger, start) before ingesting, then with status, end and report")
     void runLifecycleIsPersisted() {
         AtomicReference<IngestionRun> seenDuringIngestion = new AtomicReference<>();
         IngestFlightsUseCase ingestion = (runId, guard) -> {
@@ -106,7 +107,7 @@ class IngestionRunServiceTest {
     }
 
     @Test
-    @DisplayName("AC-14: the stored status follows the report (PARTIAL, FAILED)")
+    @DisplayName("spec 004 AC-14: the stored status follows the report (PARTIAL, FAILED)")
     void statusFollowsReport() {
         StartedIngestion partial = service((runId, guard) -> report(runId, completed(), failed()), SAME_THREAD)
                 .start(IngestionTrigger.SCHEDULED);
@@ -118,7 +119,7 @@ class IngestionRunServiceTest {
     }
 
     @Test
-    @DisplayName("AC-15: RUNNING rows left by a dead process are marked ABORTED once the lock is acquired")
+    @DisplayName("spec 004 AC-15: RUNNING rows left by a dead process are marked ABORTED once the lock is acquired")
     void orphansAreAborted() {
         IngestionRun orphan =
                 IngestionRun.started(UUID.randomUUID(), IngestionTrigger.SCHEDULED, NOW.minusSeconds(3600));
@@ -134,7 +135,8 @@ class IngestionRunServiceTest {
     }
 
     @Test
-    @DisplayName("AC-16 (error): an unexpected exception stores the run FAILED with the message and releases the lock")
+    @DisplayName(
+            "spec 004 AC-16 (error): an unexpected exception stores the run FAILED with the message and releases the lock")
     void unexpectedFailure() {
         IngestionRunService service = service(
                 (runId, guard) -> {
@@ -146,7 +148,10 @@ class IngestionRunServiceTest {
                 service.start(IngestionTrigger.MANUAL).completion().join();
 
         assertThat(failedRun.status()).isEqualTo(RunStatus.FAILED);
-        assertThat(failedRun.failure()).contains("boom (test)");
+        assertThat(failedRun.failure())
+                .as("names the error type, never its message (it may carry SQL or hosts)")
+                .contains("IllegalStateException")
+                .doesNotContain("boom");
         assertThat(failedRun.finishedAt()).isNotNull();
         assertThat(lock.isTaken()).isFalse();
         assertThat(service.start(IngestionTrigger.MANUAL).completion().join().status())
@@ -156,7 +161,7 @@ class IngestionRunServiceTest {
     }
 
     @Test
-    @DisplayName("AC-17: with the lock held elsewhere no run starts and the running id is reported")
+    @DisplayName("spec 004 AC-17: with the lock held elsewhere no run starts and the running id is reported")
     void lockHeldElsewhere() {
         IngestionRun running =
                 IngestionRun.started(UUID.randomUUID(), IngestionTrigger.SCHEDULED, NOW.minusSeconds(10));
@@ -181,7 +186,7 @@ class IngestionRunServiceTest {
     }
 
     @Test
-    @DisplayName("AC-17/AC-21: a run executes asynchronously; a second start while it runs is rejected")
+    @DisplayName("spec 004 AC-17/AC-21: a run executes asynchronously; a second start while it runs is rejected")
     void secondStartWhileRunning() throws InterruptedException {
         CountDownLatch release = new CountDownLatch(1);
         IngestionRunService service = service(
@@ -205,7 +210,7 @@ class IngestionRunServiceTest {
     }
 
     @Test
-    @DisplayName("AC-18/AC-19: the guard handed to the ingestion follows the lease; a lost lock fails the run")
+    @DisplayName("spec 004 AC-18/AC-19: the guard handed to the ingestion follows the lease; a lost lock fails the run")
     void lockLost() {
         AtomicReference<Boolean> before = new AtomicReference<>();
         AtomicReference<Boolean> after = new AtomicReference<>();
@@ -229,7 +234,7 @@ class IngestionRunServiceTest {
     }
 
     @Test
-    @DisplayName("AC-12: a run deletes days before today and runs started more than the retention ago")
+    @DisplayName("spec 004 AC-12: a run deletes days before today and runs started more than the retention ago")
     void retention() {
         IngestionRun old = IngestionRun.started(
                         UUID.randomUUID(), IngestionTrigger.SCHEDULED, NOW.minus(Duration.ofDays(8)))
@@ -255,7 +260,7 @@ class IngestionRunServiceTest {
     }
 
     @Test
-    @DisplayName("AC-13: statistics are refreshed once after the run's writes, also when the run fails")
+    @DisplayName("spec 004 AC-13: statistics are refreshed once after the run's writes, also when the run fails")
     void statisticsRefreshed() {
         service(
                         (runId, guard) -> {
@@ -276,7 +281,8 @@ class IngestionRunServiceTest {
     }
 
     @Test
-    @DisplayName("AC-16 (error): if the run cannot be scheduled, the lock is released and the run is stored FAILED")
+    @DisplayName(
+            "spec 004 AC-16 (error): if the run cannot be scheduled, the lock is released and the run is stored FAILED")
     void executorRejects() {
         Executor rejecting = task -> {
             throw new RejectedExecutionException("shutting down (test)");
@@ -287,6 +293,43 @@ class IngestionRunServiceTest {
                 .isInstanceOf(RejectedExecutionException.class);
         assertThat(lock.isTaken()).isFalse();
         assertThat(runs.findLatest().orElseThrow().status()).isEqualTo(RunStatus.FAILED);
+    }
+
+    @Test
+    @DisplayName("spec 004 AC-16: a run interrupted at shutdown still stores its final state and releases the lock")
+    void interruptedRunStoresItsState() {
+        IngestionRun run = service(
+                        (runId, guard) -> {
+                            Thread.currentThread().interrupt(); // as IngestionRunExecutor.close() does
+                            throw new IllegalStateException("Interrupted while waiting for the ingestion to finish");
+                        },
+                        SAME_THREAD)
+                .start(IngestionTrigger.SCHEDULED)
+                .completion()
+                .join();
+
+        assertThat(Thread.interrupted())
+                .as("the interrupt is restored afterwards")
+                .isTrue();
+        assertThat(run.status()).isEqualTo(RunStatus.FAILED);
+        assertThat(runs.findById(run.id()).orElseThrow().status()).isEqualTo(RunStatus.FAILED);
+        assertThat(runs.updatedWhileInterrupted())
+                .as("bookkeeping runs with the interrupt flag cleared")
+                .isFalse();
+        assertThat(lock.isTaken()).isFalse();
+    }
+
+    @Test
+    @DisplayName("spec 004 AC-12: a retention failure is logged and the run still ingests")
+    void retentionFailureDoesNotStopTheRun() {
+        maintenance.failRetention();
+
+        IngestionRun run = service((runId, guard) -> report(runId, completed()), SAME_THREAD)
+                .start(IngestionTrigger.SCHEDULED)
+                .completion()
+                .join();
+
+        assertThat(run.status()).isEqualTo(RunStatus.COMPLETED);
     }
 
     private static void await(CountDownLatch latch) {

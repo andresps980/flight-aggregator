@@ -69,7 +69,7 @@ class DaySnapshotPublisherTest {
     }
 
     @Test
-    @DisplayName("AC-2: a complete day replaces the previous snapshot and is recorded complete and fresh")
+    @DisplayName("spec 004 AC-2: a complete day replaces the previous snapshot and is recorded complete and fresh")
     void completeDayReplaces() {
         seedPrevious(clock.instant().minusSeconds(60), ALPHA, BETA, GAMMA);
         List<AggregatedItinerary> fresh = List.of(aggregated("IB1", DAY, "08:00"), aggregated("IB2", DAY, "09:00"));
@@ -85,7 +85,8 @@ class DaySnapshotPublisherTest {
     }
 
     @Test
-    @DisplayName("AC-3: a day missing a provider of the existing snapshot keeps the old rows and marks them stale")
+    @DisplayName(
+            "spec 004 AC-3: a day missing a provider of the existing snapshot keeps the old rows and marks them stale")
     void partialDayKeepsPreviousSnapshot() {
         seedPrevious(null, ALPHA, BETA, GAMMA);
 
@@ -102,7 +103,7 @@ class DaySnapshotPublisherTest {
     }
 
     @Test
-    @DisplayName("AC-3: consecutive stale runs keep the first stale instant")
+    @DisplayName("spec 004 AC-3: consecutive stale runs keep the first stale instant")
     void staleSinceIsKept() {
         seedPrevious(null, ALPHA, BETA, GAMMA);
         Instant firstStale = clock.instant();
@@ -115,7 +116,7 @@ class DaySnapshotPublisherTest {
     }
 
     @Test
-    @DisplayName("AC-4: a partial day without a previous snapshot is written as incomplete")
+    @DisplayName("spec 004 AC-4: a partial day without a previous snapshot is written as incomplete")
     void partialDayWithoutSnapshotIsWritten() {
         DayPublication publication = publisher.publish(day(List.of(aggregated("IB1", DAY, "08:00")), GAMMA));
 
@@ -125,7 +126,7 @@ class DaySnapshotPublisherTest {
     }
 
     @Test
-    @DisplayName("AC-5: after max-stale-age a partial day replaces the stale snapshot (incomplete)")
+    @DisplayName("spec 004 AC-5: after max-stale-age a partial day replaces the stale snapshot (incomplete)")
     void staleTooLongIsReplaced() {
         seedPrevious(clock.instant().minus(Duration.ofHours(2)), ALPHA, BETA, GAMMA);
 
@@ -136,7 +137,7 @@ class DaySnapshotPublisherTest {
     }
 
     @Test
-    @DisplayName("AC-6: a day without data keeps an existing snapshot stale, or stays empty")
+    @DisplayName("spec 004 AC-6: a day without data keeps an existing snapshot stale, or stays empty")
     void unavailableDay() {
         assertThat(publisher.unavailable(RUN, DAY)).isEqualTo(DayPublication.noData());
         assertThat(store.find(DAY)).isEmpty();
@@ -148,7 +149,8 @@ class DaySnapshotPublisherTest {
     }
 
     @Test
-    @DisplayName("AC-8 (error): a failed write is reported as WRITE_FAILED and the previous snapshot is untouched")
+    @DisplayName(
+            "spec 004 AC-8 (error): a failed write is reported as WRITE_FAILED and the previous snapshot is untouched")
     void writeFailure() {
         seedPrevious(null, ALPHA, BETA, GAMMA);
         store.failWritesOf(DAY);
@@ -161,7 +163,7 @@ class DaySnapshotPublisherTest {
     }
 
     @Test
-    @DisplayName("AC-9: an itinerary whose first departure is on another UTC day is not stored and is counted")
+    @DisplayName("spec 004 AC-9: an itinerary whose first departure is on another UTC day is not stored and is counted")
     void misfiledItinerariesAreSkipped() {
         AggregatedItinerary onTheDay = aggregated("IB1", DAY, "08:00");
         AggregatedItinerary nextDay = aggregated("IB2", DAY.plusDays(1), "08:00");

@@ -26,6 +26,7 @@ final class InMemoryDaySnapshotStore implements DaySnapshotStore, SnapshotMainte
     private final List<LocalDate> deletedBefore = new ArrayList<>();
     private final AtomicInteger statisticsRefreshes = new AtomicInteger();
     private volatile LocalDate failWritesOf;
+    private volatile boolean failRetention;
 
     @Override
     public Optional<DaySnapshot> find(LocalDate day) {
@@ -51,6 +52,9 @@ final class InMemoryDaySnapshotStore implements DaySnapshotStore, SnapshotMainte
 
     @Override
     public synchronized void deleteDaysBefore(LocalDate day) {
+        if (failRetention) {
+            throw new IllegalStateException("lock timeout (test)");
+        }
         deletedBefore.add(day);
         rows.keySet().removeIf(d -> d.isBefore(day));
         snapshots.keySet().removeIf(d -> d.isBefore(day));
@@ -59,6 +63,10 @@ final class InMemoryDaySnapshotStore implements DaySnapshotStore, SnapshotMainte
     @Override
     public void refreshStatistics() {
         statisticsRefreshes.incrementAndGet();
+    }
+
+    void failRetention() {
+        failRetention = true;
     }
 
     void failWritesOf(LocalDate day) {

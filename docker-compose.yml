@@ -50,6 +50,8 @@ services:
     # -XX:+ExitOnOutOfMemoryError exits the JVM: restart it. A run cut short stays RUNNING until the next run marks
     # it ABORTED (its advisory lock died with the session).
     restart: unless-stopped
+    # Longer than the 30 s the aggregator waits for a run in progress to store its state at shutdown.
+    stop_grace_period: 40s
     ports:
       - "8080:8080"
     depends_on:

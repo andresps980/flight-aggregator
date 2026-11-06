@@ -8,6 +8,7 @@ import static com.andresps.flights.ingestion.RecordedGdsMock.request;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
+import com.andresps.flights.support.StoredData;
 import java.time.Duration;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
@@ -44,7 +45,10 @@ class IngestionApiIT extends RecordedFeedsSpringTest {
 
     @AfterEach
     void waitForRunsToFinish() {
-        await().atMost(Duration.ofSeconds(30)).until(() -> !"RUNNING".equals(latestStatus()));
+        // The final state is stored just before the lock is released: wait for both, or the next POST could get a 409.
+        StoredData stored = new StoredData(dataSource);
+        await().atMost(Duration.ofSeconds(30))
+                .until(() -> !"RUNNING".equals(latestStatus()) && stored.advisoryLocks() == 0);
     }
 
     private String latestStatus() {
@@ -63,7 +67,8 @@ class IngestionApiIT extends RecordedFeedsSpringTest {
     }
 
     @Test
-    @DisplayName("AC-21: POST answers 202 with Location and the RUNNING run; the run then completes asynchronously")
+    @DisplayName(
+            "spec 004 AC-21: POST answers 202 with Location and the RUNNING run; the run then completes asynchronously")
     void postStartsARun() {
         ResponseEntity<JsonNode> response = post();
 
@@ -95,7 +100,7 @@ class IngestionApiIT extends RecordedFeedsSpringTest {
     }
 
     @Test
-    @DisplayName("AC-21: a POST while a run is in progress answers 409 ProblemDetail with the running id")
+    @DisplayName("spec 004 AC-21: a POST while a run is in progress answers 409 ProblemDetail with the running id")
     void conflictWhileRunning() {
         String running = post().getBody().get("id").asString();
 
@@ -107,11 +112,12 @@ class IngestionApiIT extends RecordedFeedsSpringTest {
         assertThat(problem.get("status").asInt()).isEqualTo(409);
         assertThat(problem.get("title").asString()).isEqualTo("Ingestion already running");
         assertThat(problem.get("runningIngestionId").asString()).isEqualTo(running);
+        assertThat(problem.get("instance").asString()).isEqualTo("/api/v1/ingestions");
         assertThat(problem.get("detail").asString()).contains(running);
     }
 
     @Test
-    @DisplayName("AC-22: GET by id while running has no report; latest is the most recently started run")
+    @DisplayName("spec 004 AC-22: GET by id while running has no report; latest is the most recently started run")
     void getRunningAndLatest() {
         String id = post().getBody().get("id").asString();
 
@@ -125,7 +131,7 @@ class IngestionApiIT extends RecordedFeedsSpringTest {
     }
 
     @Test
-    @DisplayName("AC-23 (error): unknown id and latest without runs answer 404; a malformed id answers 400")
+    @DisplayName("spec 004 AC-23 (error): unknown id and latest without runs answer 404; a malformed id answers 400")
     void errors() {
         ResponseEntity<JsonNode> latest = get("/api/v1/ingestions/latest");
         ResponseEntity<JsonNode> unknown = get("/api/v1/ingestions/" + UUID.randomUUID());

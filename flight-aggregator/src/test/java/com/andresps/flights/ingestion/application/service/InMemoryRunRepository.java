@@ -14,6 +14,7 @@ import java.util.concurrent.ConcurrentHashMap;
 final class InMemoryRunRepository implements IngestionRunRepository {
 
     private final Map<UUID, IngestionRun> runs = new ConcurrentHashMap<>();
+    private volatile boolean updatedWhileInterrupted;
 
     @Override
     public void create(IngestionRun run) {
@@ -24,6 +25,9 @@ final class InMemoryRunRepository implements IngestionRunRepository {
 
     @Override
     public void update(IngestionRun run) {
+        if (Thread.currentThread().isInterrupted()) {
+            updatedWhileInterrupted = true; // a real JDBC call would be aborted
+        }
         if (runs.replace(run.id(), run) == null) {
             throw new IllegalStateException("unknown run " + run.id());
         }
@@ -69,6 +73,10 @@ final class InMemoryRunRepository implements IngestionRunRepository {
 
     void put(IngestionRun run) {
         runs.put(run.id(), run);
+    }
+
+    boolean updatedWhileInterrupted() {
+        return updatedWhileInterrupted;
     }
 
     int size() {

@@ -58,7 +58,8 @@ class IngestionPipelineIT extends RecordedFeedsSpringTest {
     }
 
     @Test
-    @DisplayName("AC-24: stored rows per day and the persisted report reconcile with the recorded gds-mock figures")
+    @DisplayName(
+            "spec 004 AC-24: stored rows per day and the persisted report reconcile with the recorded gds-mock figures")
     void pipelineReconciles() {
         IngestionRun run = runToCompletion();
 
@@ -85,7 +86,8 @@ class IngestionPipelineIT extends RecordedFeedsSpringTest {
     }
 
     @Test
-    @DisplayName("AC-12: a run deletes past days and runs older than 7 days; AC-13: the table is analyzed afterwards")
+    @DisplayName(
+            "spec 004 AC-12: a run deletes past days and runs older than 7 days; AC-13: the table is analyzed afterwards")
     void retentionAndStatistics() {
         LocalDate yesterday = LocalDate.ofInstant(RecordedGdsMock.CLOCK.instant(), java.time.ZoneOffset.UTC)
                 .minusDays(1);
@@ -108,7 +110,7 @@ class IngestionPipelineIT extends RecordedFeedsSpringTest {
     }
 
     @Test
-    @DisplayName("AC-2/AC-24: a second run replaces every day; rows always belong to a single run per day")
+    @DisplayName("spec 004 AC-2/AC-24: a second run replaces every day; rows always belong to a single run per day")
     void secondRunReplaces() {
         IngestionRun first = runToCompletion();
         IngestionRun second = runToCompletion();

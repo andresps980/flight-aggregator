@@ -8,17 +8,20 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.ReentrantLock;
 import javax.sql.DataSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.UncategorizedSQLException;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
 /**
  * The run lock as a PostgreSQL session-level advisory lock (ADR-0019). A session lock belongs to its connection, so
- * the lease keeps that connection for the whole run and closes it when released: handing it back to the pool earlier
- * would release the lock or leak it to another borrower. If the session dies (network, database restart, terminated
- * backend), PostgreSQL releases the lock and {@link RunLease#isHeld()} turns false.
+ * the lease keeps that connection for the whole run and closes it when released. In the application the connection
+ * comes from a <em>non-pooled</em> data source ({@link #connectingTo}): closing it always ends the session, so the lock
+ * can never go back to a pool still held (for instance if the unlock times out), and it does not use a pool slot. If
+ * the session dies (network, database restart, terminated backend), PostgreSQL releases the lock and
+ * {@link RunLease#isHeld()} turns false.
  */
 public final class PostgresAdvisoryRunLock implements IngestionRunLock {
 
@@ -33,6 +36,11 @@ public final class PostgresAdvisoryRunLock implements IngestionRunLock {
 
     public PostgresAdvisoryRunLock(DataSource dataSource) {
         this.dataSource = Objects.requireNonNull(dataSource, "dataSource");
+    }
+
+    /** A lock whose every lease opens its own physical connection (no pool). */
+    public static PostgresAdvisoryRunLock connectingTo(String url, String username, String password) {
+        return new PostgresAdvisoryRunLock(new DriverManagerDataSource(url, username, password));
     }
 
     @Override
@@ -72,44 +80,56 @@ public final class PostgresAdvisoryRunLock implements IngestionRunLock {
         }
     }
 
+    /**
+     * Several day coordinators ask {@link #isHeld()} concurrently, and a JDBC connection is not thread-safe: every use
+     * of the connection is serialised (a {@link ReentrantLock}, which does not pin virtual threads).
+     */
     private static final class Lease implements RunLease {
 
         private final Connection connection;
-        private final AtomicBoolean closed = new AtomicBoolean();
+        private final ReentrantLock use = new ReentrantLock();
+        private boolean closed;
 
         Lease(Connection connection) {
             this.connection = connection;
         }
 
-        /** Asks this session whether it still holds the lock; any failure means the session is gone. */
+        /** Asks this session whether it still holds the lock; any failure means it cannot be trusted to. */
         @Override
         public boolean isHeld() {
-            if (closed.get()) {
-                return false;
-            }
+            use.lock();
             try {
-                return queryBoolean(
-                        connection,
-                        "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND granted"
-                                + " AND pid = pg_backend_pid() AND classid = 0 AND objsubid = 1 AND objid = ?::oid)");
-            } catch (SQLException e) {
-                LOG.warn("The ingestion lock's session is gone: {}", e.getMessage());
+                return !closed
+                        && queryBoolean(
+                                connection,
+                                "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND granted AND pid ="
+                                        + " pg_backend_pid() AND classid = 0 AND objsubid = 1 AND objid = ?::oid)");
+            } catch (SQLException | RuntimeException e) {
+                LOG.warn("The ingestion lock cannot be confirmed, treating it as lost: {}", e.toString());
                 return false;
+            } finally {
+                use.unlock();
             }
         }
 
+        /** Unlocks, then closes the connection; closing ends the session, which releases the lock in any case. */
         @Override
         public void close() {
-            if (!closed.compareAndSet(false, true)) {
-                return;
-            }
+            use.lock();
             try {
-                queryBoolean(connection, "SELECT pg_advisory_unlock(?)");
-            } catch (SQLException e) {
-                // A dead session has already released the lock.
-                LOG.debug("Unlocking failed; the session is gone", e);
+                if (closed) {
+                    return;
+                }
+                closed = true;
+                try {
+                    queryBoolean(connection, "SELECT pg_advisory_unlock(?)");
+                } catch (SQLException | RuntimeException e) {
+                    LOG.debug("Unlocking failed; closing the session releases the lock", e);
+                } finally {
+                    closeQuietly(connection);
+                }
             } finally {
-                closeQuietly(connection);
+                use.unlock();
             }
         }
     }

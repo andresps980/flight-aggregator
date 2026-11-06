@@ -25,8 +25,15 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 class PostgresAdvisoryRunLockIT {
 
     private final DataSource dataSource = TestPostgres.dataSource();
-    private final PostgresAdvisoryRunLock instanceA = new PostgresAdvisoryRunLock(dataSource);
-    private final PostgresAdvisoryRunLock instanceB = new PostgresAdvisoryRunLock(dataSource);
+    private final PostgresAdvisoryRunLock instanceA = nonPooled();
+    private final PostgresAdvisoryRunLock instanceB = nonPooled();
+
+    /** As the application builds it: every lease on its own physical connection. */
+    private static PostgresAdvisoryRunLock nonPooled() {
+        return PostgresAdvisoryRunLock.connectingTo(
+                TestPostgres.jdbcUrl(), TestPostgres.username(), TestPostgres.password());
+    }
+
     private final List<RunLease> leases = new ArrayList<>();
 
     @AfterEach
@@ -41,7 +48,7 @@ class PostgresAdvisoryRunLockIT {
     }
 
     @Test
-    @DisplayName("AC-17: while one instance holds the lock, another cannot take it; after release it can")
+    @DisplayName("spec 004 AC-17: while one instance holds the lock, another cannot take it; after release it can")
     void exclusiveAcrossInstances() {
         RunLease lease = acquire(instanceA).orElseThrow();
 
@@ -56,7 +63,7 @@ class PostgresAdvisoryRunLockIT {
     }
 
     @Test
-    @DisplayName("AC-17: two instances trying at the same moment: exactly one gets the lock")
+    @DisplayName("spec 004 AC-17: two instances trying at the same moment: exactly one gets the lock")
     void concurrentAttempts() throws Exception {
         CyclicBarrier together = new CyclicBarrier(2);
         Callable<Optional<RunLease>> attemptA = () -> {
@@ -78,7 +85,8 @@ class PostgresAdvisoryRunLockIT {
     }
 
     @Test
-    @DisplayName("AC-18/AC-19: when the lock's session dies, the lock is released and the lease reports it lost")
+    @DisplayName(
+            "spec 004 AC-18/AC-19: when the lock's session dies, the lock is released and the lease reports it lost")
     void sessionDeathReleasesTheLock() {
         RunLease lease = acquire(instanceA).orElseThrow();
         int lockHolder = JdbcClient.create(dataSource)
@@ -97,7 +105,24 @@ class PostgresAdvisoryRunLockIT {
     }
 
     @Test
-    @DisplayName("AC-18: the lock is held on its own connection, not returned to the pool while the run lasts")
+    @DisplayName("spec 004 AC-19: many day coordinators checking the lease at once all get a true answer")
+    void concurrentChecks() throws Exception {
+        RunLease lease = acquire(instanceA).orElseThrow();
+        List<Future<Boolean>> checks = new ArrayList<>();
+
+        try (ExecutorService threads = Executors.newVirtualThreadPerTaskExecutor()) {
+            for (int i = 0; i < 50; i++) {
+                checks.add(threads.submit(lease::isHeld));
+            }
+        }
+
+        for (Future<Boolean> check : checks) {
+            assertThat(check.get()).isTrue();
+        }
+    }
+
+    @Test
+    @DisplayName("spec 004 AC-18: the lock is held on its own connection, closed (not pooled) when released")
     void dedicatedConnection() {
         acquire(instanceA).orElseThrow();
 
@@ -108,5 +133,11 @@ class PostgresAdvisoryRunLockIT {
                 .single();
 
         assertThat(sessionsHoldingIt).isEqualTo(1);
+        leases.getFirst().close();
+        assertThat(JdbcClient.create(dataSource)
+                        .sql("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory'")
+                        .query(Long.class)
+                        .single())
+                .isZero();
     }
 }

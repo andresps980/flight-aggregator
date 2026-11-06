@@ -76,6 +76,13 @@ public final class StoredData {
                 .list();
     }
 
+    /** Advisory locks currently granted (the ingestion run lock, ADR-0019). */
+    public long advisoryLocks() {
+        return jdbc.sql("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND granted")
+                .query(Long.class)
+                .single();
+    }
+
     /** When {@code itinerary} was last analyzed (manually), or empty. */
     public Optional<Instant> lastAnalyze() {
         return jdbc.sql("SELECT last_analyze FROM pg_stat_user_tables WHERE relname = 'itinerary'")

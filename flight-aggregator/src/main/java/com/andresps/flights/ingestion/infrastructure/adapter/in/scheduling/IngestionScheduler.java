@@ -42,6 +42,7 @@ public final class IngestionScheduler implements AutoCloseable {
             return;
         }
         if (schedule == null) {
+            // Wall-clock time on purpose: the task scheduler runs on real time, whatever the application Clock says.
             schedule = taskScheduler.scheduleWithFixedDelay(
                     this::tick, Instant.now().plus(settings.initialDelay()), settings.fixedDelay());
             LOG.info(

@@ -203,12 +203,12 @@ is one concrete class shared by the persistence adapter and the REST response, s
 | | Result |
 |---|---|
 | Bulk load, `COPY` (1,000,006 rows as 7 days, `BulkLoadBenchmarkIT`) | **10.4 s** first load, **13.8 s** replacement |
-| Bulk load, batched `INSERT` + `reWriteBatchedInserts` / without | 18.9 s / 24.5 s; 31.0 s / 34.7 s |
+| Bulk load, batched `INSERT` + `reWriteBatchedInserts` / without | 18.9 s / 24.5 s; 31.0 s / 34.7 s (the "without" run: the same benchmark with the `reWriteBatchedInserts` line removed from `TestPostgres`) |
 | Full run in compose (gds-mock deterministic, 946,230 itineraries stored, 7 days `REPLACED`) | **19.2 s** at `-Xmx512m`, **21.2 s** at `-Xmx768m` (first run and replacement alike) |
 | Smallest heap that completes | **512 MB** (container peak 717 MiB); 384 MB runs out of memory |
 | Chosen heap | **`-Xmx768m`** (1.5× the floor), container peak ≈ 0.99 GiB, was 1,536 MB with the in-memory store |
 | Table size | 558 MB (456 MB rows + 103 MB indexes), 618 bytes per row |
-| Default compose stack (100,000, chaos on) | first scheduled run `COMPLETED` in 17.5 s, 94,543 rows |
+| Default compose stack (100,000, chaos on), AC-25 checked by hand | `postgres`, `gds-mock` and `flight-aggregator` healthy (the aggregator started after the other two, `depends_on: service_healthy`); first scheduled run `COMPLETED` in 17.5 s; 94,543 rows queryable in `itinerary` (7 days, one `day_snapshot` row each); `POST` → `202` + `Location`, a second `POST` → `409` with `runningIngestionId`; after `docker compose down` / `up` the rows and both runs were still there (named volume) |
 
 - The heap is now the ingestion working set only (2 days in flight); the store writes and drops each day.
 - With 384 MB the JVM exits on `OutOfMemoryError` and the container restarts (compose restart policy); the run it
@@ -234,6 +234,13 @@ Reproduce: `./mvnw -pl flight-aggregator verify -Pslow-tests -Dit.test=BulkLoadB
   starts or stays `RUNNING` afterwards.
 - A shared Testcontainers container returned as a Spring `@ServiceConnection` bean is stopped by Spring when any
   context closes; the shared test container ignores `stop()` (Ryuk removes it when the JVM exits).
+- **Shutdown waited for a whole run.** `ThreadPoolTaskScheduler` takes part in the lifecycle stop phase, which runs
+  before beans are destroyed and lets running tasks finish; the scheduler's tick waits for its run, so closing the
+  application waited for the run to complete, and the executor that should interrupt it was destroyed only after.
+  Found by an IT that closes the application mid-run (added after the code review); the schedule is now stopped on
+  `ContextClosedEvent`, and the interrupted run is stored `FAILED` with its lock released.
+- **The lock connection was shared by concurrent day coordinators** (found in review): it is now used under a lock,
+  opened outside the pool, and any failure to confirm the lock counts as losing it.
 
 ### AI tools used
 
@@ -382,13 +389,23 @@ Persistence and pipeline (spec 004):
 - **One bad row fails its day.** `COPY` has no per-row errors; the day is `WRITE_FAILED` and keeps its previous
   snapshot.
 - **The run lock is a PostgreSQL session lock.** It needs a direct connection or a session-mode pooler (not PgBouncer
-  in transaction mode), holds one pooled connection for up to 10 min, and a lost lock is detected at the next day
-  boundary, so at most one day can overlap with another instance's run (that day is still atomic) — ADR-0019.
+  in transaction mode) and holds one extra (non-pooled) connection for up to 10 min. A lost lock is detected at the
+  next day boundary, so a run whose session died while writing a day can still commit that day after another
+  instance has started. Each day stays atomic and two writers of the same day are serialised by PostgreSQL (the
+  second one's rows conflict on the unique key or replace the first's whole day), so readers never see a mix; there
+  is no fencing token in the write itself — ADR-0019.
+- **Pool size vs. concurrent days.** Each day in flight writes on its own pooled connection; the default pool (10)
+  covers the default 2 days with room for the API. Raising `max-concurrent-days` well beyond the pool size makes
+  publishes wait for connections (and fail as `WRITE_FAILED` after Hikari's 30 s timeout); keep
+  `spring.datasource.hikari.maximum-pool-size` ≥ `max-concurrent-days` + 2.
 - **The ingestion endpoints are unauthenticated**, like the rest of the API for now; anyone who can reach the service
   can start a run (at most one at a time).
 - **Runs started by `POST` are not cancellable**, and the history keeps only the last 7 days.
 - **A run cut short by a crash** stays `RUNNING` until the next run marks it `ABORTED`; with the default schedule that
   is at most 15 min (plus the restart).
-- **Graceful shutdown** interrupts a run in progress and waits up to 30 s for it to store its `FAILED` state.
+- **Graceful shutdown** interrupts a run in progress and waits up to 30 s for it to store its `FAILED` state (compose
+  gives the container 40 s before killing it); a run killed harder stays `RUNNING` until the next run aborts it.
+- **Failure messages are generic** (`Unexpected error (IllegalStateException)…`): the API never serves exception
+  text, which may contain SQL or host names; the details are in the log under the run id.
 
 *To be completed:* what would change for production.
