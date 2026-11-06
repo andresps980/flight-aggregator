@@ -113,6 +113,16 @@ docs/ai/, run ./mvnw verify (report duration) and prepare the PR with /pr-descri
 The session hit the account's usage limit once, after the tests were written and before they were committed; the
 Stop hook then reported the (intentionally) failing build, and work resumed with prompt 3.
 
+### 4. Push
+
+````text
+OK, push and open the PR, then check CI and code scanning as before.
+Add a follow-up note (for the frontend PR) to document the ingestion endpoints in OpenAPI
+with the correct 202 response instead of excluding them.
+````
+
+Added by the author: the follow-up is recorded in spec 005 (*Requirements for the frontend spec*).
+
 ## Clarifications (open questions of the spec)
 
 | # | Question | Answer |

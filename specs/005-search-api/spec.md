@@ -219,6 +219,16 @@ New feature `com.andresps.flights.search` (no Java dependency on `ingestion`; it
 - **Security:** parameters are bound to SQL placeholders, never concatenated; cursors are validated before use.
 - **Tests:** a shared Redis Testcontainer next to the shared PostgreSQL one; images as in compose.
 
+## Requirements for the frontend spec
+
+- **Document the ingestion endpoints in OpenAPI** instead of excluding them: this PR scopes springdoc to the search
+  paths (`springdoc.paths-to-match`) because, unannotated, `POST /api/v1/ingestions` was described as `200 */*`. Annotate
+  the ingestion controller so the description shows `202 Accepted` with the `Location` header and the run body, `409`
+  with the ProblemDetail and `runningIngestionId`, and `GET /{id}` / `/latest` with `200`, `400`, `404`; then widen
+  `paths-to-match` to `/api/v1/**` and regenerate `docs/api/openapi.json` (the contract IT will require it).
+- The dashboard must keep paging while `hasMore` is true (a cached page may be short or empty) and may use the
+  catalog's `routes` for a destination dropdown that depends on the origin.
+
 ## Open questions
 
 All resolved (2026-11-06):
