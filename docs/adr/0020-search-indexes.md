@@ -1,6 +1,6 @@
 # ADR-0020: Minimal search index set, chosen by EXPLAIN on 1M rows
 
-- **Status:** Proposed (accepted once the measurements below are recorded, in this PR)
+- **Status:** Accepted (measured 2026-11-06)
 - **Date:** 2026-11-06
 - **Related spec:** [specs/005-search-api](../../specs/005-search-api/spec.md) (AC-22, AC-23)
 - **Refines:** [ADR-0008](0008-keyset-pagination.md) ("composite indexes cover the filter columns followed by
@@ -48,8 +48,53 @@ today).
 The worst realistic case — the busiest route, no date, a `maxPrice` above every price — and deep pages are in the
 `slow` performance test (AC-23).
 
-**Measurements** (filled in when implemented; plans, buffers and timings per combination, `COPY` 1M rows before and
-after): *pending*.
+**Measurements** — `SearchPerformanceIT` on 1,000,006 gds-mock-shaped rows (busiest route FRA-JNB, 993 rows), Apple M1
+Max, Docker 6 CPUs / 16 GB, `postgres:17`. Full plans and every figure: [docs/measurements/search-1m.md](../measurements/search-1m.md).
+
+The two candidate indexes were enough; the others were not added. Every combination of AC-22 is an index scan in
+keyset order stopped by `LIMIT`, with no sort node at all — the bounded in-memory sort accepted for small sets was never
+chosen, because the route index already returns a route in price order:
+
+| Combination (first page of 20) | Index | Rows read and discarded | Execution |
+|---|---|---:|---:|
+| none | `(final_price, id)` | 0 | 0.18 ms |
+| `date` (143k rows) | `(final_price, id)`, date as filter | 106 | 0.67 ms |
+| `origin` (29k rows) | `(final_price, id)`, origin as filter | 758 | 2.4 ms |
+| route, any of date / carrier / `maxPrice` | `(origin, destination, final_price, id)` | ≤ a few | ≤ 0.11 ms |
+| route, `maxPrice` above every price (worst realistic) | same, `final_price <= …` in the index condition | 0 | 0.05 ms |
+| `origin` + `carrier` + `maxPrice=200` (365 rows) | `(final_price, id)`, two filters | 19,334 | 89 ms (51 ms median warm) |
+
+```
+-- route, worst realistic case
+Limit (actual time=0.020..0.051 rows=21)
+  -> Nested Loop
+       -> Index Scan using itinerary_route_price_id_idx on itinerary i (actual rows=21)
+            Index Cond: ((origin = 'FRA') AND (destination = 'JNB') AND (final_price <= 999999.00))
+            Filter: (departure_at > now)
+       -> Index Scan using day_snapshot_pkey on day_snapshot s
+
+-- the case this set does not serve well
+Limit (actual time=0.240..88.696 rows=21)
+  -> Index Scan using itinerary_price_id_idx on itinerary i
+       Index Cond: (final_price <= 200.00)
+       Filter: ((departure_at > now) AND (origin = 'FRA') AND (airline = 'QR'))
+       Rows Removed by Filter: 19334
+```
+
+Two filters outside the route index (origin × carrier ≈ 1/800 of the rows) make the price-ordered scan read ≈ 800
+entries per result; ≈ 50–90 ms for a first page, then served from the cache. It is not in AC-22's list; adding
+`(origin, final_price, id)` would fix origin + carrier but not destination + carrier, so it is recorded instead of
+indexed.
+
+Cost on the bulk load (`COPY` of 1M rows as 7 days through the real store):
+
+| Indexes | First load | Replacement (delete + load) |
+|---|---:|---:|
+| PK, unique key, `departure_date` | 13.0 s | — (13.8 s in ADR-0018's run) |
+| + the two search indexes | 18.5 s (+42 %) | 31.0 s |
+
+Still well under the one-minute budget of ADR-0018; the replacement pays for maintaining four indexes over a table
+with a day of dead tuples.
 
 ## Alternatives considered
 
@@ -68,5 +113,6 @@ after): *pending*.
 - **Negative / trade-offs:** a filter that is both selective and not in an index (e.g. a rare carrier with no route)
   scans more of the price index; very selective combinations with an unusually low `maxPrice` can read many entries
   before finding `limit` rows. New filters or sort orders need this analysis again.
-- **Follow-ups:** record the measured plans and `COPY` times here and in SOLUTION.md; revisit if the catalog grows
-  (more airports make routes smaller and the price index less useful for route searches).
+- **Follow-ups:** revisit if the catalog grows (more airports make routes smaller and the price index less useful for
+  route searches), if origin + carrier becomes a common search (add `(origin, final_price, id)`), or if the replacement
+  time matters (day partitions, ADR-0017).

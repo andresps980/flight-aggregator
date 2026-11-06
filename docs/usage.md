@@ -23,10 +23,10 @@ be running.
 ### Run
 
 The easiest way is the whole stack ([Docker Compose](#docker-compose)). To run the aggregator from the build, start
-PostgreSQL and gds-mock first:
+PostgreSQL, Redis and gds-mock first (Redis is optional: without it, search reads PostgreSQL every time):
 
 ```bash
-docker compose up -d postgres gds-mock
+docker compose up -d postgres redis gds-mock
 ./mvnw -pl flight-aggregator spring-boot:run
 ```
 
@@ -36,14 +36,15 @@ creates or migrates the schema at startup; the first ingestion runs 10 s after s
 ### Docker Compose
 
 ```bash
-docker compose up --build        # postgres + gds-mock + flight-aggregator
+docker compose up --build        # postgres + redis + gds-mock + flight-aggregator
 ```
 
 | Service | Port | Notes |
 |---|---|---|
 | `postgres` | `5432` (`POSTGRES_PORT`) | `postgres:17`, database/user `flights`, password `flights` (`POSTGRES_PASSWORD`); data in the named volume `postgres-data` (`docker compose down -v` deletes it) |
+| `redis` | `6379` (`REDIS_PORT`) | `redis:8`, search cache only: no persistence, `maxmemory 256mb`, `allkeys-lru` |
 | `gds-mock` | `8081` | Chaos on by default; `GDS_MOCK_PROFILE=deterministic` turns it off, `GDS_WORLD_VOLUME=1000000` for the full volume |
-| `flight-aggregator` | `8080` | Starts when the other two are healthy; healthy on `/actuator/health/readiness`; restarts if the JVM exits on `OutOfMemoryError` |
+| `flight-aggregator` | `8080` | Starts when the other three are healthy; healthy on `/actuator/health/readiness`; restarts if the JVM exits on `OutOfMemoryError` |
 
 Variables for the aggregator: `INGESTION_INITIAL_DELAY` (default `10s`), `INGESTION_FIXED_DELAY` (`15m`),
 `AGGREGATOR_JAVA_TOOL_OPTIONS` (default `-Xmx768m -XX:+ExitOnOutOfMemoryError`, see SOLUTION.md). The compose file
@@ -63,6 +64,10 @@ docker compose exec postgres psql -U flights -c "SELECT departure_date, count(*)
 |---|---|
 | `GET /actuator/health` | Health (also `/actuator/health/liveness` and `/readiness`) |
 | `GET /actuator/info` | Build/app info |
+| `GET /actuator/metrics/search.cache` | Search cache counter by `result` (`hit`, `miss`, `error`, `bypassed`) |
+| `GET /api/v1/itineraries` | Search itineraries (spec 005) |
+| `GET /api/v1/catalog` | Origins, destinations, carriers, dates and routes that can be searched (spec 005) |
+| `GET /v3/api-docs`, `/swagger-ui.html` | OpenAPI description of the search API (committed copy: [`docs/api/openapi.json`](api/openapi.json)) |
 | `POST /api/v1/ingestions` | Start an ingestion run now (spec 004) |
 | `GET /api/v1/ingestions/{id}` | A run: status, timestamps and, once finished, its report |
 | `GET /api/v1/ingestions/latest` | The most recently started run |
@@ -77,6 +82,80 @@ curl http://localhost:8080/actuator/health
 
 Errors are returned as [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) Problem Details: domain validation errors
 and malformed ids map to `400`, unknown resources to `404`, a run already in progress to `409`.
+
+#### Search (spec 005)
+
+`GET /api/v1/itineraries` returns itineraries **departing after now**, cheapest first (final price, then an internal
+id), one page at a time. Every filter is optional and they combine with AND:
+
+| Parameter | Format | Meaning |
+|---|---|---|
+| `origin`, `destination` | IATA airport, 3 letters, case-insensitive | First origin / final destination |
+| `date` | `YYYY-MM-DD`, from yesterday to today + 365 days | UTC day of the first departure. Absent: every future day |
+| `maxPrice` | ≥ 0, at most 2 decimals | Final price (EUR) at most this, inclusive |
+| `carrier` | IATA airline, 2 characters A–Z/0–9 | The airline operating every segment |
+| `limit` | 1–100, default 20 | Items per page |
+| `cursor` | opaque | `nextCursor` of the previous page; only valid with the same filters |
+
+```bash
+curl 'http://localhost:8080/api/v1/itineraries?origin=MAD&destination=JFK&maxPrice=650&limit=2'
+```
+
+```json
+{"items":[{"itineraryKey":"IB6251:MAD-JFK@2026-11-08T10:15:00Z","origin":"MAD","destination":"JFK",
+  "departureDate":"2026-11-08","departureAt":"2026-11-08T10:15:00Z","arrivalAt":"2026-11-08T18:40:00Z",
+  "carrier":"IB","stops":0,
+  "segments":[{"flightNumber":"IB6251","origin":"MAD","destination":"JFK",
+               "departureAt":"2026-11-08T10:15:00Z","arrivalAt":"2026-11-08T18:40:00Z"}],
+  "basePrice":412.38,"finalPrice":433.00,"currency":"EUR","selectedProvider":"mock-alpha",
+  "providers":["mock-alpha","mock-gamma"],
+  "freshness":{"status":"COMPLETE","publishedAt":"2026-11-06T10:00:21Z","missingProviders":[],"staleSince":null}},
+  …],
+ "nextCursor":"djF8NDMzLjAwfDgyMTM0fDdmM2E5YzEyZTRiMDVkNjg","hasMore":true}
+```
+
+```bash
+curl 'http://localhost:8080/api/v1/itineraries?origin=MAD&destination=JFK&maxPrice=650&limit=2&cursor=djF8NDMzLjAwfDgyMTM0fDdmM2E5YzEyZTRiMDVkNjg'
+```
+
+**Paging rules for clients:**
+- Keep requesting while `hasMore` is `true`. A page served from the cache omits itineraries that departed after it
+  was cached, so it **may be shorter than `limit`, or even empty, while `hasMore` is `true`**.
+- There is no total count and no "page N": the cursor continues from the last item seen ([ADR-0008](adr/0008-keyset-pagination.md)).
+  `limit` may change between pages; the filters may not (a cursor reused with other filters answers `400`).
+- If an ingestion run replaces a day while you page, the walk continues from the same price position in the new data,
+  so an itinerary at the boundary may be skipped or repeated, and prices may change between pages. Start again from
+  the first page to get a consistent view.
+- `freshness.status` is the itinerary's day: `COMPLETE`, `INCOMPLETE` (some providers missing, listed in
+  `missingProviders`) or `STALE` (the latest run could not refresh the day, so its previous data is shown; see
+  `staleSince`).
+
+Invalid parameters answer `400` with a problem detail that names the parameter:
+
+```http
+HTTP/1.1 400
+Content-Type: application/problem+json
+
+{"type":"about:blank","title":"Invalid request","status":400,
+ "detail":"origin must be a 3-letter IATA airport code","instance":"/api/v1/itineraries"}
+```
+
+`GET /api/v1/catalog` lists what can be searched now, to fill the dashboard's dropdowns:
+
+```bash
+curl http://localhost:8080/api/v1/catalog
+```
+
+```json
+{"origins":["AMS","BCN","MAD"],"destinations":["JFK","LHR"],"carriers":["IB","VY"],
+ "dates":[{"date":"2026-11-06","freshness":{"status":"COMPLETE","publishedAt":"…","missingProviders":[],"staleSince":null}}],
+ "routes":[{"origin":"AMS","destinations":["JFK"]},{"origin":"MAD","destinations":["JFK","LHR"]}]}
+```
+
+Both endpoints are cached in Redis per data version: the first request after an ingestion run publishes data reads
+PostgreSQL, the next identical ones are served from Redis ([ADR-0022](adr/0022-search-cache.md)). If Redis is down,
+answers come from PostgreSQL (a WARN when the cache is switched off for 30 s, the `search.cache` metric counts
+failures). `/actuator/health` reports Redis; readiness does not depend on it.
 
 #### Ingestion runs (spec 004)
 
@@ -194,6 +273,10 @@ As in gds-mock, per-provider keys contain a dash, so override them with command-
 | `aggregator.persistence.max-stale-age` | `2h` | How long a stale day snapshot is kept against partial data before partial data replaces it |
 | `aggregator.persistence.run-retention` | `7d` | Ingestion runs older than this are deleted at the start of each run |
 | `spring.datasource.hikari.maximum-pool-size` | `10` | Keep ≥ `max-concurrent-days` + 2: each day in flight writes on its own connection (the run lock uses a separate, non-pooled one) |
+| `aggregator.search.cache.enabled` | `true` | Serve search and catalog through the Redis cache (`false`: always PostgreSQL) |
+| `aggregator.search.cache.ttl` | `10m` | Lifetime of a cache entry (a safety net: the data version invalidates entries) |
+| `spring.data.redis.host` / `port` | `localhost` / `6379` | Redis (`REDIS_HOST` / `REDIS_PORT`; compose: `redis`) |
+| `spring.data.redis.timeout` / `connect-timeout` | `100ms` / `100ms` | Beyond this a Redis call counts as failed and the search reads PostgreSQL |
 | `spring.datasource.url` / `username` / `password` | `jdbc:postgresql://localhost:5432/flights` / `flights` / `flights` | PostgreSQL (`SPRING_DATASOURCE_*` in compose) |
 | `GDS_MOCK_URL` (environment) | `http://localhost:8081` | Base URL of all three providers at once (compose: `http://gds-mock:8081`) |
 | `aggregator.resilience.default.connect-timeout` | `1s` | TCP connect timeout |

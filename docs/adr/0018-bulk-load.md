@@ -52,4 +52,5 @@ We will load with **`COPY itinerary (...) FROM STDIN`** through PgJDBC's `PGCopy
 - **Negative / trade-offs:** a hand-written encoder whose escaping must be right (covered by unit tests and a
   round-trip IT with hostile values); PostgreSQL-specific; `COPY` does not report per-row errors, so one bad row
   fails the whole day (reported as `WRITE_FAILED`, previous snapshot intact).
-- **Follow-ups:** the search spec adds its indexes and re-measures the load with them (each index slows `COPY`).
+- **Follow-ups:** the search spec adds its indexes and re-measures the load with them (each index slows `COPY`):
+  done in [ADR-0020](0020-search-indexes.md) (18.5 s first load, 31.0 s replacement with the two search indexes).

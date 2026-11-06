@@ -177,9 +177,62 @@ erDiagram
 ```
 
 One denormalized row per itinerary: every search filter and the sort key are scalar columns of the same row, so a
-search page is a single index range scan with no join; segments are only displayed, so they travel as JSONB. The
-search spec adds the composite indexes. `day_snapshot` and `itinerary` share `departure_date` but have no foreign key:
+search page is a single index range scan; segments are only displayed, so they travel as JSONB. Spec 005 adds the
+search indexes `(final_price, id)` and `(origin, destination, final_price, id)` ([ADR-0020](adr/0020-search-indexes.md))
+and the single-row `data_version` table that every writing transaction increments ([ADR-0022](adr/0022-search-cache.md)). `day_snapshot` and `itinerary` share `departure_date` but have no foreign key:
 the day is written in one transaction anyway, and retention deletes both.
+
+## Search (spec 005)
+
+Search never calls providers: it reads the read model above, through a Redis cache that is invisible to the use case.
+
+```mermaid
+flowchart LR
+    client([Dashboard / curl]) --> web[ItinerarySearchController<br/>CatalogController<br/>adapter/in/web, DTOs]
+    web --> uc
+
+    subgraph application["application (plain Java)"]
+        uc[ItinerarySearchService / CatalogService<br/>validate, check cursor fingerprint,<br/>issue next cursor]
+        qp((ItinerarySearchQuery<br/>CatalogQuery))
+        vp((DataVersionQuery))
+    end
+
+    uc --> qp
+
+    subgraph cache["adapter/out/cache (Redis only here)"]
+        dec[CachingItinerarySearchQuery<br/>CachingCatalogQuery<br/>key = version + filters + limit + position]
+        res[ResilientCacheStore<br/>100 ms timeout, breaker 30 s]
+    end
+
+    subgraph persistence["adapter/out/persistence (SQL only here)"]
+        pg[PostgresItinerarySearchQuery<br/>PostgresCatalogQuery]
+        ver[PostgresDataVersionQuery]
+    end
+
+    dec -. implements .-> qp
+    dec --> vp
+    ver -. implements .-> vp
+    dec -- miss --> pg
+    dec --> res --> redis[(Redis)]
+    pg --> db[(PostgreSQL)]
+    ver --> db
+    ingest[ingestion store<br/>bumps data_version in each write] --> db
+```
+
+A search request:
+
+1. The use case validates the filters (`400` naming the parameter), decodes the cursor and checks that its
+   fingerprint matches the filters ([ADR-0021](adr/0021-search-cursor.md)).
+2. The cache decorator reads the data version (one primary-key read) and looks the page up in Redis. On a hit it drops
+   itineraries departed since the page was cached and keeps its next position; on a miss (or with Redis failing) it
+   asks PostgreSQL and stores the page for 10 min.
+3. PostgreSQL reads `limit + 1` rows `WHERE departure_at > now … AND (final_price, id) > cursor ORDER BY final_price,
+   id`: one index range scan ([ADR-0008](adr/0008-keyset-pagination.md), [ADR-0020](adr/0020-search-indexes.md)),
+   joined with the day's `day_snapshot` row for freshness.
+4. The use case encodes the next cursor from the page's last position; the controller maps to DTOs.
+
+An ingestion run that replaces a day or marks it stale increments `data_version` in the same transaction, so the next
+request misses and reads the new data; old entries expire by TTL, nothing is deleted.
 
 ## Dependency rule
 
@@ -192,6 +245,7 @@ the day is written in one transaction anyway, and retention deletes both.
 | Domain doesn't depend on application/infrastructure | Business rules are independent of use cases and delivery |
 | Domain and application are framework-free | Fast, plain unit tests; framework upgrades don't touch business code |
 | Controllers live in `infrastructure.adapter.in` | Delivery mechanisms stay at the edge |
+| PostgreSQL / JDBC only in `adapter.out.persistence` (and wiring); Redis only in `adapter.out.cache` (and wiring); the cache never touches SQL | Each technology has one home; the cache is a decorator of ports |
 | No cycles between features | Features can evolve (or be extracted) independently |
 | Constructor injection only, no generic exceptions, no `System.out` | Explicit dependencies, meaningful errors, proper logging |
 
@@ -210,7 +264,8 @@ the day is written in one transaction anyway, and retention deletes both.
 | Level | Naming | Scope | Tools |
 |---|---|---|---|
 | Unit | `*Test` | Domain, use cases, adapters in isolation (no Spring context) | JUnit 5, AssertJ, Mockito, standalone MockMvc |
-| Integration | `*IT` | Full application on a random port, real HTTP | `@SpringBootTest`, `RestClient` |
+| Integration | `*IT` | Full application on a random port, real HTTP; adapters against real servers | `@SpringBootTest`, `RestClient`, Testcontainers (one shared PostgreSQL and one shared Redis per build), WireMock |
+| Volume (`slow` tag) | `*IT` | 1M rows: bulk load, query plans, keyset vs offset, cache latency | `-Pslow-tests` |
 | Architecture | `ArchitectureTest` | Package dependencies and coding rules | ArchUnit |
 
 Coverage from unit and integration tests is merged by JaCoCo per module; the build fails if any module drops below

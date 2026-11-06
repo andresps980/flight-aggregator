@@ -24,6 +24,6 @@ New ADR: copy [`0000-template.md`](0000-template.md) or run `/adr` in Claude Cod
 | [0017](0017-day-snapshot-replacement.md) | Replace each day's snapshot atomically; keep a more complete snapshot when a provider is missing | Accepted |
 | [0018](0018-bulk-load.md) | Bulk load day snapshots with PostgreSQL COPY | Accepted |
 | [0019](0019-ingestion-run-lock.md) | No concurrent ingestion runs across instances, with a PostgreSQL session advisory lock | Accepted |
-| [0020](0020-search-indexes.md) | Minimal search index set, chosen by EXPLAIN on 1M rows | Proposed |
+| [0020](0020-search-indexes.md) | Minimal search index set, chosen by EXPLAIN on 1M rows | Accepted |
 | [0021](0021-search-cursor.md) | Opaque, unsigned keyset cursor with a filter fingerprint | Accepted |
 | [0022](0022-search-cache.md) | Redis cache-aside keyed by a transactional data version, as a decorator of the query ports | Accepted |

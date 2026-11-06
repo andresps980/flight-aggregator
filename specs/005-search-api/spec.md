@@ -148,7 +148,7 @@ Response `200`:
                      "missingProviders": [], "staleSince": null }
     }
   ],
-  "nextCursor": "djF8NDMzLjAwfDgyMTM0fDdmM2E5YzEy",
+  "nextCursor": "djF8NDMzLjAwfDgyMTM0fDdmM2E5YzEyZTRiMDVkNjg",
   "hasMore": true
 }
 ```
@@ -169,7 +169,7 @@ is `true`**; an empty `items` alone never means the end.
 
 Errors: `400` (AC-12 – AC-16), body RFC 9457:
 ```json
-{ "type": "about:blank", "title": "Bad Request", "status": 400,
+{ "type": "about:blank", "title": "Invalid request", "status": 400,
   "detail": "origin must be a 3-letter IATA airport code", "instance": "/api/v1/itineraries" }
 ```
 
