@@ -130,6 +130,14 @@ produces a report. The flow diagram is in [architecture.md](docs/architecture.md
 partitions, and the run is `FAILED` only if every provider failed (no exception either way). A day is published if at
 least one provider delivered it, naming the missing providers, so the persistence spec can keep their previous data.
 
+The dashboard's demo controls make this visible (spec 006). Below, Mock-Gamma was forced down through gds-mock's admin
+API and a run started with *Refresh data*: the run is `PARTIAL`, Gamma `FAILED` on all 7 partitions with its breaker
+`OPEN`, Alpha and Beta `COMPLETED`; no day was replaced (0 itineraries stored, every day `KEPT_STALE`, ADR-0017), so
+search keeps serving the previous, more complete data with `STALE` badges instead of dropping Gamma's offers.
+
+![Data status after a Mock-Gamma outage: run PARTIAL, mock-gamma FAILED 0/7 with breaker OPEN, demo controls with the
+Gamma outage switched on](docs/images/dashboard-outage.png)
+
 **Reconciliation.** With no failures, every figure of the report equals gds-mock's `/admin/world/stats`, for the run
 and for each day: records and malformed records per reason per provider, offers received, discards per reason,
 duplicates merged and itineraries produced. The build checks it against recorded feeds (`IngestionIT`). The `e2e`

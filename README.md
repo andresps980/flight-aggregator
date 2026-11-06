@@ -70,6 +70,8 @@ Search reads only from PostgreSQL/Redis, never from the providers, and pages wit
 **flight-aggregator** (port 8080) and the **dashboard** (port 3000), each with a healthcheck. The aggregator runs its
 first ingestion about 10 s after it is healthy, then every 15 min.
 
+![Dashboard: search panel, data status, "New data available" banner, price and provider charts, results with freshness badges](docs/images/dashboard.png)
+
 **Open the dashboard at <http://localhost:3000>**: search and filter (the filters live in the URL), page with
 "Load more", watch the data status panel, press *Refresh data* to run an ingestion now, and use the *Demo controls*
 panel to take a mock provider down and watch the breaker open and days go stale

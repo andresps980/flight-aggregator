@@ -6,6 +6,9 @@ small React + TypeScript single-page app in [`frontend/`](../frontend), built wi
 [ADR-0023](adr/0023-real-time-by-polling.md), [ADR-0024](adr/0024-contract-generated-client-and-frontend-toolchain.md)).
 This page is written for a backend developer: it maps each frontend idea to something familiar.
 
+![The dashboard for MAD → JFK: search panel and data status on the left; "New data available" banner, price
+distribution, results by selected provider and the cheapest itineraries with STALE badges on the right](images/dashboard.png)
+
 ## Run it
 
 | How | Command | URL |
