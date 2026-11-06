@@ -216,3 +216,14 @@ Both agents ran on the branch after the implementation and docs commits. Fixes a
 | T3 | AC numbers shared by specs 003 and 004 | **Fixed:** every spec 004 test name starts with "spec 004" |
 | T4 | 409 `instance` and virtual threads not asserted | **Added** (`IngestionApiIT`, `IngestionRunExecutorTest`) |
 | T5 | The "without rewrite" benchmark figure is not reproducible from the test | **Documented** how it was measured |
+
+## CI and code scanning findings on the PR
+
+PR #6, first push (`9377d41`): every check green, nothing to fix.
+
+| Check | Result |
+|---|---|
+| Build, tests & coverage (both modules, Testcontainers `postgres:17` on the runner) | pass, 2 min 0 s |
+| Format (Spotless) | pass |
+| Static security analysis (CodeQL) | pass, **0 open code scanning alerts** on the PR |
+| Dependency review (new JDBC, Flyway, PostgreSQL and Testcontainers dependencies) | pass, no vulnerable dependencies |
