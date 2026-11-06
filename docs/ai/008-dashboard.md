@@ -140,6 +140,26 @@ Run it in the frontend CI job. Tell me when it's fixed so I can re-check in the 
 before taking the screenshots.
 ````
 
+### 5. Screenshots, contract regeneration, push
+
+````text
+Layout looks good in Brave, including below 960 px. New screenshots saved:
+docs/images/dashboard.png (final) and docs/images/dashboard-outage.png (Beta outage: run
+PARTIAL, breaker OPEN, results STALE). Add the first to the README and docs/frontend.md and
+the outage one to SOLUTION.md's resiliency section; commit them.
+
+If not done yet: the OpenAPI contract test must only compare and fail on drift in
+./mvnw verify and CI; regenerating docs/api/openapi.json must be an explicit action (system
+property or Maven profile), documented in docs/frontend.md / CLAUDE.md, with a check proving
+that a drift fails.
+
+Then add the layout fix to the PR description, push, open the PR and check CI and code
+scanning (including the first CodeQL analysis of the TypeScript code) as before.
+````
+
+Noted by the agent: the outage screenshot shows **Mock-Gamma** down (not Beta); the caption in SOLUTION.md says
+Gamma.
+
 ## Clarifications (open questions of the spec)
 
 | # | Question | Answer |
@@ -235,6 +255,19 @@ intended division of labour: the agent cannot widen its own permissions; a human
 - Test fixes while writing it: two selectors matched twice (the hidden chart table also has a provider row; the demo
   text contains "Days"); the `<details>` is opened programmatically, so an overlapped element cannot turn the test into
   a 30 s timeout; it asserts the four panels exist, so the overlap check can never pass on an empty list.
+
+## Contract regeneration made explicit (prompt 5)
+
+Before: `OpenApiContractIT` compared by default, but `-Dopenapi.write=true` rewrote `docs/api/openapi.json` **and then
+passed by comparing the file with itself** (the misleading green noted above). Now:
+
+- `./mvnw verify` and CI only compare; the failure message names the regeneration command.
+- `-Popenapi-write` (root POM profile) sets `openapi.write` for Failsafe, runs only this IT, writes the file and
+  reports the test **aborted** (JUnit `Assumptions.abort`), never passed; with `CI` set it fails instead.
+- `driftFailsTheBuild` proves the comparison rejects a hand-edited copy.
+- Checked by hand, four runs: normal (6 passed); a hand-edited `openapi.json` → build fails with the regeneration
+  message; `-Popenapi-write` on that edited file → exit 0, one test skipped, file back to the real contract (no diff);
+  `CI=true` with the profile → build fails ("must never run in CI").
 
 ## Review findings and how they were handled
 

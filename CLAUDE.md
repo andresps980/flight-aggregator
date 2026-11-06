@@ -41,6 +41,7 @@ activates it in its own `<build><plugins>`, so formatting, the coverage gate and
 | Frontend: dev server (proxies `/api` to :8080, `/gds-admin` to :8081) | `cd frontend && npm run dev` |
 | Frontend: all checks (Prettier, ESLint, tsc, Vitest + coverage gate) | `cd frontend && npm run check` |
 | Frontend: tests only / watch | `npm test` / `npm run test:watch` |
+| Regenerate `docs/api/openapi.json` after an API change (explicit; verify only compares and fails on drift) | `./mvnw -pl flight-aggregator verify -Popenapi-write`, review the diff |
 | Frontend: regenerate API types after an OpenAPI change | `cd frontend && npm run gen:api` |
 | Frontend: production build / image smoke test | `npm run build` / `bash frontend/docker/smoke-test.sh` |
 | Frontend: layout check in Chromium (after `npm run build`; once: `npx playwright install chromium`) | `npm run test:layout` |

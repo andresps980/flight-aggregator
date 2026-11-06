@@ -71,7 +71,7 @@ docker compose exec postgres psql -U flights -c "SELECT departure_date, count(*)
 | `GET /actuator/metrics/search.cache` | Search cache counter by `result` (`hit`, `miss`, `error`, `bypassed`) |
 | `GET /api/v1/itineraries` | Search itineraries (spec 005) |
 | `GET /api/v1/catalog` | Origins, destinations, carriers, dates and routes that can be searched (spec 005) |
-| `GET /v3/api-docs`, `/swagger-ui.html` | OpenAPI description of every `/api/v1` endpoint, search and ingestion (committed copy: [`docs/api/openapi.json`](api/openapi.json), checked by `OpenApiContractIT`; regenerate with `./mvnw -pl flight-aggregator verify -Dit.test=OpenApiContractIT -Dopenapi.write=true`) |
+| `GET /v3/api-docs`, `/swagger-ui.html` | OpenAPI description of every `/api/v1` endpoint, search and ingestion (committed copy: [`docs/api/openapi.json`](api/openapi.json), checked by `OpenApiContractIT`; `./mvnw verify` fails on any drift; regenerate it explicitly with `./mvnw -pl flight-aggregator verify -Popenapi-write`, see [frontend.md](frontend.md#contract-generated-types)) |
 | `POST /api/v1/ingestions` | Start an ingestion run now (spec 004) |
 | `GET /api/v1/ingestions/{id}` | A run: status, timestamps and, once finished, its report |
 | `GET /api/v1/ingestions/latest` | The most recently started run |

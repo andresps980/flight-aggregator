@@ -44,6 +44,9 @@
         <!-- JUnit tags excluded by default: "slow" (long-running volume tests) and "e2e" (needs a running gds-mock).
              -Pslow-tests adds the slow ones, -Pe2e-tests adds the e2e ones. -->
         <test.excludedGroups>slow,e2e</test.excludedGroups>
+        <!-- OpenApiContractIT compares docs/api/openapi.json with the published description; it only rewrites the file
+             with -Popenapi-write (an explicit action, refused in CI). -->
+        <openapi.write>false</openapi.write>
     </properties>
 
     <dependencyManagement>
@@ -96,6 +99,10 @@
                     <artifactId>maven-failsafe-plugin</artifactId>
                     <configuration>
                         <excludedGroups>${test.excludedGroups}</excludedGroups>
+                        <systemPropertyVariables>
+                            <!-- true only with -Popenapi-write: OpenApiContractIT then rewrites docs/api/openapi.json -->
+                            <openapi.write>${openapi.write}</openapi.write>
+                        </systemPropertyVariables>
                     </configuration>
                     <executions>
                         <execution>
@@ -237,6 +244,20 @@
             <id>e2e-tests</id>
             <properties>
                 <test.excludedGroups>slow</test.excludedGroups>
+            </properties>
+        </profile>
+        <!-- ./mvnw -pl flight-aggregator verify -Popenapi-write: regenerate docs/api/openapi.json from the running
+             application (only OpenApiContractIT runs; it writes the file and reports itself aborted, not passed).
+             Review the diff, then `npm run gen:api` in frontend/ and a normal ./mvnw verify. -->
+        <profile>
+            <id>openapi-write</id>
+            <properties>
+                <openapi.write>true</openapi.write>
+                <it.test>OpenApiContractIT</it.test>
+                <test>NoUnitTestsInThisProfile</test>
+                <surefire.failIfNoSpecifiedTests>false</surefire.failIfNoSpecifiedTests>
+                <failsafe.failIfNoSpecifiedTests>false</failsafe.failIfNoSpecifiedTests>
+                <jacoco.skip>true</jacoco.skip>
             </properties>
         </profile>
     </profiles>

@@ -328,7 +328,9 @@ aggregator. Walkthrough for backend developers: [docs/frontend.md](docs/frontend
 `runningIngestionId`, `200`/`400`/`404`), and a customizer makes the schemas exact: response properties required
 (nullable where they can be null), `ProblemDetail` flat, nullable references as `anyOf [$ref, null]`. The last one was
 **found by the generated types**: springdoc wrote `$ref` next to `type: null`, so the TypeScript said a run's report
-was never null. An ArchUnit rule keeps response records from omitting nulls, which would make "required" untrue.
+was never null. An ArchUnit rule keeps response records from omitting nulls, which would make "required" untrue. The
+contract check only compares in every build; regenerating `docs/api/openapi.json` is an explicit
+`-Popenapi-write` run that reports itself aborted, not passed, and is refused in CI.
 
 **How the frontend maps to the backend's principles.** Pure modules (`format`, `filters`, `charts`, `newData`) are the
 core and are unit-tested alone; `api/client.ts` is the only outbound adapter; hooks orchestrate and hold state;

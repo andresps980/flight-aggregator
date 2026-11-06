@@ -1,6 +1,7 @@
 package com.andresps.flights.search;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.andresps.flights.ingestion.domain.CircuitState;
 import com.andresps.flights.ingestion.domain.DayOutcome;
@@ -13,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
@@ -21,14 +23,21 @@ import tools.jackson.databind.node.ObjectNode;
 
 /**
  * Spec 005 AC-24: the OpenAPI description published by the application ({@code /v3/api-docs}) is the one committed in
- * {@code docs/api/openapi.json}, so the frontend and reviewers read the real contract. After an intended API change,
- * regenerate it with {@code -Dopenapi.write=true} and review the diff. Spec 006 (backend follow-up) adds the ingestion
- * endpoints and exact required/nullable properties, because the dashboard generates its TypeScript types from it.
+ * {@code docs/api/openapi.json}, so the frontend and reviewers read the real contract. Spec 006 (backend follow-up) adds
+ * the ingestion endpoints and exact required/nullable properties, because the dashboard generates its TypeScript types
+ * from it.
+ *
+ * <p>In {@code ./mvnw verify} and CI this test only compares, and fails on any drift. Regenerating the file is an
+ * explicit action: {@code ./mvnw -pl flight-aggregator verify -Popenapi-write} writes it and reports this test as
+ * aborted (never as passed, so a regeneration cannot look like a green contract check); it is refused when {@code CI}
+ * is set. Then review the diff and run {@code npm run gen:api} in {@code frontend/}.
  */
 class OpenApiContractIT extends SearchSpringTest {
 
     private static final Path COMMITTED = Path.of("..", "docs", "api", "openapi.json");
     private static final JsonMapper JSON = JsonMapper.builder().build();
+    private static final String OUT_OF_DATE = "docs/api/openapi.json is out of date: regenerate it with "
+            + "./mvnw -pl flight-aggregator verify -Popenapi-write, review the diff, then npm run gen:api in frontend/";
 
     private JsonNode published() {
         ObjectNode spec = (ObjectNode) get("/v3/api-docs").getBody();
@@ -36,18 +45,41 @@ class OpenApiContractIT extends SearchSpringTest {
         return spec;
     }
 
+    /** The comparison every build makes; a separate method so a test can prove that a drift fails it. */
+    static void assertSameContract(JsonNode committed, JsonNode published) {
+        assertThat(committed).as(OUT_OF_DATE).isEqualTo(published);
+    }
+
     @Test
     @DisplayName("AC-24: the published OpenAPI description equals docs/api/openapi.json")
     void matchesTheCommittedContract() throws IOException {
         JsonNode published = published();
         if (Boolean.getBoolean("openapi.write")) {
+            assertThat(System.getenv("CI"))
+                    .as("-Popenapi-write regenerates the contract; it must never run in CI")
+                    .isNull();
             Files.writeString(COMMITTED, JSON.writerWithDefaultPrettyPrinter().writeValueAsString(published) + "\n");
+            Assumptions.abort(
+                    "docs/api/openapi.json regenerated (not compared): review the diff, run npm run gen:api in "
+                            + "frontend/, then ./mvnw verify");
         }
 
         assertThat(COMMITTED).exists();
-        assertThat(JSON.readTree(Files.readString(COMMITTED)))
-                .as("docs/api/openapi.json is out of date: run the IT with -Dopenapi.write=true and review the diff")
-                .isEqualTo(published);
+        assertSameContract(JSON.readTree(Files.readString(COMMITTED)), published);
+    }
+
+    @Test
+    @DisplayName("AC-24: a committed description that differs from the published one fails the build")
+    void driftFailsTheBuild() {
+        JsonNode published = published();
+        ObjectNode drifted = (ObjectNode) published.deepCopy();
+        ((ObjectNode) drifted.at("/components/schemas/IngestionRunResponse/properties/status"))
+                .put("description", "edited by hand");
+
+        assertThatThrownBy(() -> assertSameContract(drifted, published))
+                .isInstanceOf(AssertionError.class)
+                .hasMessageContaining("out of date")
+                .hasMessageContaining("-Popenapi-write");
     }
 
     @Test

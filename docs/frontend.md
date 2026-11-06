@@ -148,10 +148,24 @@ banner, badges spell their status out (colour only reinforces it), charts have a
 Java records (springdoc annotations)  ──OpenApiContractIT──▶  docs/api/openapi.json  ──npm run gen:api──▶  schema.d.ts
 ```
 
-Both arrows are checked: `OpenApiContractIT` fails if `openapi.json` differs from what the application publishes,
-and the CI frontend job regenerates `schema.d.ts` and fails if it differs from the committed file. After an API
-change: regenerate `openapi.json` (`./mvnw -pl flight-aggregator verify -Dit.test=OpenApiContractIT
--Dopenapi.write=true`), then `npm run gen:api`, then fix whatever `tsc` reports.
+Both arrows are checked, and both checks **only compare**:
+
+- `OpenApiContractIT` (in every `./mvnw verify` and in CI) fails if `docs/api/openapi.json` differs from what the
+  application publishes; its message says how to regenerate. A second test proves the comparison fails on a drifted
+  copy, so the check cannot silently become a no-op.
+- `npm run check:api` (in `npm run check`, the Stop / pre-push hooks and CI) regenerates `schema.d.ts` in place and
+  fails if it differs from the committed file.
+
+Regenerating the contract is a deliberate step, never a side effect of a build:
+
+```bash
+./mvnw -pl flight-aggregator verify -Popenapi-write   # rewrites docs/api/openapi.json; the IT reports "aborted", not passed
+git diff docs/api/openapi.json                        # review what changed in the contract
+cd frontend && npm run gen:api && npm run typecheck   # regenerate the types; fix whatever tsc reports
+cd .. && ./mvnw verify                                # the normal, comparing build
+```
+
+The profile runs only `OpenApiContractIT`, and it refuses to write when `CI` is set.
 
 This chain already paid off in this PR: the generated type said an ingestion run's `report` was never `null`. The
 cause was springdoc writing `$ref` next to `type: null` (ambiguous in OpenAPI 3.1); the backend now writes
