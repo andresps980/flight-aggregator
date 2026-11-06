@@ -29,9 +29,11 @@ describe('accessibility (AC-21)', () => {
         const { user } = renderApp();
         await catalogLoaded();
         await waitFor(() => expect(urls).toHaveLength(1));
+        // A native <select> changes with the arrow keys in a real browser; user-event does not simulate that, so the
+        // value is picked with selectOptions and the test checks focus order and keyboard submission.
+        await user.selectOptions(screen.getByLabelText('Origin'), 'BCN');
         screen.getByLabelText('Origin').focus();
 
-        await user.keyboard('{ArrowDown}'); // first real origin: BCN
         await user.tab();
         expect(screen.getByLabelText('Destination')).toHaveFocus();
         await user.tab();

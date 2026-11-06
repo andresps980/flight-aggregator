@@ -10,7 +10,8 @@ function renderRow(...args: Parameters<typeof itinerary>) {
             <ItineraryRow itinerary={itinerary(...args)} />
         </ul>,
     );
-    return screen.getByRole('listitem');
+    // The row is the list item named after its route; its segments are a nested list.
+    return screen.getByRole('listitem', { name: /→/ });
 }
 
 describe('ItineraryRow', () => {
