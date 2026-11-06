@@ -112,17 +112,18 @@ export function SearchPanel({ catalog, catalogLoading, filters, busy, onSearch }
         <label htmlFor="maxPrice">Max price (EUR)</label>
         <input
           id="maxPrice"
-          type="number"
+          // Text, not type="number": a number input hides what was typed when it is not a number (the value is
+          // then ""), so a typo would silently search without a price limit. The format is checked on submit.
+          type="text"
           inputMode="decimal"
-          min="0"
-          step="0.01"
+          autoComplete="off"
           value={form.maxPrice ?? ''}
           aria-invalid={priceError ? 'true' : 'false'}
           aria-describedby={priceError ? 'maxPrice-error' : undefined}
           onChange={(e) => set('maxPrice', e.target.value)}
         />
         {priceError && (
-          <p id="maxPrice-error" className="field-error">
+          <p id="maxPrice-error" className="field-error" role="alert">
             {priceError}
           </p>
         )}

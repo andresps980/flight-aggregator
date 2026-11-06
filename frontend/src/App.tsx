@@ -10,7 +10,7 @@ import { ProviderChart } from './components/ProviderChart';
 import { ResultsList } from './components/ResultsList';
 import { SearchPanel } from './components/SearchPanel';
 import { StatusPanel } from './components/StatusPanel';
-import { toSearchParams, type Filters } from './filters';
+import type { Filters } from './filters';
 import { useCatalog } from './hooks/useCatalog';
 import { useIngestionStatus } from './hooks/useIngestionStatus';
 import { useSearch } from './hooks/useSearch';
@@ -39,7 +39,7 @@ export default function App({ config }: { config: AppConfig }) {
   );
 
   // Back/forward restore the filters from the URL and rerun their search (AC-6).
-  const [filters, pushFilters] = useUrlFilters(startSearch);
+  const { filters, navigation, pushFilters } = useUrlFilters(startSearch);
 
   // The search for the URL the page was opened with (AC-6), once. Its baseline is FIRST_POLL (initial state).
   useEffect(() => {
@@ -75,8 +75,9 @@ export default function App({ config }: { config: AppConfig }) {
             <h2 id="search-heading">Search</h2>
             {catalog.error && <ProblemAlert error={catalog.error} />}
             <SearchPanel
-              // A new key on back/forward remounts the form with the restored filters.
-              key={toSearchParams(filters).toString()}
+              // A new key on back/forward remounts the form with the restored filters. Only then: remounting on
+              // every search would drop the keyboard focus from the Search button.
+              key={navigation}
               catalog={catalog.catalog}
               catalogLoading={catalog.loading && catalog.catalog === null}
               filters={filters}

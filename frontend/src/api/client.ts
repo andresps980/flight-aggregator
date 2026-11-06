@@ -59,7 +59,7 @@ async function send<T>(
       // Absolute URL: same origin as the page (nginx in production, the Vite proxy in development).
       response = await fetch(new URL(path, window.location.href), {
         ...init,
-        headers: { Accept: 'application/json, application/problem+json' },
+        headers: { ...init.headers, Accept: 'application/json, application/problem+json' },
         signal,
       });
       text = await response.text();

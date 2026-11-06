@@ -12,11 +12,10 @@ export interface CatalogState {
 
 export function useCatalog(): CatalogState {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<ApiError | null>(null);
-  // `requested` counts the loads asked for, `answered` the last one that came back (with data or an error), so
-  // "loading" is derived instead of being set inside the effect.
-  const [requested, setRequested] = useState(0);
-  const [answered, setAnswered] = useState(-1);
+  // Changing this number re-runs the effect below, i.e. fetches again.
+  const [generation, setGeneration] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -24,16 +23,21 @@ export function useCatalog(): CatalogState {
       .then((result) => {
         setCatalog(result);
         setError(null);
-        setAnswered(requested);
+        setLoading(false);
       })
       .catch((e: unknown) => {
         if (controller.signal.aborted) return;
         setError(toApiError(e));
-        setAnswered(requested);
+        setLoading(false);
       });
     return () => controller.abort();
-  }, [requested]);
+  }, [generation]);
 
-  const reload = useCallback(() => setRequested((n) => n + 1), []);
-  return { catalog, loading: answered !== requested, error, reload };
+  // `loading` is set here, in the event, rather than inside the effect (React's rule: effects should not set state
+  // synchronously).
+  const reload = useCallback(() => {
+    setLoading(true);
+    setGeneration((g) => g + 1);
+  }, []);
+  return { catalog, loading, error, reload };
 }

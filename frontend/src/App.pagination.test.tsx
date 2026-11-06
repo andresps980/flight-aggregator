@@ -91,6 +91,34 @@ describe('pagination', () => {
     expect(resultRows()).toHaveLength(1);
   });
 
+  it('AC-12: an itinerary repeated by the next page (a day replaced while paging) is shown once', async () => {
+    const repeated = itinerary();
+    servePages([page([itinerary(), repeated], 'c1'), page([repeated, itinerary()])]);
+    const { user } = renderApp();
+    await waitFor(() => expect(resultRows()).toHaveLength(2));
+
+    await user.click(screen.getByRole('button', { name: 'Load more' }));
+
+    await waitFor(() => expect(screen.getByText('End of results')).toBeInTheDocument());
+    expect(resultRows()).toHaveLength(3);
+  });
+
+  it('AC-13: a page with hasMore but no cursor ends the walk instead of restarting from the first page', async () => {
+    const urls = recordRequests('/api/v1/itineraries');
+    server.use(
+      http.get('/api/v1/itineraries', () =>
+        HttpResponse.json({ items: [], nextCursor: null, hasMore: true }),
+      ),
+    );
+
+    renderApp();
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /Search/ })).toHaveAttribute('aria-busy', 'false'),
+    );
+    expect(urls).toHaveLength(1);
+  });
+
   it('AC-14: a failed page keeps the loaded items, shows the problem and offers "Restart search"', async () => {
     const urls = recordRequests('/api/v1/itineraries');
     server.use(

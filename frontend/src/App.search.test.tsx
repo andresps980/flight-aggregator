@@ -129,6 +129,19 @@ describe('search panel', () => {
     expect(urls).toHaveLength(1);
   });
 
+  it('AC-4: text that is not a number is flagged (not silently dropped) and announced', async () => {
+    const urls = recordRequests('/api/v1/itineraries');
+    const { user } = renderApp();
+    await catalogLoaded();
+    await waitFor(() => expect(urls).toHaveLength(1));
+
+    await user.type(screen.getByLabelText('Max price (EUR)'), 'abc');
+    await user.click(screen.getByRole('button', { name: 'Search' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/must be a number/);
+    expect(urls).toHaveLength(1);
+  });
+
   it('AC-4: a server 400 is still shown when the server disagrees with the client checks', async () => {
     server.use(
       http.get('/api/v1/itineraries', ({ request }) =>
@@ -201,7 +214,7 @@ describe('URL state', () => {
 
     expect(screen.getByLabelText('Origin')).toHaveValue('MAD');
     expect(screen.getByLabelText('Destination')).toHaveValue('JFK');
-    expect(screen.getByLabelText('Max price (EUR)')).toHaveValue(650);
+    expect(screen.getByLabelText('Max price (EUR)')).toHaveValue('650');
     expect(screen.getByLabelText('Carrier')).toHaveValue('IB');
     expect(screen.getByLabelText('Departure date (UTC)')).toHaveValue('2026-11-08');
     await waitFor(() => expect(urls).toHaveLength(1));

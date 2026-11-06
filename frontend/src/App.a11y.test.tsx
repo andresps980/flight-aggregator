@@ -50,6 +50,20 @@ describe('accessibility (AC-21)', () => {
     expect(urls[1]?.searchParams.get('origin')).toBe('BCN');
   });
 
+  it('AC-21: keyboard focus stays on the Search button after a search', async () => {
+    const urls = recordRequests('/api/v1/itineraries');
+    const { user } = renderApp();
+    await catalogLoaded();
+    await waitFor(() => expect(urls).toHaveLength(1));
+
+    await user.selectOptions(screen.getByLabelText('Origin'), 'MAD');
+    screen.getByRole('button', { name: 'Search' }).focus();
+    await user.keyboard('{Enter}');
+
+    await waitFor(() => expect(urls).toHaveLength(2));
+    expect(screen.getByRole('button', { name: 'Search' })).toHaveFocus();
+  });
+
   it('AC-21: the result count, banner and refresh outcomes are announced through live regions', async () => {
     server.use(http.get('/api/v1/itineraries', () => HttpResponse.json(page([itinerary()]))));
     renderApp();

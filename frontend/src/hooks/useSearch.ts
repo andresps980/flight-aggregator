@@ -41,13 +41,17 @@ function reducer(state: SearchState, action: Action): SearchState {
       return action.append
         ? { ...state, phase: 'loadingMore', error: null }
         : { ...initialState, phase: 'loading' };
-    case 'page':
+    case 'page': {
+      // A day replaced between two pages can make a cursor repeat an itinerary (spec 005): show it once.
+      const known = new Set(state.items.map((item) => item.itineraryKey));
+      const fresh = action.page.items.filter((item) => !known.has(item.itineraryKey));
       return {
         ...state,
-        items: [...state.items, ...action.page.items],
+        items: [...state.items, ...fresh],
         nextCursor: action.page.nextCursor,
         hasMore: action.page.hasMore,
       };
+    }
     case 'done':
       return { ...state, phase: 'done' };
     case 'error':
@@ -90,15 +94,18 @@ export function useSearch(): Search {
           { limit: PAGE_SIZE, cursor: next },
           { signal: controller.signal },
         );
+        // Superseded while waiting (a newer search started): drop this answer (AC-11).
+        if (controllerRef.current !== controller) return;
         dispatch({ type: 'page', page });
         next = page.nextCursor;
-        if (page.items.length > 0 || !page.hasMore) break;
+        if (page.items.length > 0 || !page.hasMore || next === null) break;
         emptyPages += 1;
         if (emptyPages >= MAX_EMPTY_PAGES) break;
       }
       dispatch({ type: 'done' });
     } catch (error) {
-      if (!controller.signal.aborted) dispatch({ type: 'error', error: toApiError(error) });
+      if (controllerRef.current === controller)
+        dispatch({ type: 'error', error: toApiError(error) });
     }
   }, []);
 

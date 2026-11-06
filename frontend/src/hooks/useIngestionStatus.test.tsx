@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { http, HttpResponse } from 'msw';
+import { delay, http, HttpResponse } from 'msw';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IngestionRun } from '../api/types';
 import { problem, run } from '../test/fixtures';
@@ -85,6 +85,51 @@ describe('useIngestionStatus', () => {
 
     await waitFor(() => expect(result.current.unavailable).toBe(false));
     expect(result.current.latest?.id).toBe('run-1');
+  });
+
+  it('AC-16: a poll superseded by a newer one does not mark the status unavailable', async () => {
+    let call = 0;
+    server.use(
+      http.get('/api/v1/ingestions/latest', async () => {
+        call += 1;
+        if (call >= 2) await delay(1_000); // poll 2 is interrupted; poll 3 is still pending when we look
+        return HttpResponse.json(run());
+      }),
+    );
+    const { result } = renderHook(() => useIngestionStatus());
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+
+    await act(() => vi.advanceTimersByTimeAsync(IDLE_POLL_MS + 10)); // poll 2 starts and hangs
+    act(() => setVisibility('hidden'));
+    act(() => setVisibility('visible')); // poll 3 aborts poll 2
+
+    await act(() => vi.advanceTimersByTimeAsync(50));
+    expect(result.current.unavailable).toBe(false);
+  });
+
+  it('AC-17: a poll in flight when refresh starts a run cannot replace the RUNNING run with an older one', async () => {
+    let slowOld = false;
+    server.use(
+      http.get('/api/v1/ingestions/latest', async () => {
+        if (slowOld) {
+          await delay(500);
+          return HttpResponse.json(run({ id: 'old' }));
+        }
+        return HttpResponse.json(run({ id: 'old' }));
+      }),
+      http.post('/api/v1/ingestions', () =>
+        HttpResponse.json(run({ id: 'new', status: 'RUNNING' }), { status: 202 }),
+      ),
+    );
+    const { result } = renderHook(() => useIngestionStatus());
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+    slowOld = true;
+    await act(() => vi.advanceTimersByTimeAsync(IDLE_POLL_MS + 10)); // a slow poll is now in flight
+
+    await act(() => result.current.refresh());
+    await act(() => vi.advanceTimersByTimeAsync(600)); // the slow poll would have answered by now
+
+    expect(result.current.latest).toMatchObject({ id: 'new', status: 'RUNNING' });
   });
 
   it('AC-15: no run yet (404) is a loaded state with no latest run, not an error', async () => {

@@ -57,17 +57,19 @@ export function useIngestionStatus(): IngestionStatus {
 
     const poll = async () => {
       if (hidden()) return; // paused; the visibility listener polls again when the tab is shown
+      // Only one poll at a time: a newer poll (or refresh) aborts the older one, whose answer is then ignored.
       controller?.abort();
-      controller = new AbortController();
+      const mine = new AbortController();
+      controller = mine;
       try {
-        const run = await getLatestIngestion({ signal: controller.signal });
-        if (cancelled) return;
+        const run = await getLatestIngestion({ signal: mine.signal });
+        if (cancelled || mine.signal.aborted) return;
         showRun(run);
         setInitialLatest((first) => (first === undefined ? run : first));
         setUnavailable(false);
         setLoaded(true);
       } catch {
-        if (cancelled || controller.signal.aborted) return;
+        if (cancelled || mine.signal.aborted) return;
         setUnavailable(true);
       }
       schedule(latestRef.current?.status === 'RUNNING' ? RUNNING_POLL_MS : IDLE_POLL_MS);
@@ -78,7 +80,12 @@ export function useIngestionStatus(): IngestionStatus {
       if (!hidden()) void poll();
     };
 
-    pollSoonRef.current = () => schedule(RUNNING_POLL_MS);
+    // After "Refresh data": drop a poll still in flight (it may return the run before the one just started, and
+    // would reschedule at the idle pace), then poll again in 3 s.
+    pollSoonRef.current = () => {
+      controller?.abort();
+      schedule(RUNNING_POLL_MS);
+    };
     document.addEventListener('visibilitychange', onVisibilityChange);
     void poll();
     return () => {

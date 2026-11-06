@@ -4,33 +4,39 @@ import { fromSearchParams, toSearchParams, type Filters } from '../filters';
 
 const currentFilters = () => fromSearchParams(new URLSearchParams(window.location.search));
 
-/**
- * Returns the current filters and a function that pushes new ones to the URL (returning them normalised).
- * `onNavigate` is called with the filters the browser restored on back/forward.
- */
-export function useUrlFilters(
-  onNavigate: (filters: Filters) => void,
-): [Filters, (filters: Filters) => Filters] {
+export interface UrlFilters {
+  filters: Filters;
+  /** Counts back/forward navigations; the form uses it as its React `key` to show the restored filters. */
+  navigation: number;
+  /** Writes the filters to the URL (a new history entry unless unchanged) and returns them normalised. */
+  pushFilters: (filters: Filters) => Filters;
+}
+
+/** `onNavigate` is called with the filters the browser restored on back/forward. */
+export function useUrlFilters(onNavigate: (filters: Filters) => void): UrlFilters {
   const [filters, setFilters] = useState<Filters>(currentFilters);
+  const [navigation, setNavigation] = useState(0);
 
   useEffect(() => {
     const onPopState = () => {
       const restored = currentFilters();
       setFilters(restored);
+      setNavigation((n) => n + 1);
       onNavigate(restored);
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
   }, [onNavigate]);
 
-  /** Writes the filters to the URL as a new history entry and makes them current. */
   const pushFilters = useCallback((next: Filters) => {
     const query = toSearchParams(next).toString();
-    window.history.pushState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}`);
+    if (query !== new URLSearchParams(window.location.search).toString()) {
+      window.history.pushState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}`);
+    }
     const normalised = fromSearchParams(toSearchParams(next));
     setFilters(normalised);
     return normalised;
   }, []);
 
-  return [filters, pushFilters];
+  return { filters, navigation, pushFilters };
 }
