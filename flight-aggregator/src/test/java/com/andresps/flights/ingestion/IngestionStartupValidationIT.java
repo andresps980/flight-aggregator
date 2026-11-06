@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.andresps.flights.FlightAggregatorApplication;
+import com.andresps.flights.support.TestPostgres;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -45,12 +46,20 @@ class IngestionStartupValidationIT {
                 "aggregator.providers.mock-beta.resilience.retry.max-attempts=0       | aggregator.providers.mock-beta.resilience.retry.max-attempts",
                 "aggregator.providers.mock-delta.base-url=http://localhost:9999       | aggregator.providers.mock-delta",
                 "aggregator.providers.mock-beta.base-url=                             | aggregator.providers.mock-beta.base-url",
+                "aggregator.ingestion.schedule.initial-delay=-1s                      | aggregator.ingestion.schedule.initial-delay",
+                "aggregator.ingestion.schedule.fixed-delay=0s                         | aggregator.ingestion.schedule.fixed-delay",
+                "aggregator.persistence.max-stale-age=0s                              | aggregator.persistence.max-stale-age",
+                "aggregator.persistence.run-retention=0d                              | aggregator.persistence.run-retention",
             })
     @DisplayName("AC-23 (error): invalid settings fail the startup with a message naming the property")
     void invalidSettingsFailStartup(String property, String named) {
         assertThatThrownBy(() -> new SpringApplicationBuilder(FlightAggregatorApplication.class)
                         .web(WebApplicationType.NONE)
-                        .run("--" + property)
+                        .run(
+                                "--" + property,
+                                "--spring.datasource.url=" + TestPostgres.jdbcUrl(),
+                                "--spring.datasource.username=" + TestPostgres.username(),
+                                "--spring.datasource.password=" + TestPostgres.password())
                         .close())
                 .satisfies(e -> assertThat(messages(e)).contains(named));
     }

@@ -25,10 +25,14 @@ import com.andresps.flights.aggregation.domain.model.ProviderId;
 import com.andresps.flights.aggregation.domain.pricing.PercentageMarkupPolicy;
 import com.andresps.flights.aggregation.domain.validation.DiscardReason;
 import com.andresps.flights.aggregation.domain.validation.ItineraryValidator;
+import com.andresps.flights.ingestion.application.port.in.PublicationGuard;
+import com.andresps.flights.ingestion.application.port.in.RunLockLostException;
 import com.andresps.flights.ingestion.application.port.out.DayAggregationSink;
 import com.andresps.flights.ingestion.application.port.out.ProviderFeed;
 import com.andresps.flights.ingestion.domain.CircuitState;
 import com.andresps.flights.ingestion.domain.DayAggregation;
+import com.andresps.flights.ingestion.domain.DayOutcome;
+import com.andresps.flights.ingestion.domain.DayPublication;
 import com.andresps.flights.ingestion.domain.DayReport;
 import com.andresps.flights.ingestion.domain.FailureKind;
 import com.andresps.flights.ingestion.domain.IngestionReport;
@@ -41,6 +45,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CyclicBarrier;
 import java.util.stream.Stream;
@@ -56,6 +61,8 @@ class IngestionServiceTest {
     private static final LocalDate DAY3 = LocalDate.parse("2026-11-08");
     private static final List<LocalDate> HORIZON = List.of(DAY1, DAY2, DAY3);
 
+    private static final UUID RUN_ID = UUID.fromString("00000000-0000-0000-0000-000000000042");
+
     private static final IngestionSettings SETTINGS = new IngestionSettings(3, 2, 2, Duration.ofSeconds(10));
 
     private final FakeProviderFeed alpha = new FakeProviderFeed(ALPHA);
@@ -65,7 +72,7 @@ class IngestionServiceTest {
 
     private IngestionReport ingest(IngestionSettings settings, ProviderFeed... feeds) {
         return new IngestionService(List.of(feeds), sink, PercentageMarkupPolicy.defaultPolicy(), CLOCK, settings)
-                .ingest();
+                .ingest(RUN_ID, PublicationGuard.ALWAYS);
     }
 
     private IngestionReport ingest() {
@@ -469,28 +476,91 @@ class IngestionServiceTest {
 
         @Test
         @DisplayName(
-                "AC-11/AC-21: a failing sink loses that day's publication, not the run: the report is still returned")
+                "spec 004 AC-7/AC-8: a failing sink loses that day (WRITE_FAILED), not the run; the run is PARTIAL")
         void sinkFailureIsReportedNotThrown() {
-            DayAggregationSink failingOnDay2 = day -> {
-                if (day.day().equals(DAY2)) {
-                    throw new IllegalStateException("database down (test)");
-                }
-                sink.publish(day);
-            };
+            sink.failOn(DAY2);
 
-            IngestionReport report = new IngestionService(
-                            List.of(alpha, beta, gamma),
-                            failingOnDay2,
-                            PercentageMarkupPolicy.defaultPolicy(),
-                            CLOCK,
-                            SETTINGS)
-                    .ingest();
+            IngestionReport report = ingest();
 
+            assertThat(report.day(DAY2).publication().outcome()).isEqualTo(DayOutcome.WRITE_FAILED);
             assertThat(report.day(DAY2).published()).isFalse();
             assertThat(report.day(DAY1).published()).isTrue();
             assertThat(report.day(DAY3).published()).isTrue();
             assertThat(sink.published()).containsExactlyInAnyOrder(DAY1, DAY3);
-            assertThat(report.status()).isEqualTo(IngestionStatus.COMPLETED);
+            assertThat(report.providers())
+                    .allSatisfy(p -> assertThat(p.status()).isEqualTo(IngestionStatus.COMPLETED));
+            assertThat(report.status()).isEqualTo(IngestionStatus.PARTIAL);
+        }
+    }
+
+    @Nested
+    class Persistence {
+
+        @Test
+        @DisplayName("spec 004: the caller's run id is the report's and is handed to the sink with each day")
+        void runIdComesFromTheCaller() {
+            IngestionReport report = ingest();
+
+            assertThat(report.runId()).isEqualTo(RUN_ID);
+            assertThat(sink.day(DAY1).runId()).isEqualTo(RUN_ID);
+        }
+
+        @Test
+        @DisplayName("spec 004 AC-7: each day's report carries the outcome and stored rows returned by the sink")
+        void reportCarriesTheSinkOutcome() {
+            alpha.on(DAY1, returns(List.of(offer(ALPHA, "100.00", direct(DAY1, "IB1", "MAD", "BCN")))));
+            beta.on(DAY2, fails(FailureKind.SERVER_ERROR, 3));
+            sink.keepStaleOnPartial();
+
+            IngestionReport report = ingest();
+
+            assertThat(report.day(DAY1).publication()).isEqualTo(DayPublication.replaced(1, 0));
+            assertThat(report.day(DAY2).publication()).isEqualTo(DayPublication.keptStale());
+            assertThat(report.day(DAY2).published()).isFalse();
+            assertThat(report.storedItineraries()).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("spec 004 AC-6: a day where every provider failed is reported to the sink as unavailable")
+        void dayWithoutDataIsReportedUnavailable() {
+            alpha.on(DAY3, fails(FailureKind.TIMEOUT, 3));
+            beta.on(DAY3, fails(FailureKind.SERVER_ERROR, 3));
+            gamma.on(DAY3, fails(FailureKind.CIRCUIT_OPEN, 0));
+
+            IngestionReport report = ingest();
+
+            assertThat(sink.unavailable()).containsExactly(DAY3);
+            assertThat(sink.published()).containsExactlyInAnyOrder(DAY1, DAY2);
+            assertThat(report.day(DAY3).publication().outcome()).isEqualTo(DayOutcome.NO_DATA);
+        }
+
+        @Test
+        @DisplayName("spec 004 AC-9: misfiled itineraries reported by the sink are summed in the run report")
+        void misfiledAreSummed() {
+            sink.misfiledPerDay(2);
+
+            IngestionReport report = ingest();
+
+            assertThat(report.day(DAY1).publication().misfiledItineraries()).isEqualTo(2);
+            assertThat(report.misfiledItineraries()).isEqualTo(6);
+        }
+
+        @Test
+        @DisplayName("spec 004 AC-19: once the lock is lost no further day is published and the run fails")
+        void lockLostStopsPublishing() {
+            var checks = new java.util.concurrent.atomic.AtomicInteger();
+            PublicationGuard lostAfterFirstDay = () -> checks.incrementAndGet() == 1;
+            IngestionService service = new IngestionService(
+                    List.of(alpha, beta, gamma),
+                    sink,
+                    PercentageMarkupPolicy.defaultPolicy(),
+                    CLOCK,
+                    new IngestionSettings(3, 1, 3, Duration.ofSeconds(10)));
+
+            assertThatThrownBy(() -> service.ingest(RUN_ID, lostAfterFirstDay))
+                    .isInstanceOf(RunLockLostException.class);
+            assertThat(sink.published()).hasSize(1);
+            assertThat(sink.unavailable()).isEmpty();
         }
     }
 
@@ -527,14 +597,46 @@ class IngestionServiceTest {
         }
     }
 
-    /** Thread-safe sink that records what was published. */
+    /** Thread-safe sink that records what was published and answers with scriptable outcomes. */
     static final class RecordingSink implements DayAggregationSink {
 
         private final Map<LocalDate, DayAggregation> days = new ConcurrentHashMap<>();
+        private final Set<LocalDate> unavailable = ConcurrentHashMap.newKeySet();
+        private volatile LocalDate failOn;
+        private volatile boolean keepStaleOnPartial;
+        private volatile int misfiledPerDay;
 
         @Override
-        public void publish(DayAggregation day) {
+        public DayPublication publish(DayAggregation day) {
+            if (day.day().equals(failOn)) {
+                throw new IllegalStateException("database down (test)");
+            }
+            if (keepStaleOnPartial && !day.missing().isEmpty()) {
+                return DayPublication.keptStale();
+            }
             days.put(day.day(), day);
+            int stored = day.result().itineraries().size();
+            return day.missing().isEmpty()
+                    ? DayPublication.replaced(stored, misfiledPerDay)
+                    : DayPublication.publishedIncomplete(stored, misfiledPerDay);
+        }
+
+        @Override
+        public DayPublication unavailable(UUID runId, LocalDate day) {
+            unavailable.add(day);
+            return DayPublication.noData();
+        }
+
+        void failOn(LocalDate day) {
+            failOn = day;
+        }
+
+        void keepStaleOnPartial() {
+            keepStaleOnPartial = true;
+        }
+
+        void misfiledPerDay(int count) {
+            misfiledPerDay = count;
         }
 
         DayAggregation day(LocalDate day) {
@@ -543,6 +645,10 @@ class IngestionServiceTest {
 
         Set<LocalDate> published() {
             return days.keySet();
+        }
+
+        Set<LocalDate> unavailable() {
+            return unavailable;
         }
     }
 }

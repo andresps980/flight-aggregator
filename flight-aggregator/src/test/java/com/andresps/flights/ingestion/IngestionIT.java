@@ -21,14 +21,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.andresps.flights.aggregation.domain.model.ProviderId;
 import com.andresps.flights.ingestion.application.port.in.IngestFlightsUseCase;
+import com.andresps.flights.ingestion.application.port.in.PublicationGuard;
 import com.andresps.flights.ingestion.domain.CircuitState;
-import com.andresps.flights.ingestion.domain.DayAggregation;
 import com.andresps.flights.ingestion.domain.FailureKind;
 import com.andresps.flights.ingestion.domain.IngestionReport;
 import com.andresps.flights.ingestion.domain.IngestionStatus;
 import com.andresps.flights.ingestion.domain.PartitionFailure;
 import com.andresps.flights.ingestion.domain.ProviderReport;
-import com.andresps.flights.ingestion.infrastructure.adapter.out.memory.InMemoryDayAggregationStore;
+import com.andresps.flights.support.StoredData;
+import com.andresps.flights.support.TestPostgres;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.stubbing.Scenario;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
@@ -36,6 +37,8 @@ import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.util.Arrays;
+import java.util.UUID;
+import javax.sql.DataSource;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -44,6 +47,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -66,6 +70,7 @@ import org.springframework.test.context.DynamicPropertySource;
             "aggregator.resilience.default.retry.initial-backoff=10ms",
             "aggregator.resilience.default.circuit-breaker.open-wait=60s"
         })
+@Import(TestPostgres.class)
 class IngestionIT {
 
     private static final WireMockServer SERVER = startServer();
@@ -99,7 +104,9 @@ class IngestionIT {
     private IngestFlightsUseCase ingestion;
 
     @Autowired
-    private InMemoryDayAggregationStore store;
+    private DataSource dataSource;
+
+    private StoredData store;
 
     @Autowired
     private CircuitBreakerRegistry breakers;
@@ -109,7 +116,8 @@ class IngestionIT {
         SERVER.resetAll();
         RecordedGdsMock.stubAll(SERVER);
         breakers.getAllCircuitBreakers().forEach(CircuitBreaker::reset);
-        store.clear();
+        TestPostgres.truncateAll(dataSource);
+        store = new StoredData(dataSource);
     }
 
     private static int requests(String provider) {
@@ -120,7 +128,7 @@ class IngestionIT {
     @Test
     @DisplayName("AC-22: with no failures, every figure reconciles exactly with gds-mock's /admin/world/stats")
     void reconcilesWithWorldStats() {
-        IngestionReport report = ingestion.ingest();
+        IngestionReport report = ingestion.ingest(UUID.randomUUID(), PublicationGuard.ALWAYS);
 
         assertThat(report.status()).isEqualTo(IngestionStatus.COMPLETED);
         assertReconciles(report, stats());
@@ -135,15 +143,13 @@ class IngestionIT {
     @Test
     @DisplayName("AC-11/AC-22: every day is published with its deduplicated itineraries and all providers contributing")
     void publishesEveryDay() {
-        IngestionReport report = ingestion.ingest();
+        IngestionReport report = ingestion.ingest(UUID.randomUUID(), PublicationGuard.ALWAYS);
 
         assertThat(store.days()).containsExactlyElementsOf(DAYS);
-        long published = DAYS.stream()
-                .map(store::day)
-                .mapToLong(day -> day.orElseThrow().result().itineraries().size())
-                .sum();
+        long published = DAYS.stream().mapToLong(store::rows).sum();
         assertThat(published).isEqualTo(report.statistics().itinerariesProduced());
-        assertThat(store.day(DAYS.getFirst()).orElseThrow().missing()).isEmpty();
+        assertThat(store.snapshot(DAYS.getFirst()).orElseThrow().missingProviders())
+                .isEmpty();
     }
 
     @Test
@@ -152,7 +158,7 @@ class IngestionIT {
         LocalDate day = DAYS.getFirst();
         firstThen(GAMMA, day, ok(GAMMA, feed(GAMMA, day)).withFixedDelay(2000));
 
-        IngestionReport report = ingestion.ingest();
+        IngestionReport report = ingestion.ingest(UUID.randomUUID(), PublicationGuard.ALWAYS);
 
         assertThat(report.status()).isEqualTo(IngestionStatus.COMPLETED);
         assertThat(report.provider(new ProviderId(GAMMA)).attempts()).isEqualTo(8);
@@ -164,7 +170,7 @@ class IngestionIT {
     void serverErrorIsRetried() {
         firstThen(BETA, DAYS.get(2), aResponse().withStatus(500));
 
-        IngestionReport report = ingestion.ingest();
+        IngestionReport report = ingestion.ingest(UUID.randomUUID(), PublicationGuard.ALWAYS);
 
         assertThat(report.status()).isEqualTo(IngestionStatus.COMPLETED);
         assertThat(report.provider(new ProviderId(BETA)).attempts()).isEqualTo(8);
@@ -179,7 +185,7 @@ class IngestionIT {
         byte[] full = feed(ALPHA, day);
         firstThen(ALPHA, day, ok(ALPHA, Arrays.copyOf(full, full.length / 2)));
 
-        IngestionReport report = ingestion.ingest();
+        IngestionReport report = ingestion.ingest(UUID.randomUUID(), PublicationGuard.ALWAYS);
 
         assertThat(report.status()).isEqualTo(IngestionStatus.COMPLETED);
         assertThat(report.provider(new ProviderId(ALPHA)).attempts()).isEqualTo(8);
@@ -193,7 +199,7 @@ class IngestionIT {
         LocalDate day = DAYS.get(2);
         SERVER.stubFor(request(BETA, day).willReturn(aResponse().withStatus(500)));
 
-        IngestionReport report = ingestion.ingest();
+        IngestionReport report = ingestion.ingest(UUID.randomUUID(), PublicationGuard.ALWAYS);
 
         ProviderReport beta = report.provider(new ProviderId(BETA));
         assertThat(report.status()).isEqualTo(IngestionStatus.PARTIAL);
@@ -206,8 +212,7 @@ class IngestionIT {
         assertThat(beta.partitionsSucceeded()).isEqualTo(6);
         assertProviderReconciles(report.provider(new ProviderId(ALPHA)), stats());
         assertProviderReconciles(report.provider(new ProviderId(GAMMA)), stats());
-        DayAggregation published = store.day(day).orElseThrow();
-        assertThat(published.missing()).containsExactly(new ProviderId(BETA));
+        assertThat(store.snapshot(day).orElseThrow().missingProviders()).containsExactly(BETA);
         assertAggregationReconciles(report.day(DAYS.getFirst()).statistics(), stats(DAYS.getFirst()));
     }
 
@@ -218,7 +223,7 @@ class IngestionIT {
                 .atPriority(1)
                 .willReturn(aResponse().withStatus(503)));
 
-        IngestionReport report = ingestion.ingest();
+        IngestionReport report = ingestion.ingest(UUID.randomUUID(), PublicationGuard.ALWAYS);
 
         ProviderReport beta = report.provider(new ProviderId(BETA));
         assertThat(report.status()).isEqualTo(IngestionStatus.PARTIAL);
@@ -232,7 +237,8 @@ class IngestionIT {
         assertProviderReconciles(report.provider(new ProviderId(ALPHA)), stats());
         assertProviderReconciles(report.provider(new ProviderId(GAMMA)), stats());
         assertThat(store.days()).containsExactlyElementsOf(DAYS);
-        assertThat(store.day(DAYS.getFirst()).orElseThrow().missing()).containsExactly(new ProviderId(BETA));
+        assertThat(store.snapshot(DAYS.getFirst()).orElseThrow().missingProviders())
+                .containsExactly(BETA);
     }
 
     @Test
@@ -241,10 +247,10 @@ class IngestionIT {
         SERVER.stubFor(get(urlPathEqualTo(RecordedGdsMock.path(BETA)))
                 .atPriority(1)
                 .willReturn(aResponse().withStatus(503)));
-        ingestion.ingest();
+        ingestion.ingest(UUID.randomUUID(), PublicationGuard.ALWAYS);
         int afterFirstRun = requests(BETA);
 
-        IngestionReport second = ingestion.ingest();
+        IngestionReport second = ingestion.ingest(UUID.randomUUID(), PublicationGuard.ALWAYS);
 
         assertThat(requests(BETA)).isEqualTo(afterFirstRun);
         assertThat(second.provider(new ProviderId(BETA)).failures())
@@ -259,7 +265,7 @@ class IngestionIT {
                 .atPriority(1)
                 .willReturn(aResponse().withStatus(500))));
 
-        IngestionReport report = ingestion.ingest();
+        IngestionReport report = ingestion.ingest(UUID.randomUUID(), PublicationGuard.ALWAYS);
 
         assertThat(report.status()).isEqualTo(IngestionStatus.FAILED);
         assertThat(report.providers()).allSatisfy(p -> assertThat(p.status()).isEqualTo(IngestionStatus.FAILED));
