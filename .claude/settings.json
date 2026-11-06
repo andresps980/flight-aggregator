@@ -18,7 +18,9 @@
       "Bash(gh pr checks:*)",
       "Bash(gh pr diff:*)",
       "Bash(gh run view:*)",
-      "Bash(gh run list:*)"
+      "Bash(gh run list:*)",
+      "Bash(npm run:*)",
+      "Bash(npm ci:*)"
     ],
     "ask": [
       "Bash(git push:*)",
@@ -53,7 +55,8 @@
       {
         "matcher": "Edit|Write|MultiEdit",
         "hooks": [
-          { "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/format-java.sh\"", "timeout": 120 }
+          { "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/format-java.sh\"", "timeout": 120 },
+          { "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/format-frontend.sh\"", "timeout": 60 }
         ]
       }
     ],
