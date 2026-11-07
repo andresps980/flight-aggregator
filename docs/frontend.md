@@ -184,12 +184,13 @@ criterion it covers (`AC-13: …`). Coverage gate: 80 % lines / 70 % branches.
 **Layout check (Playwright, Chromium).** jsdom has no layout engine, so `e2e/layout.spec.ts` loads the production
 build in a real (headless) Chromium with every API call mocked by deliberately wide content (long provider names,
 three-segment itineraries, failures, demo panel on) at 1440, 1170, 1024 and 768 px, and asserts that (1) no two main
-panels intersect, (2) no visible element sticks out of its panel (scroll containers count as their own box), and (3)
-the page does not scroll sideways — naming the culprits when it does. It runs in CI after the build. It was added after
+panels intersect, (2) no visible element sticks out of its panel (scroll containers count as their own box), (3)
+the page does not scroll sideways — naming the culprits when it does — and (4) no word in the providers table is
+broken across lines (spec 007 F-1). It runs in CI after the build. It was added after
 a layout bug found by hand (below) and checked against the old layout and against a deliberately broken one.
 
-`frontend/docker/smoke-test.sh` builds the image and checks what nginx serves (22 checks: headers, SPA fallback,
-proxy scope, demo flag, URL validation, non-root user, healthcheck command), also in CI.
+`frontend/docker/smoke-test.sh` builds the image and checks what nginx serves (23 checks: headers, SPA fallback,
+proxy scope, demo flag, URL validation, non-root user, healthcheck command, no container left behind), also in CI.
 
 ## Delivery: nginx and Docker
 
@@ -235,7 +236,7 @@ then results, then status and demo. Rules that keep content inside its panel:
 - The demo controls are unauthenticated, like gds-mock's admin API itself; demo-only, off with `DEMO_CONTROLS=false`.
 - `npm audit` reports 7 moderate advisories in `minimatch` inside the dev-only lint toolchain (`typescript-eslint`);
   they affect glob patterns we write ourselves, and production dependencies audit clean. Accepted until upstream
-  updates.
+  updates; the Dependabot alert is dismissed as *"Risk is tolerable"* ([docs/ai/009](ai/009-dependabot-triage.md)).
 - TypeScript 5.9 and ESLint 9 rather than TypeScript 7 / ESLint 10: see *Version constraints* below.
 
 ## Version constraints

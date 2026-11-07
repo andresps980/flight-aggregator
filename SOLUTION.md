@@ -611,7 +611,9 @@ Dashboard (spec 006):
 - **No browser end-to-end flows**: behaviour is tested in jsdom with MSW, layout in headless Chromium with a mocked
   API (one engine, four widths), the image with a smoke test, and the stack by hand.
 - **`npm audit`: 7 moderate advisories** in `minimatch` inside the dev-only lint toolchain (`typescript-eslint`); they
-  concern glob patterns we write ourselves. Production dependencies audit clean. Accepted until upstream updates.
+  concern glob patterns we write ourselves. Production dependencies audit clean. Accepted until upstream updates: the
+  author dismissed the Dependabot alert as *"Risk is tolerable"* (dev-only, transitive, not shipped, no compatible fix
+  yet) — [docs/ai/009](docs/ai/009-dependabot-triage.md#open-item-for-the-author--resolved).
 - **Pinned behind the latest majors**: TypeScript 5.9 and ESLint 9 until the tools support TypeScript 7 / ESLint 10;
   Dependabot ignores those majors with a documented revisit condition (the first such PRs, #10 and #11, were
   declined — [docs/frontend.md](docs/frontend.md#version-constraints)). For the same reason Dependabot's security
