@@ -1,660 +1,474 @@
 # SOLUTION
 
-Write-up required by the [assessment statement](docs/exercise.md) (section 4). It summarises the decisions and
-links to the ADRs, which hold the full reasoning.
+The write-up required by the [assessment statement](docs/exercise.md) (section 4). This page states each decision
+and its result, and links to the [ADRs](docs/adr/README.md) for the reasoning,
+[docs/architecture/](docs/architecture/overview.md) for the structure and [docs/ai/](docs/ai/README.md) for the AI
+sessions instead of repeating them.
 
-> **Status: skeleton.** This document is completed as features are implemented. Sections marked *To be completed*
-> will be filled with measured results, not plans.
+## Executive summary
 
-## 1. Architectural decisions and AI tools used
+**What it is.** Five containers started by `docker compose up --build`: a React dashboard behind nginx, the
+`flight-aggregator` (Spring Boot 4, Java 21), a `gds-mock` serving Mock-Alpha (JSON), Mock-Beta (XML) and Mock-Gamma
+(CSV) with latency, random `500`s and an outage switch, PostgreSQL and Redis
+([system view](docs/architecture/overview.md#system-view)).
 
-### Architecture
+**How it works.** Ingestion is **decoupled from search**: a scheduled (every 15 min) or on-demand run fetches the
+three providers in parallel through streaming parsers, with retries and a circuit breaker per provider. It
+deduplicates in the framework-free domain (cheapest offer, 5 % markup, dead legs and invalid connections dropped),
+one horizon day at a time, and replaces each day atomically in PostgreSQL with `COPY`. Search never calls a
+provider: it pages the stored itineraries with a **keyset cursor** on `(final_price, id)`, served by two composite
+indexes, through a Redis cache that is optional at runtime ([flows](docs/architecture/flows.md)).
+
+**Headline results** (details and conditions in section 2):
+
+| | |
+|---|---|
+| Deepest page, 1M rows, keyset vs `OFFSET` | page 1,000: **0.55 ms vs 50 ms**; last page (50,001): **0.51 ms vs 1.1 s** |
+| Full 1M ingestion in compose | **21.5 s** first load, 29.5 s replacement, at the shipped `-Xmx768m` (container peak ≈ 1 GB); ≈ 250 MB working set per day in flight |
+| Search, server side, first page | 0.05–2.9 ms for the common filter combinations (one rare two-filter case ≈ 50–90 ms) |
+| One provider down | run `PARTIAL`, provider `FAILED` with breaker `OPEN`, the previous complete day kept, search unaffected — **checked in CI on every PR** |
+| `docker compose up --build`, clean clone | build ≈ 22 s, healthy 18 s later, first ingestion `COMPLETED` 21 s after that: **≈ 1 min** on a laptop, base image pulls aside |
+
+**How it was built.** Spec-driven, test-first, with Claude Code under versioned guardrails (rules, skills, review
+agents, hooks), every prompt and review finding logged; 7 specs, 24 ADRs, 15 PRs, each merged only with green
+quality gates ([1.5](#15-ai-tools-and-the-agent-system)).
+
+**Where to look.** [Architecture](docs/architecture/overview.md) · [ADRs](docs/adr/README.md) ·
+[specs](specs/README.md) · [usage](docs/usage.md) · [measurements at 1M](docs/measurements/search-1m.md) ·
+[AI log](docs/ai/README.md).
+
+## 1. Architectural decisions and AI tools
+
+### 1.1 Shape
+
+Hexagonal architecture **by feature, then by layer** in each backend module
+([ADR-0002](docs/adr/0002-hexagonal-architecture.md)): `domain` and `application` are plain Java; adapters and the
+composition root live in `infrastructure`; use cases are wired as beans, never annotated. The rules are executable:
+each module's `ArchitectureTest` (ArchUnit) fails the build if a dependency points outwards, a framework leaks into
+the domain, PostgreSQL or Redis code leaves its adapter, or features form a cycle. `ingestion` and `search` never
+import each other — they meet only in the PostgreSQL schema. Diagrams, derived from the code and checked against it
+by a test: [overview](docs/architecture/overview.md), [package pages](docs/architecture/packages/README.md),
+[flows](docs/architecture/flows.md).
+
+### 1.2 Decisions
 
 | Decision | ADR |
 |---|---|
-| Hexagonal architecture organised by feature, framework-free domain and use cases | [ADR-0002](docs/adr/0002-hexagonal-architecture.md) |
-| Spec-driven development: every change starts from a spec with Given/When/Then criteria | [ADR-0003](docs/adr/0003-spec-driven-development.md) |
-| Automated quality gates (format, tests, ArchUnit, coverage, CodeQL) | [ADR-0004](docs/adr/0004-quality-gates.md) |
-| Scheduled pre-ingestion + `POST /api/v1/ingestions` (202, 409 if running) + status endpoint; search never calls providers | [ADR-0006](docs/adr/0006-scheduled-pre-ingestion.md) |
-| PostgreSQL (Flyway, `JdbcClient` batching, no JPA) as source of truth, Redis as search cache | [ADR-0007](docs/adr/0007-postgresql-and-redis.md) |
-| Minimal React + TypeScript + Vite frontend served by nginx | [ADR-0009](docs/adr/0009-react-frontend.md) |
-| Domain assumptions: invalid connections, EUR, one airline, 5% `HALF_EVEN` markup, date filter | [ADR-0010](docs/adr/0010-domain-assumptions.md) |
-| Incremental deduplication keyed by a deterministic itinerary key, total-order tie-break | [ADR-0011](docs/adr/0011-incremental-deduplication.md) |
-| One `gds-mock` app serving the three providers, chaos per provider, no dependency on the aggregator | [ADR-0012](docs/adr/0012-single-gds-mock-application.md) |
-| Mock data generated lazily per request from per-itinerary seeds, streamed, never materialised | [ADR-0013](docs/adr/0013-stateless-seeded-streamed-generation.md) |
-| Provider resilience: Resilience4j core, deadlines, per-provider breakers | [ADR-0014](docs/adr/0014-provider-resilience.md) |
-| Atomic partitions through a per-attempt buffer | [ADR-0015](docs/adr/0015-atomic-partition-buffers.md) |
-| Aggregate one horizon day at a time, statistics summed | [ADR-0016](docs/adr/0016-day-partitioned-aggregation.md) |
-| Each day is an atomic snapshot; a less complete day never wipes a more complete one (kept stale, at most 2 h) | [ADR-0017](docs/adr/0017-day-snapshot-replacement.md) |
-| Bulk load with PostgreSQL `COPY` (measured 1.8× faster than batched inserts) | [ADR-0018](docs/adr/0018-bulk-load.md) |
-| No concurrent runs across instances: session advisory lock on a dedicated connection | [ADR-0019](docs/adr/0019-ingestion-run-lock.md) |
-| Two search indexes, `(final_price, id)` and `(origin, destination, final_price, id)`, chosen by `EXPLAIN` on 1M rows | [ADR-0020](docs/adr/0020-search-indexes.md) |
-| Opaque, unsigned keyset cursor `v1|price|id|filter fingerprint` | [ADR-0021](docs/adr/0021-search-cursor.md) |
-| Redis cache-aside as a decorator of the query ports, keyed by a transactional data version; optional at runtime | [ADR-0022](docs/adr/0022-search-cache.md) |
-| Dashboard "real time" by polling the latest ingestion run (30 s, 3 s while running), never auto-replacing results | [ADR-0023](docs/adr/0023-real-time-by-polling.md) |
-| Frontend types generated from the OpenAPI description; Vitest + RTL + MSW; ESLint + Prettier; Node 26; runtime config | [ADR-0024](docs/adr/0024-contract-generated-client-and-frontend-toolchain.md) |
+| Hexagonal architecture organised by feature, framework-free domain and use cases | [0002](docs/adr/0002-hexagonal-architecture.md) |
+| Spec-driven development: every change starts from a spec with Given/When/Then criteria | [0003](docs/adr/0003-spec-driven-development.md) |
+| Quality gates: format, unit + IT tests, ArchUnit, coverage ≥ 80 % lines / 70 % branches, CodeQL, dependency review, full-stack smoke | [0004](docs/adr/0004-quality-gates.md) |
+| Scheduled pre-ingestion + `POST /api/v1/ingestions` (`202`, `409` while running); search never calls providers | [0006](docs/adr/0006-scheduled-pre-ingestion.md) |
+| PostgreSQL (Flyway, `JdbcClient`, no JPA) as source of truth, Redis as a disposable search cache | [0007](docs/adr/0007-postgresql-and-redis.md) |
+| Keyset pagination ordered by `(final_price, id)` | [0008](docs/adr/0008-keyset-pagination.md) |
+| Minimal React + TypeScript + Vite frontend served by nginx | [0009](docs/adr/0009-react-frontend.md) |
+| Domain assumptions: what is an invalid connection, EUR only, single airline, 5 % `HALF_EVEN` markup, UTC date filter | [0010](docs/adr/0010-domain-assumptions.md) |
+| Incremental deduplication keyed by a deterministic itinerary key, total-order tie-break | [0011](docs/adr/0011-incremental-deduplication.md) |
+| One `gds-mock` app serving the three providers, no code shared with the aggregator | [0012](docs/adr/0012-single-gds-mock-application.md) |
+| Mock data generated per request from per-itinerary seeds, streamed, never materialised | [0013](docs/adr/0013-stateless-seeded-streamed-generation.md) |
+| Provider resilience: Resilience4j core, read timeout, attempt and run deadlines, per-provider breakers | [0014](docs/adr/0014-provider-resilience.md) |
+| Atomic partitions through a per-attempt buffer | [0015](docs/adr/0015-atomic-partition-buffers.md) |
+| Aggregate one horizon day at a time, statistics summed | [0016](docs/adr/0016-day-partitioned-aggregation.md) |
+| Each day an atomic snapshot; a less complete day never wipes a more complete one (kept stale, at most 2 h) | [0017](docs/adr/0017-day-snapshot-replacement.md) |
+| Bulk load with PostgreSQL `COPY` (1.8× faster than batched inserts at 1M) | [0018](docs/adr/0018-bulk-load.md) |
+| No concurrent runs across instances: session advisory lock on a dedicated connection | [0019](docs/adr/0019-ingestion-run-lock.md) |
+| Two search indexes, chosen by `EXPLAIN` on 1M rows | [0020](docs/adr/0020-search-indexes.md) |
+| Opaque, unsigned keyset cursor with a filter fingerprint | [0021](docs/adr/0021-search-cursor.md) |
+| Redis cache-aside as a decorator of the query ports, keyed by a transactional data version | [0022](docs/adr/0022-search-cache.md) |
+| Dashboard "real time" by polling the latest run (30 s, 3 s while running), never auto-replacing results | [0023](docs/adr/0023-real-time-by-polling.md) |
+| Frontend types generated from the OpenAPI description; Vitest + RTL + MSW; ESLint + Prettier | [0024](docs/adr/0024-contract-generated-client-and-frontend-toolchain.md) |
 
-### Core domain (spec 001)
+### 1.3 Per feature
 
-The aggregation rules live in `com.andresps.flights.aggregation.domain`, plain Java with no framework dependency
-(enforced by ArchUnit). The domain has four packages:
+Each feature's spec has its acceptance criteria, each mapped to tests; each docs/ai entry has the session, the review
+findings and how they were resolved. What follows is what a reviewer is most likely to ask about.
 
-| Package | Contents |
+**Core domain** ([spec 001](specs/001-itinerary-aggregation/spec.md),
+[package pages](docs/architecture/packages/flight-aggregator/aggregation-domain-model.md)). Two kinds of bad input are
+handled differently: *malformed* data (a 2-letter airport, a non-positive or non-EUR price) fails when the value
+object is built and is counted per provider and reason; *well-formed but unsellable* itineraries (dead legs, invalid
+connections: mixed airlines, arrival not after departure, unchained segments, a revisited airport, connection < 45 min,
+layover > 24 h, already departed) are discarded with one `DiscardReason` each. Identity is the statement's: airline
+and flight numbers, connections and departure times.
+
+**Mock providers** ([spec 002](specs/002-gds-mock/spec.md)). Built to exercise the aggregator: cross- and
+same-provider duplicates at different prices, one invalid itinerary kind per discard reason, malformed records, three
+time representations (UTC epoch milliseconds, ISO-8601 with offset, local time + IANA zone). `GET /admin/world/stats` reports what spec 001 should produce,
+so ingestion reconciles **exactly**. *Found:* a streamed response is dispatched twice by Spring, so latency was
+applied twice and a `500` could follow a sent feed; `ConcurrencyIT` caught it (three feeds in parallel took the sum,
+not the slowest).
+
+**Ingestion and resiliency** ([spec 003](specs/003-provider-ingestion/spec.md),
+[flow](docs/architecture/flows.md#ingestion-run)). Streaming parsers (Jackson token stream, StAX with DTDs refused,
+a line reader), hostile input bounded. The resilience values follow from the mock's 100–5000 ms latency and 10 %
+errors: a 6 s read timeout (below 5 s, ≈ 40 % of normal answers would be retried), 3 attempts (a partition is lost
+with p ≈ 0.1 % instead of 10 %), a breaker that opens at ≥ 80 % failures of 10 calls (p ≈ 4 × 10⁻⁷ on that noise,
+checked by a seeded 10,000-call test) and stays open 30 s — far below the 15 min interval, so the next run always
+probes again. A failed partition never fails the run; a run is `FAILED` only if every provider failed. Below,
+Mock-Beta forced down from the dashboard's demo controls and a run started with *Refresh data*: the run is `PARTIAL`,
+Beta `FAILED` on all 7 partitions with its breaker `OPEN`, Alpha and Gamma `COMPLETED`; every day kept its previous,
+more complete snapshot (`KEPT_STALE`), so search serves it with `STALE` badges instead of dropping Beta's offers.
+
+![Data status after a Mock-Beta outage: run PARTIAL, mock-beta FAILED 0/7 with breaker OPEN, mock-alpha and mock-gamma
+COMPLETED, demo controls with the Beta outage switched on](docs/images/dashboard-outage.png)
+
+*Found:* interrupting the calling thread does not abort a blocked socket read on a platform thread, so each attempt
+now runs on its own virtual thread; a waiting partition could start a request after the run deadline; an
+`OutOfMemoryError` could leave a day's coordinator waiting forever; and the providers doc had a DST error the parser
+test caught.
+
+**Persistence and pipeline** ([spec 004](specs/004-persistence-and-pipeline/spec.md)). A day is the unit of
+replacement: one transaction deletes its rows, `COPY`s the new ones, upserts `day_snapshot` and bumps the data
+version. Runs never overlap across instances (advisory lock checked before every day is published; orphaned `RUNNING`
+rows become `ABORTED`). `ANALYZE` after each run, retention at its start. *Found:* shutdown waited for a whole run
+(Spring's scheduler lets tasks finish before beans are destroyed) — the schedule now stops on context close and the
+interrupted run is stored `FAILED`; the lock connection was shared by concurrent day coordinators (found in review).
+
+**Search and cache** ([spec 005](specs/005-search-api/spec.md),
+[flow](docs/architecture/flows.md#search-request)). Filters `origin`, `destination`, `date`, `maxPrice`, `carrier`;
+`limit` + `cursor`; a catalog of filter values; OpenAPI committed and checked. The cursor carries a filter
+fingerprint, so a cursor reused with other filters is a `400`, not a silently wrong page. The cache decorates the
+query ports — the use case cannot tell — and is invalidated by a version row bumped in every writing transaction, so
+invalidation is atomic with the commit and nothing is deleted. Redis down means 100 ms timeouts, then a breaker skips
+it for 30 s; search keeps answering from PostgreSQL. *Changed after review:* the catalog is memoised per data version
+in the JVM (single-flight), so a version bump or a Redis outage costs one scan, not one per concurrent request.
+
+**Dashboard** ([spec 006](specs/006-dashboard/spec.md), [docs/frontend.md](docs/frontend.md)). React 19 + TypeScript,
+runtime dependencies `react` and `react-dom` only; filters in the URL; keyset "Load more"; live run status with
+*Refresh data*; plain-SVG charts with table alternatives; demo controls to take a provider down. Types are generated
+from `docs/api/openapi.json`, so the chain Java → JSON → TypeScript is checked at both links — which **found** a
+springdoc bug that typed a nullable report as never null. *Found by hand, then guarded:* a grid layout that painted the
+results over the form at 1170 px; a Playwright check at four widths now fails on it.
+
+**Full-stack smoke test** ([spec 007](specs/007-stack-smoke/spec.md)). `scripts/stack-smoke.sh`, the same locally and
+in CI, proves the statement's two stack-level promises on every PR: `docker compose up --build` boots healthy and
+ingests (checked through nginx, plus the e2e reconciliation test against the running mock), and one provider dropping
+out (a Mock-Beta outage) gives a `PARTIAL` run with Beta `FAILED`, its breaker `OPEN` and search still answering.
+*Found:* `GDS_MOCK_PROFILE=deterministic` alone kept 10 % errors, because compose sets the error rate explicitly and
+an environment variable beats a profile file; the docs had claimed otherwise.
+
+### 1.4 SOLID, and what is deliberately not abstracted
+
+| Principle | Where it shows |
 |---|---|
-| `model` | Value objects with invariants: `AirportCode`, `AirlineCode`, `FlightNumber`, `ProviderId`, `Money`, `Segment`, `Itinerary`, `ItineraryKey`, `FlightOffer` |
-| `validation` | `ItineraryRule` (one method) and one class per rule, composed in a fixed order by `ItineraryValidator` |
-| `pricing` | `MarkupPolicy` and `PercentageMarkupPolicy` (5% by default) |
-| `deduplication` | `OfferAggregator` (incremental accumulator), `OfferPreference` (tie-break), result and statistics records |
+| **SRP** | One class per validation rule; `Money` owns rounding, `MarkupPolicy` pricing, `OfferPreference` the tie-break. The snapshot policy decides, the publisher applies, the store runs SQL. Validation in the search domain, paging in the use case, SQL in the adapter, caching in a decorator. |
+| **OCP** | A rule is a new `ItineraryRule`; a pricing scheme a new `MarkupPolicy`; a provider a new `FeedParser` (aggregator) and `ProviderFormat` (mock); the cache was added without touching the use case or the SQL adapter. A new rule also needs a `DiscardReason` constant — a deliberate, type-safe trade-off. |
+| **LSP** | Port and interface Javadocs state contracts (a rule returns empty or one reason and never throws; a markup policy returns EUR at scale 2, never below the base). The cache decorators honour the query ports' contract; one abstract contract test runs for every provider format. |
+| **ISP** | One-method `ItineraryRule` / `MarkupPolicy`; `DaySnapshotStore` (day writes) and `SnapshotMaintenance` (retention, statistics) are separate ports implemented by one adapter; `DataVersionQuery` is used only by the decorators. |
+| **DIP** | The application owns every port; infrastructure implements them; `Clock`, executors and randomness are injected, so time-dependent rules and chaos are tested without sleeping. |
+| **Not abstracted** | `ItineraryValidator`, `OfferAggregator`, key derivation: one implementation, no variation point. gds-mock has no `application` layer (no use cases, no driven ports). The scheduler uses Spring's `TaskScheduler` directly (it is an adapter). The report's JSON mapping is shared by storage and API, so the API shows what is stored. The cache codec serialises the search records directly (a versioned key prefix instead of a cache-only DTO layer). The frontend has no repository/service layers or DI — at its size they would be ceremony. |
 
-There are two kinds of bad input, and they are handled differently:
+### 1.5 AI tools and the agent system
 
-- **Malformed data** (a 2-letter airport code, a negative or zero price, a non-EUR price) fails when the value object
-  is built. It never reaches the aggregator. The ingestion report will count these records per provider.
-- **Well-formed but unsellable itineraries** (dead legs, invalid connections) are discarded with a `DiscardReason`
-  and counted in the aggregation statistics.
+The code was written with **Claude Code** (Claude Opus 5.5) under guardrails versioned in this repository
+([ADR-0005](docs/adr/0005-ai-assisted-development.md)), so anyone who clones it gets the same agent behaviour:
 
-**How SOLID applies here, and where it deliberately doesn't:**
-
-| Principle | Where |
+| Piece | What it does |
 |---|---|
-| **SRP** | One class per validation rule. `Money` owns rounding, `MarkupPolicy` owns pricing, and `OfferPreference` owns the tie-break. `OfferAggregator` only orchestrates (validate → select → count) and statistics are a separate record. |
-| **OCP** | A new rule is a new `ItineraryRule` added to the validator's list. A new pricing scheme is a new `MarkupPolicy`. Neither change touches `ItineraryValidator` or `OfferAggregator`. One caveat: a new rule also needs a new `DiscardReason` constant. The enum is a deliberate, type-safe trade-off and makes a good statistics key. |
-| **LSP** | Interface Javadocs state the contracts. A rule returns empty or exactly one reason, never throws for a well-formed itinerary and has no side effects. A markup policy returns EUR at scale 2, never below the base price. So any rule or policy can replace another (tests use lambdas). |
-| **ISP** | `ItineraryRule.check` and `MarkupPolicy.apply` each have a single method. The aggregator exposes only `accept` and `result`. |
-| **DIP** | `OfferAggregator` depends on the `MarkupPolicy` abstraction and on rules through their interface. Time comes from an injected `java.time.Clock`, so "already departed" is testable. |
-| **Not abstracted** | `ItineraryValidator`, `OfferAggregator`, key derivation and the tie-break are concrete classes. Each has one obvious implementation and no variation point, so an interface would only add indirection. |
+| [`CLAUDE.md`](CLAUDE.md) | Project rules: architecture and layering, testing conventions, git workflow, definition of done, English-only |
+| Skills (`.claude/skills/`) | `spec-feature` (requirement → spec with Given/When/Then and *open questions*, never invented requirements), `implement-spec` (branch → tests first → code → docs), `adr`, `pr-description` |
+| Agents (`.claude/agents/`) | `code-reviewer` (SOLID, hexagonal rules, tests, security), `spec-reviewer` (acceptance-criteria traceability, scope creep), `test-engineer` (coverage gaps) |
+| Hooks (`.claude/settings.json`) | Block commits/pushes to `main`, force-push and `--no-verify` (with its own test suite in CI); Spotless / Prettier after every edit; `./mvnw verify` and/or the frontend checks before the agent may finish a turn, for whatever changed |
+| Git hooks + GitHub rulesets | The same gates for humans: pre-commit format check, pre-push verify; `main` changes only through PRs with green required checks |
 
-### Mock GDS providers (spec 002)
+**The workflow per PR:** the author's prompt → the agent reads the repo and writes the spec with open questions →
+the author answers and approves → tests first (committed red on purpose), then the implementation → `code-reviewer`
+and `spec-reviewer` agents → the author decides which findings to fix → PR, CI by commit SHA. The **human owns every
+decision**: specs are approved, review findings triaged and PRs merged by the author. Each [docs/ai](docs/ai/README.md)
+entry records the verbatim prompts, the agent's questions and the answers, the review findings with their outcome,
+and what was found while implementing.
 
-`gds-mock` is the test double of the three external providers: a separate Spring Boot app that shares no code with
-the aggregator (an ArchUnit rule forbids any dependency on `com.andresps.flights`). It is built to exercise the
-aggregator, not to look pretty: cross- and same-provider duplicates at different prices, one invalid itinerary
-kind per spec 001 discard reason, malformed records, three different time representations, latency, random `500`s and
-a runtime outage switch. Formats: [docs/providers.md](docs/providers.md).
+**The guardrails also constrain the agent.** In PR 8 the agent tried to register a new hook and `npm` permissions in
+`.claude/settings.json`; Claude Code's classifier blocked it as self-modification, so the author applied the change
+by hand ([docs/ai/008](docs/ai/008-dashboard.md)).
 
-| Concern | Design |
-|---|---|
-| Data | `WorldGenerator` (plain Java). Itinerary *i* of day *d* comes from its own `SplittableRandom(seed, d, i)`, so a provider or a day is generated on its own and every provider sees the same itinerary. Index ↔ (airline, first flight number) makes identities unique by construction. |
-| Formats | One `ProviderFormat` per provider (Jackson 3 streaming generator, StAX, `BufferedWriter`). A new provider is a new class; a shared contract test checks round trip, empty feed, streaming and client disconnects for every format. |
-| Chaos | `ChaosPolicy` (plain Java, injected randomness) decides; `ChaosInterceptor` applies it before the controller. Serializers and controllers know nothing about chaos (ArchUnit). |
-| Reconciliation | `GET /admin/world/stats` reports what the world contains and what spec 001 should produce from the well-formed records, so the ingestion PR can check its counts exactly. |
-
-**SOLID, pragmatically.** SRP: generation (`ScheduleFactory`, `OfferFactory`), serialization (one class per format),
-chaos (policy vs. interceptor) and statistics are separate. OCP: a provider is added with a new `ProviderFormat`
-bean, and nothing else changes. LSP: every format honours the same contract, checked by one abstract test that runs
-for each format. ISP/DIP: controllers depend on `ProviderFormat` and the injected `Sleeper` / `RandomGenerator`
-supplier make chaos testable without sleeping. **Not abstracted:** the module has no `application/port` layer. The
-mock has no use-case orchestration and no driven ports, so ports would be single-implementation ceremony.
-
-**Measured at 1,000,000 itineraries** (Docker on an Apple Silicon laptop, `deterministic` profile, `-Xmx256m`):
-
-| | Mock-Alpha | Mock-Beta | Mock-Gamma |
-|---|---:|---:|---:|
-| Records | 619,577 | 619,925 | 619,224 |
-| Feed size | 144 MB | 332 MB | 100 MB |
-| Full feed, one request | 2.7 s | 10.6 s | 2.8 s |
-
-The container stayed at about 229 MiB with the 256 MB heap cap, and nothing was logged at WARN or ERROR. The three
-feeds requested in parallel took 11.4 s, about as long as the slowest one alone. `GET /admin/world/stats` took 1.7 s
-the first time. Beta is the slowest (verbose XML through StAX); a per-day partition is about 1/7 of these numbers.
-
-**Found while implementing:** the first version applied the latency **twice** per feed. A streamed response is
-asynchronous, and Spring dispatches the request again when the body completes, so the interceptor ran a second time.
-That also made it possible to inject a `500` after a feed had already been sent. `ConcurrencyIT` (three providers in
-parallel, expected ≈ slowest, got ≈ sum) exposed it; the interceptor now ignores `ASYNC` dispatches.
-
-### Provider ingestion and resiliency (spec 003)
-
-The `ingestion` feature fetches every (provider, day) partition of the horizon, aggregates **one day at a time** and
-produces a report. The flow diagram is in [architecture.md](docs/architecture.md#ingestion-flow-spec-003).
-
-| Decision | Where |
-|---|---|
-| Use case `IngestionService` (plain Java) depends on two outbound ports: `ProviderFeed` (one per provider) and `DayAggregationSink`. A new provider is a new `FeedParser` + `aggregator.providers.<id>.base-url`; the use case doesn't change. | [spec 003](specs/003-provider-ingestion/spec.md) |
-| Streaming parsers: Jackson 3 token stream, StAX cursor (DTDs refused, so XXE-safe), a line reader. Records are parsed one at a time into the attempt's buffer, never the whole document. Hostile input is bounded: 64 KiB per string, text or line, 16 legs or segments per record, `max-records-per-partition` (500,000) per attempt. | adapters `alpha`, `beta`, `gamma` |
-| Resilience lives in infrastructure: read timeout 6 s, attempt deadline 60 s, Resilience4j circuit breaker per provider (≥ 80 % of the last 10 attempts, 30 s open), retry 3× with 500 ms / 1 s ± 50 % backoff; run deadline 10 min. | [ADR-0014](docs/adr/0014-provider-resilience.md) |
-| Partition atomicity: each attempt parses into its own buffer; only a completed attempt's buffer reaches the aggregator. | [ADR-0015](docs/adr/0015-atomic-partition-buffers.md) |
-| One `OfferAggregator` per day, fed by a single consumer (the day's coordinator), statistics summed. Valid because the identity includes departure instants and providers partition by UTC date of first departure. | [ADR-0016](docs/adr/0016-day-partitioned-aggregation.md) |
-
-**Why these resilience values.** The mock's latency is 100–5000 ms and 10 % of requests fail.
-- A read timeout below 5 s would turn about 40 % of normal answers into retries, so it is 6 s; ingestion runs in the
-  background and can afford to wait.
-- With 3 attempts a partition is lost with p ≈ 0.1 % instead of 10 %.
-- The breaker must not open on that noise: 8 failures in 10 attempts at 10 % has p ≈ 4 × 10⁻⁷. A seeded test with
-  10,000 calls checks it stays closed, and another that an outage opens it after 10 attempts (≈ 3 s, since a `503`
-  is immediate).
-- The 30 s open wait covers the rest of the run that detected the outage but is far below the 15 min interval, so the
-  next run always probes again (half-open). It is tested with the real 30 s on a controllable clock.
-
-**Partial results.** A failed partition never fails the run: a provider is `COMPLETED`, `PARTIAL` or `FAILED` by its
-partitions, and the run is `FAILED` only if every provider failed (no exception either way). A day is published if at
-least one provider delivered it, naming the missing providers, so the persistence spec can keep their previous data.
-
-The dashboard's demo controls make this visible (spec 006). Below, Mock-Gamma was forced down through gds-mock's admin
-API and a run started with *Refresh data*: the run is `PARTIAL`, Gamma `FAILED` on all 7 partitions with its breaker
-`OPEN`, Alpha and Beta `COMPLETED`; no day was replaced (0 itineraries stored, every day `KEPT_STALE`, ADR-0017), so
-search keeps serving the previous, more complete data with `STALE` badges instead of dropping Gamma's offers.
-
-![Data status after a Mock-Gamma outage: run PARTIAL, mock-gamma FAILED 0/7 with breaker OPEN, demo controls with the
-Gamma outage switched on](docs/images/dashboard-outage.png)
-
-**Reconciliation.** With no failures, every figure of the report equals gds-mock's `/admin/world/stats`, for the run
-and for each day: records and malformed records per reason per provider, offers received, discards per reason,
-duplicates merged and itineraries produced. The build checks it against recorded feeds (`IngestionIT`). The `e2e`
-test checks it against a running mock; it was run by hand for this PR at 100,000 and 1,000,000 itineraries, and the
-CI smoke job will run it in a later PR.
-
-**Found while implementing:**
-- The attempt deadline first interrupted the *calling* thread. That only aborts a blocked socket read on a virtual
-  thread, and `HttpProviderFeedIT` calls `fetch` from a platform thread, so a trickling body ran to completion. Each
-  attempt now runs on its own virtual thread, and the caller waits for it with the deadline. That works whatever
-  thread calls `fetch`.
-- A partition still waiting for its provider's permit could start a request just after the run deadline, as soon as
-  the cancelled request released the permit. It now gives up instead.
-- An `OutOfMemoryError` was wrapped as an ordinary failure. Simply rethrowing it would have left the day's
-  coordinator waiting for the run deadline. Now every partition always delivers an outcome (`UNEXPECTED_ERROR`) and
-  the `Error` is rethrown.
-- The cross-zone example in `docs/providers.md` said OPO 12:55 Lisbon → BOS 12:15 New York is a 6 h 20 min flight.
-  On 6 November it is 4 h 20 min, because the US left DST on 1 November. The parser test caught it.
-
-**Measured at 1,000,000 itineraries.** gds-mock in the `deterministic` profile, 1,840,053 offers → 946,092
-itineraries, G1, Apple Silicon laptop. The table shows the smallest heap (`-Xmx`) with which a run completes. The
-first four rows use a sink that discards each day, to isolate the ingestion's own working set; the last row uses the
-real in-memory sink, which keeps every published day.
-
-| Sink | Days in flight | Heap that completes | Run | With less heap |
-|---|---:|---:|---:|---|
-| discarding | 1 | 256 MB | 11.4 s | — |
-| discarding | **2 (default)** | **512 MB** | 8.1 s | 384 MB: `PARTIAL` (GC pauses cause read timeouts); 256 MB: out of memory |
-| discarding | 3 | 768 MB | 7.4 s | 512 MB: `PARTIAL` |
-| discarding | 7 | 1 GB | 8.2 s | 768 MB: out of memory |
-| in-memory (whole world) | 2 | 1.5 GB | 7.6 s, reconciles exactly | 1 GB: `PARTIAL` |
-
-- **The working set follows the days in flight, about 250 MB per day at 1M.** That is better than the estimate in
-  ADR-0016 (≲ 0.5 GB per day), because buffers are fed and dropped as soon as each partition arrives.
-- **The retained world costs ≈ 1–1.2 GB for 946,092 itineraries**, about 1.2 KB each. That confirms ADR-0011's
-  estimate, and it is what the PostgreSQL sink will remove.
-- **The default stays at 2 days.** In this test (no latency) it is as fast as 3 or 7 days, with half or a quarter of
-  their memory. Against the chaos mock (100–5000 ms latency) a run takes about 15 s instead of about 5 s, which is
-  negligible against a 15 min interval.
-- **The container heap is `-Xmx1536m`** (`flight-aggregator/Dockerfile`, about 2 GB of container memory). That is
-  what the in-memory sink needs at 1M. `-XX:+ExitOnOutOfMemoryError` makes the container restart instead of
-  continuing in an unknown state.
-- **Too little heap degrades gracefully before it fails.** GC pauses turn into timeouts, so the report is `PARTIAL`
-  instead of the run crashing.
-
-Reproduce it: start gds-mock with `--gds.world.volume=1000000` (deterministic profile), then run
-`./mvnw -pl flight-aggregator verify -Pe2e-tests -Dit.test=IngestionReconciliationE2EIT "-DargLine=-Xmx1536m"`.
-
-*Superseded by spec 004:* results now go to PostgreSQL day by day, and the container heap is 768 MB (below).
-
-### Persistence and the ingestion pipeline (spec 004)
-
-PostgreSQL replaces the in-memory result store; runs are triggered by a scheduler and by `POST /api/v1/ingestions`,
-never overlap, and are persisted with their report. Diagrams: [architecture.md](docs/architecture.md#persistence-and-the-ingestion-pipeline-spec-004).
-
-| Decision | Where |
-|---|---|
-| Hexagonal split: `IngestionRunService` (plain Java) owns the run lifecycle through three outbound ports (`IngestionRunLock`, `IngestionRunRepository`, `SnapshotMaintenance`) and an injected `Executor`; `DaySnapshotPublisher` implements the existing `DayAggregationSink` and applies a plain-Java `SnapshotPolicy` over a `DaySnapshotStore` port. The scheduler and the controller are inbound adapters; everything PostgreSQL-specific is in `adapter/out/persistence` (ArchUnit rule). | spec 004 |
-| A day is the unit of replacement: one transaction deletes its rows, `COPY`s the new ones and upserts `day_snapshot`. A publication replaces only if it is at least as complete as the stored snapshot (or that one has been stale for 2 h); otherwise the old snapshot is kept and marked stale. | [ADR-0017](docs/adr/0017-day-snapshot-replacement.md) |
-| `COPY` text format through PgJDBC, streamed from a 64 KiB buffer. | [ADR-0018](docs/adr/0018-bulk-load.md) |
-| Session `pg_try_advisory_lock` held on a dedicated connection for the whole run; checked before each day is published (a lost lock stops the run, `FAILED`); orphaned `RUNNING` rows become `ABORTED` when the next run takes the lock. | [ADR-0019](docs/adr/0019-ingestion-run-lock.md) |
-| The run id is chosen by the run service (so `POST` returns it at once) and passed to the ingestion use case with a `PublicationGuard`. | spec 004 |
-| `ANALYZE itinerary` after each run's writes, so the planner's statistics follow the snapshots (for the search PR). | spec 004, AC-13 |
-| Retention at the start of every run: days before today, runs older than 7 days. | spec 004, AC-12 |
-| The in-memory store was removed from the application; an in-memory `DaySnapshotStore` fake remains in the tests. | spec 004, Q5 |
-
-**SOLID, pragmatically.** SRP: the policy decides, the publisher applies, the store executes SQL, the run service
-orchestrates the lifecycle. OCP: the bulk-load technique is an `ItineraryBulkLoader` behind the store (the batched
-alternative lives in tests for the benchmark). ISP: `DaySnapshotStore` (day writes) and `SnapshotMaintenance`
-(retention, statistics) are separate ports, implemented by one adapter. DIP: the use cases own every port. **Not
-abstracted:** the scheduler uses Spring's `TaskScheduler` directly (it is an inbound adapter); the report JSON mapping
-is one concrete class shared by the persistence adapter and the REST response, so the API shows what is stored.
-
-**Measured at 1,000,000 itineraries** (Apple M1 Max, Docker with 6 CPUs / 16 GB, `postgres:17`):
-
-| | Result |
-|---|---|
-| Bulk load, `COPY` (1,000,006 rows as 7 days, `BulkLoadBenchmarkIT`) | **10.4 s** first load, **13.8 s** replacement |
-| Bulk load, batched `INSERT` + `reWriteBatchedInserts` / without | 18.9 s / 24.5 s; 31.0 s / 34.7 s (the "without" run: the same benchmark with the `reWriteBatchedInserts` line removed from `TestPostgres`) |
-| Full run in compose (gds-mock deterministic, 946,230 itineraries stored, 7 days `REPLACED`) | **19.2 s** at `-Xmx512m`, **21.2 s** at `-Xmx768m` (first run and replacement alike) |
-| Smallest heap that completes | **512 MB** (container peak 717 MiB); 384 MB runs out of memory |
-| Chosen heap | **`-Xmx768m`** (1.5× the floor), container peak ≈ 0.99 GiB, was 1,536 MB with the in-memory store |
-| Table size | 558 MB (456 MB rows + 103 MB indexes), 618 bytes per row |
-| Default compose stack (100,000, chaos on), AC-25 checked by hand | `postgres`, `gds-mock` and `flight-aggregator` healthy (the aggregator started after the other two, `depends_on: service_healthy`); first scheduled run `COMPLETED` in 17.5 s; 94,543 rows queryable in `itinerary` (7 days, one `day_snapshot` row each); `POST` → `202` + `Location`, a second `POST` → `409` with `runningIngestionId`; after `docker compose down` / `up` the rows and both runs were still there (named volume) |
-
-- The heap is now the ingestion working set only (2 days in flight); the store writes and drops each day.
-- With 384 MB the JVM exits on `OutOfMemoryError` and the container restarts (compose restart policy); the run it
-  left `RUNNING` was marked `ABORTED` by the next run, as AC-15 specifies, observed live during the measurement.
-- `./mvnw verify` (both modules, all unit and integration tests, coverage, formatting): **54 s** on the same laptop.
-  The flight-aggregator ITs start 4 cached Spring contexts (six IT classes share the recorded-feeds one) and one
-  PostgreSQL container for the whole build.
-
-Reproduce: `./mvnw -pl flight-aggregator verify -Pslow-tests -Dit.test=BulkLoadBenchmarkIT` for the load;
-`GDS_WORLD_VOLUME=1000000 GDS_MOCK_PROFILE=deterministic AGGREGATOR_JAVA_TOOL_OPTIONS="-Xmx512m" docker compose up
---build -d --wait`, then `curl -X POST localhost:8080/api/v1/ingestions` for the run.
-
-**Found while implementing:**
-- A test configuration that replaced the `Clock` bean by *name* was silently overridden by the application's own
-  `clock` bean once it was `@Import`ed instead of nested: the run used the real date and asked for the wrong days.
-  Test clocks now use a distinct bean name plus `@Primary`.
-- `Money` caps every amount at 9 integer digits, the final price included, so `numeric(12,2)` has room to spare; the
-  round-trip test first tried a final price the domain cannot produce.
-- PostgreSQL stores microseconds: run instants are truncated to microseconds before they are stored, so a run reads
-  back equal to what the service returned.
-- Closing a `@SpringBootTest` context from inside a test breaks the test framework's context cache, so the
-  scheduling IT starts its own application with `SpringApplicationBuilder` and closes it, then checks that no run
-  starts or stays `RUNNING` afterwards.
-- A shared Testcontainers container returned as a Spring `@ServiceConnection` bean is stopped by Spring when any
-  context closes; the shared test container ignores `stop()` (Ryuk removes it when the JVM exits).
-- **Shutdown waited for a whole run.** `ThreadPoolTaskScheduler` takes part in the lifecycle stop phase, which runs
-  before beans are destroyed and lets running tasks finish; the scheduler's tick waits for its run, so closing the
-  application waited for the run to complete, and the executor that should interrupt it was destroyed only after.
-  Found by an IT that closes the application mid-run (added after the code review); the schedule is now stopped on
-  `ContextClosedEvent`, and the interrupted run is stored `FAILED` with its lock released.
-- **The lock connection was shared by concurrent day coordinators** (found in review): it is now used under a lock,
-  opened outside the pool, and any failure to confirm the lock counts as losing it.
-
-### Search API and cache (spec 005)
-
-`GET /api/v1/itineraries` (filters `origin`, `destination`, `date`, `maxPrice`, `carrier`; `limit`, `cursor`) and
-`GET /api/v1/catalog`, documented by OpenAPI ([docs/api/openapi.json](docs/api/openapi.json), checked by a test) and in
-[usage.md](docs/usage.md#search-spec-005). Flow: [architecture.md](docs/architecture.md#search-spec-005).
-
-| Decision | Where |
-|---|---|
-| New `search` feature. Use cases `ItinerarySearchService` / `CatalogService` (plain Java) validate, check the cursor and issue the next one through two outbound ports (`ItinerarySearchQuery`, `CatalogQuery`); no Java dependency on `ingestion`, both meet only in the schema. | spec 005 |
-| Date semantics: no `date` = every future departure; with `date` = that UTC day. Departed itineraries (first departure not strictly after now) are filtered at query time, and also dropped from cached pages. | ADR-0010 (amended), AC-3, AC-4, AC-20 |
-| Keyset on `(final_price, id)`, `limit + 1` rows to know whether more follow; the cursor carries a filter fingerprint, so a cursor reused with other filters is a `400`, not a silently wrong page. | ADR-0008, ADR-0021 |
-| Cache-aside in Redis as **decorators of the query ports**: the use case cannot tell. Keys = data version + normalized filters + limit + position. The version is a single row bumped as the last statement of every ingestion transaction that changes the read model, so invalidation is atomic with the commit and needs no deletion; TTL 10 min as a safety net. | ADR-0022 |
-| Redis is optional: 100 ms timeouts, failures read as misses, a Resilience4j breaker skips Redis for 30 s after repeated failures (WARN once), `search.cache` metric. Readiness doesn't depend on Redis. | AC-21 |
-| Codes compared as `bpchar` placeholders, so the `char(n)` columns are not cast and the indexes stay usable. | `ItinerarySearchSql` |
-
-**SOLID, pragmatically.** SRP: validation and cursor rules in the domain (`SearchCriteria`, `Cursor`, `PageSize`), paging
-in the use case, SQL in the adapter, caching in a decorator, failure handling in `ResilientCacheStore`. OCP: the cache
-was added without touching the use case or the SQL adapter; a different cache is another `CacheStore`. LSP: the
-decorators honour the port contract (same items and next position; fewer items only for departed flights, as the
-port's Javadoc allows). ISP: `DataVersionQuery` is its own port, used only by the decorators. DIP: the application owns
-every port. **Not abstracted:** the cache codec serialises the search records directly (a cache-only DTO layer would
-duplicate them; the key prefix `v1` is bumped if the format changes), and the controllers take raw strings so the use
-case owns every validation message.
-
-**Measured at 1M rows** (`SearchPerformanceIT`, Apple M1 Max, Docker 6 CPUs / 16 GB; full report with every plan:
-[docs/measurements/search-1m.md](docs/measurements/search-1m.md)):
-
-| | Result |
-|---|---|
-| Plans | Every AC-22 combination is an index scan in keyset order stopped by `LIMIT`; no sequential scan, no sort (ADR-0020) |
-| `COPY` 1M rows without / with the two search indexes | 12.1 s / 17.9 s first load; 32.6 s replacement with them |
-| Search, server side, first page | 0.2–2.9 ms for every AC-22 combination (each with and without `maxPrice`); 49 ms median for origin + carrier + low `maxPrice` (two filters outside the route index) |
-| API, client side, uncached / cached (median) | 2.6–8 ms / 1.8–5.4 ms for typical searches; 56 ms / 3.0 ms for that two-filter case |
-| Catalog, uncached / cached (median) | 420 ms (grouped scan of 1M rows, once per data version) / 1.4 ms |
-
-The cache saves little on a typical search, which is already sub-millisecond in PostgreSQL thanks to the indexes;
-it pays off for the expensive requests — the catalog (≈ 300×) and the filter combinations no index serves (≈ 18×) —
-and it takes repeated load off the database.
-
-Default compose stack, AC-25 checked by hand: `postgres`, `redis`, `gds-mock` and `flight-aggregator` healthy; after the
-first scheduled run (94,543 rows) a search returns data and the repeated request is a cache hit. `./mvnw verify` (both
-modules): **66 s**.
-
-**Changed after the code review:** the catalog is memoised per data version in the JVM (single-flight), so a version
-bump or a Redis outage costs one scan instead of one per concurrent request; a reused catalog drops past days; the
-breaker records `Error`s too; the cache format is pinned by a golden test.
-
-**Found while implementing:**
-- `RestClient` expands and encodes the URI template, so a test that wrote `%20` sent `%2520`; the test now writes
-  plain spaces.
-- With Redis paused, the `SET`s that timed out had already been written to the socket; Redis ran them when it resumed.
-  Harmless (the value is what PostgreSQL returned), but the recovery test first expected the pre-outage page.
-
-### Dashboard (spec 006)
-
-`frontend/`: React 19 + TypeScript + Vite, no state-management, UI, chart or date library (runtime dependencies:
-`react`, `react-dom`), built into static files served by an unprivileged nginx that also proxies `/api` to the
-aggregator. Walkthrough for backend developers: [docs/frontend.md](docs/frontend.md).
-
-| Decision | Where |
-|---|---|
-| Search on submit, filters in the URL (shareable, back/forward), destinations filtered by the catalog's routes, dates with freshness | spec 006 AC-1 – AC-6 |
-| Keyset "Load more"; short or empty pages while `hasMore` are followed automatically (≤ 5 empty in a row); no total | AC-12 – AC-14, ADR-0008 |
-| Times shown in UTC, labelled: the API has no airport time zones | AC-8, Q1 |
-| Polling instead of SSE/WebSocket; "New data available" only for runs that published data, results never replaced automatically | ADR-0023, AC-15 – AC-18 |
-| Types generated from `docs/api/openapi.json`; the chain Java → JSON → TypeScript is checked at both links | ADR-0024, AC-27 |
-| Demo controls behind a runtime flag (`DEMO_CONTROLS`, on in compose) written by the container's entrypoint | AC-22 |
-| Plain-SVG charts of the loaded results, one validated hue, a table alternative and tooltips | AC-19 |
-
-**Backend follow-up.** The ingestion endpoints are now in the OpenAPI description (`202` + `Location`, `409` with
-`runningIngestionId`, `200`/`400`/`404`), and a customizer makes the schemas exact: response properties required
-(nullable where they can be null), `ProblemDetail` flat, nullable references as `anyOf [$ref, null]`. The last one was
-**found by the generated types**: springdoc wrote `$ref` next to `type: null`, so the TypeScript said a run's report
-was never null. An ArchUnit rule keeps response records from omitting nulls, which would make "required" untrue. The
-contract check only compares in every build; regenerating `docs/api/openapi.json` is an explicit
-`-Popenapi-write` run that reports itself aborted, not passed, and is refused in CI.
-
-**How the frontend maps to the backend's principles.** Pure modules (`format`, `filters`, `charts`, `newData`) are the
-core and are unit-tested alone; `api/client.ts` is the only outbound adapter; hooks orchestrate and hold state;
-components only render. SRP: one component or hook per concern. DIP-like: components never call `fetch`. Not
-abstracted: no repository/service layers or dependency injection — at this size they would be ceremony.
-
-**Measured.** `npm run check` (types regenerated and diffed, Prettier, ESLint, `tsc`, 118 tests with coverage):
-**7 s**; coverage 99.7 % lines / 95.5 % branches (gate 80 / 70). Production bundle 243 kB JS (**76 kB gzipped**),
-5.5 kB CSS. Image smoke test (22 checks): 10 s. `./mvnw verify` (both modules): 65 s.
-
-Default compose stack, AC-25/AC-30 checked by hand: five services healthy, dashboard at <http://localhost:3000>,
-searches return data after the first run, *Refresh data* → `202` then `409`, nginx finds the aggregator again after a
-restart (`502` meanwhile). The resilience demo through the dashboard's proxy: Mock-Beta forced down, manual run →
-`PARTIAL`, Beta `FAILED 0/7` with its breaker `OPEN`, every day `KEPT_STALE`, results `STALE`.
-
-**Found while implementing:**
-- msw 3 renamed `onUnhandledRequest` to `onUnhandledFrame`; the old name was silently ignored, so an unexpected request
-  only warned. Found by `tsc`, not by a failing test.
-- Prettier inherited the repository's 4-space `.editorconfig`; the frontend now pins 2 spaces.
-- The React hooks lint rule against setting state inside effects pushed the design to start searches from events
-  (load, submit, back/forward, reload) instead of "filters changed" effects — simpler to follow.
-- The compose healthcheck used `localhost`, which resolves to `::1` in the container while nginx listens on IPv4:
-  the dashboard worked but the service stayed unhealthy. Now `127.0.0.1`, and the smoke test runs that command.
-- **A layout bug found by hand** (the author, in Brave at 1170 px): the results column painted over the search form
-  and the status table. Grid/flex children cannot shrink below their widest content (the providers table, `<select>`s
-  as wide as their longest option) unless told to (`minmax(0, 1fr)`, `min-width: 0`). Fixed with named grid areas
-  (one column below 960 px, status and demo under the results), contained tables, wrapping and clipped SVGs, and
-  guarded by a **Playwright layout check in Chromium** at four widths, which also found a second bug: screen-reader
-  tables hidden with `overflow: hidden` (which does not apply to tables) widened the page at 768 px. The check fails on
-  the old layout and on a deliberately broken one.
-- Versions: TypeScript 5.9 and ESLint 9, the newest every tool's declared peer range accepts
-  (`openapi-typescript`, `typescript-eslint`, `eslint-plugin-jsx-a11y`), instead of forcing peers.
-
-**Changed after the reviews:** a superseded poll could flag "status unavailable", and a poll in flight during *Refresh
-data* could replace the new `RUNNING` run with the previous one (both reproduced by tests on the old code, then
-fixed); keyboard focus was lost after every search (the form remounted); a non-numeric max price was silently dropped
-by `<input type="number">`; repeated items across pages are de-duplicated; upstream URLs are validated before they
-reach the nginx config; the OpenAPI → types check runs locally too.
-
-### Full-stack smoke test (spec 007)
-
-The statement's *"must boot flawlessly using a single command: docker compose up --build"* is now checked on every PR
-and push, not by hand. `scripts/stack-smoke.sh` is the only implementation, run the same way locally and by the CI job
-*Full stack smoke*.
-
-| Decision | Why |
-|---|---|
-| One Bash script (`curl`, `jq`), the same locally and in CI | Parity: a red CI job reproduces with one command on a laptop |
-| `docker-compose.ci.yml` on top of the default file: deterministic gds-mock, 20,000 itineraries, first run after 2 s, next one in 6 h, demo controls on | Fast and exact (no random errors, so the first run must be `COMPLETED` and the e2e IT reconciles exactly), no scheduled run colliding with the script's own (`409`); the default compose that reviewers run is unchanged |
-| Every check through nginx on port 3000, the outage through `/gds-admin/` | It exercises the proxy and the live demo's path, not only the services |
-| Its own compose project (`flight-aggregator-smoke`) | `down -v` can never delete the volume of a reviewer's own stack |
-| Checks: boot healthy, first run `COMPLETED`, catalog + two searches, e2e reconciliation IT, Mock-Beta outage → run `PARTIAL`, Beta `FAILED` with breaker `OPEN`, others `COMPLETED`, search still answers, recovery | The statement's two stack-level promises: it boots, and one provider dropping out does not take the system down |
-| Compose logs printed and uploaded on failure; `down -v` always (trap on exit, INT and TERM) | A red run explains itself, and leaves nothing behind |
-| BuildKit layer cache in the GitHub Actions cache through a CI-only compose file | Keeps the job inside its budget; never needed locally |
-
-`docker compose build` runs as its own step before `up --wait`: `--wait-timeout` bounds only the health wait after
-start, not the builds (found by the review). Each phase has its own bound and both durations are printed.
-
-**Measured.** Locally, from `docker compose down -v`, with the local Docker layer cache warm: 15 checks in **33 s**
-(build 2 s, health wait 16 s, the rest is ingestion, e2e IT and the outage run). In CI (PR #14, `f98c50c`), with an
-empty layer cache: 15 checks in **2 min 17 s** (build 74 s, health wait 24 s); the whole job 2 min 38 s, inside the
-~10 min budget.
-
-**Found while implementing:** `GDS_MOCK_PROFILE=deterministic` alone, with the default compose, kept 10 % errors:
-the compose file sets `GDS_CHAOS_DEFAULT_ERROR_RATE` explicitly, and an environment variable beats a profile's file.
-The docs said otherwise; they (and the compose comment) are fixed, and the CI override sets the rate to `0`.
-
-### AI tools used
-
-The code is developed with **Claude Code** under versioned guardrails ([ADR-0005](docs/adr/0005-ai-assisted-development.md)):
-
-- `CLAUDE.md` with project rules (architecture, testing, git workflow, language rule).
-- Skills: `spec-feature`, `implement-spec`, `adr`, `pr-description`.
-- Agents: `code-reviewer`, `spec-reviewer`, `test-engineer`.
-- Hooks: git guard, Spotless / Prettier after edits, `./mvnw verify` and/or the frontend checks before finishing a
-  turn, for whatever changed.
-
-**The guardrails also constrain the agent itself.** In PR 8 the agent tried to register the new Prettier hook and
-`npm` permissions in `.claude/settings.json`; Claude Code's auto-mode classifier blocked the edit as
-*self-modification* (an agent widening its own permissions or hooks). The agent wrote the hook script, explained the
-exact change, and the author applied it by hand and committed it. Changes to the agent's own rules go through a human
-([docs/ai/008](docs/ai/008-dashboard.md)).
-
-Every prompt and agent run is logged in [docs/ai/](docs/ai/README.md).
-
-PRs are merged with **merge commits, not squash**, to keep the spec-driven history visible on `main`: each feature
-branch has a `docs:` commit with the spec and ADRs, a `test:` commit with the tests written first, then the
-implementation and review fixes. The test-first commits are **intentionally red** (the tests don't compile or fail
-until the implementation lands); every merge result is green.
+**History.** PRs are merged with merge commits, not squash, so `main` keeps the spec-driven sequence: a `docs:` commit
+with the spec and ADRs, a `test:` commit with the tests written first (intentionally red), then the implementation
+and review fixes. Every merge result is green.
 
 ## 2. Data modelling and pagination up to 1,000,000 rows
 
-- **Pagination:** keyset pagination on `(final_price, id)` instead of offset ([ADR-0008](docs/adr/0008-keyset-pagination.md)),
-  measured at 1M rows below (*Keyset vs offset, measured*).
-- **Storage and cache:** see [ADR-0007](docs/adr/0007-postgresql-and-redis.md).
+### 2.1 Domain model and deduplication
 
-### Domain model and deduplication
+- **Times are `Instant`s**; connection and layover times are computed on absolute time, so time zones cannot skew
+  them. Adapters convert provider local times with their offsets or zones.
+- **Money** is a `BigDecimal` in EUR at scale 2, rounded `HALF_EVEN` once when created; the markup is computed exactly
+  and rounded once (no double rounding). Untrusted amounts are bounded, so input like `1E999999999` is rejected
+  cheaply.
+- **Deduplication key** — a readable, deterministic `ItineraryKey` such as
+  `IB3456:MAD-BCN@2026-11-10T08:00:00Z|IB3457:BCN-LHR@2026-11-10T10:30:00Z` (flight numbers, airports, departure
+  instants). It is also the unique key of the `itinerary` table.
+- **Selection** uses a total order — lowest base price → provider id → earliest arrivals → canonical form — so the
+  winner never depends on which provider answered first ([ADR-0011](docs/adr/0011-incremental-deduplication.md)).
+- **"Now" is read once per run**, so offers that arrive late in a long run are not judged against a later clock.
 
-- **Times are `Instant`s.** Connection and layover times are computed on absolute time, so time zones can't skew
-  them. Provider adapters convert local times with their offsets.
-- **Money** is a `BigDecimal` in EUR, always at scale 2. Inputs with more decimals are rounded `HALF_EVEN` once, when
-  created, so prices that differ only below one cent tie. The markup is computed exactly and rounded once, which
-  avoids double rounding.
-- **Deduplication key:** a readable, deterministic `ItineraryKey`, e.g.
-  `IB3456:MAD-BCN@2026-11-10T08:00:00Z|IB3457:BCN-LHR@2026-11-10T10:30:00Z`. It is made of flight numbers (which
-  carry the airline), airports and departure instants. It will double as the natural unique key in persistence.
-- **Selection** uses a total order: lowest base price → provider id → earliest arrivals → canonical itinerary
-  representation. The winner never depends on which provider answered first.
-- **Memory:** `OfferAggregator` keeps one entry per distinct valid itinerary (the preferred offer and a small sorted
-  set of providers), not one per offer, and it accepts offers one at a time from streaming parsers. Measured in spec
-  003: **about 1.2 KB per itinerary**, so the whole 1M world is about 1–1.2 GB. Ingestion doesn't hold the world:
-  it runs one aggregator per horizon day (duplicates never cross days, because the identity includes departure
-  instants) and sums the additive statistics (ADR-0016). Its working set is about 250 MB per day in flight at 1M,
-  512 MB with the default 2 (measurements in section 1). Further options, not needed so far: interning airports,
-  airlines and providers, a lighter provider set, or a PostgreSQL upsert for "keep cheapest" (ADR-0011).
-- **"Now" is read once per run**, when the validator is built, so offers that arrive late in a long run aren't judged
-  against a later clock. Otherwise the result would depend on arrival order.
-- **Untrusted amounts are bounded** (fewer than 10 integer digits, at most 10 decimals), so input like `1E999999999`
-  is rejected cheaply instead of triggering huge `BigDecimal` arithmetic.
+### 2.2 Memory at 1M: aggregate one day at a time
 
-### Read model in PostgreSQL (spec 004)
+`OfferAggregator` keeps one entry per distinct valid itinerary (the preferred offer and its sorted providers), not
+one per offer, and accepts offers one at a time from the streaming parsers: about **1.2 KB per itinerary**, so the
+whole 1M world would need ≈ 1–1.2 GB. Ingestion never holds the world: duplicates cannot cross days (the identity
+includes departure instants and providers partition by UTC departure date), so it runs **one aggregator per horizon
+day**, at most 2 days in flight, and sums the additive statistics
+([ADR-0016](docs/adr/0016-day-partitioned-aggregation.md)). Each partition is fed to its day's aggregator as soon as
+it arrives and dropped.
 
-One **denormalized row per aggregated itinerary** in `itinerary` (columns in [architecture.md](docs/architecture.md#schema)):
+Measured at 1M (gds-mock deterministic, 1,840,053 offers → 946,092 itineraries; Apple M1 Max):
 
-- **Every search filter and the sort key are scalar columns of the same row**: `origin`, `destination`, `airline`,
-  `final_price` (what users filter and sort on), `departure_date`/`departure_at`. A composite B-tree such as
-  `(origin, destination, final_price, id)` can then answer a filtered, price-ordered page with one index range scan
-  and `LIMIT`, with no join. The search spec adds and measures those indexes (each one slows the bulk load).
-- **`id bigint` identity** is the keyset tie-breaker with `final_price` (ADR-0008). Ids change when a day is replaced,
-  so a cursor taken before a replacement continues by position and may skip or repeat a result; the search spec
-  documents it.
-- **Segments as JSONB**, read as is: they are only displayed, so a `segment` table (2–3× the rows) and its join on
-  every read buy nothing.
-- **`itinerary_key` unique** (spec 001's key, which includes departure instants) guards against duplicates;
-  **`departure_date`** (UTC date of the first departure, i.e. the provider partition) is the unit of snapshot
-  replacement and retention: one indexed `DELETE` each.
-- **Prices `numeric(12,2)`**, EUR (ADR-0010); providers as `text[]` (sorted), the run id and timestamps for audit.
-- Day status in `day_snapshot` (complete or not, missing providers, stale since), runs in `ingestion_run` (report as
-  JSONB), both queryable by the dashboard.
-- Size measured at 1M: **618 bytes per row, 558 MB** with today's indexes; loaded in 10–14 s with `COPY` (above).
-- Partitioning by `departure_date` was considered and deferred (ADR-0017): it would make retention instant and avoid
-  dead tuples, at the cost of DDL on every run; at ≈ 1M rows plain deletes and autovacuum are enough.
+| | Result |
+|---|---|
+| Working set | ≈ 250 MB per day in flight (better than ADR-0016's ≲ 0.5 GB estimate) |
+| Smallest heap that completes, ingestion → PostgreSQL | 512 MB (384 MB: out of memory, the container restarts and the next run marks the cut run `ABORTED`) |
+| Shipped heap | **`-Xmx768m`** (1.5× the floor; container peak ≈ 1 GB). It was 1,536 MB while results were kept in memory (spec 003), before PostgreSQL took them day by day |
+| Too little heap | degrades before it fails: GC pauses become read timeouts and the run is `PARTIAL`, not a crash |
+| Full run in compose, 946,044 itineraries, search indexes present (2026-11-07) | **21.5 s** first load, **29.5 s** replacement (7 days `REPLACED` each), container peak 0.99 GiB |
+| Days in flight | 1 / 2 / 3 / 7 days: 11.4 / 8.1 / 7.4 / 8.2 s with 256 / 512 / 768 / 1,024 MB (ingestion alone, results discarded): 2 is as fast as 3 or 7 with half or a quarter of their memory |
 
-### Keyset vs offset, measured (spec 005)
+### 2.3 Read model in PostgreSQL
 
-Same filters, page of 20, server side, median / p95 of 30 runs on 1,000,006 rows
-([full table](docs/measurements/search-1m.md)):
+One **denormalized row per aggregated itinerary** in `itinerary`
+([schema](docs/architecture.md#schema), [ADR-0007](docs/adr/0007-postgresql-and-redis.md)):
+
+- **Every filter and the sort key are scalar columns of the same row** (`origin`, `destination`, `airline`,
+  `final_price`, `departure_date`, `departure_at`), so a composite B-tree answers a filtered, price-ordered page with
+  one index range scan and `LIMIT`, without a join.
+- **`id bigint` identity** is the keyset tie-breaker with `final_price`.
+- **Segments as JSONB**: they are only displayed, so a `segment` table (2–3× the rows) and a join on every read buy
+  nothing.
+- **`departure_date`** (the provider partition) is the unit of snapshot replacement and retention — one indexed
+  `DELETE` each; `day_snapshot` records per day whether it is complete, which providers are missing and since when it
+  is stale, shown to users as freshness badges; `ingestion_run` keeps each run's report as JSONB.
+- **Prices `numeric(12,2)`** in EUR; `Money` caps amounts at 9 integer digits, so the column has room to spare.
+- **Bulk load with `COPY`** (text format, streamed from a 64 KiB buffer): 1M rows in 10.4 s vs 18.9 s with batched
+  `INSERT`s and `reWriteBatchedInserts` (31.0 s without) — [ADR-0018](docs/adr/0018-bulk-load.md). With the two search
+  indexes the first load takes 17.9 s and a full replacement 32.6 s.
+- **Size at 1M:** 623 MB with every index after `VACUUM FULL` — 455 MB rows + 168 MB indexes, of which the two search
+  indexes are 65 MB (ADR-0020 estimated 30–60 MB); 690 bytes per row. Right after a replacement, dead tuples double
+  it (1.25 GB after two loads) until autovacuum reclaims them (see 3.1).
+- **Partitioning by `departure_date`** was considered and deferred: instant retention and no dead tuples, at the cost
+  of DDL on every run; at ≈ 1M rows plain deletes and autovacuum are enough ([ADR-0017](docs/adr/0017-day-snapshot-replacement.md)).
+
+### 2.4 Indexes, chosen by `EXPLAIN` on 1M rows
+
+Two indexes beyond the primary and unique keys ([ADR-0020](docs/adr/0020-search-indexes.md),
+[full plans](docs/measurements/search-1m.md)): `(final_price, id)` for searches without a route, and
+`(origin, destination, final_price, id)` for a route. Every measured filter combination is an index scan in keyset
+order stopped by `LIMIT` — no sequential scan, no sort — and the spec's common combinations (AC-22) run in
+**0.05–2.9 ms** server side for the first page. The data's shape decides what else is cheap: with ≈ 35 airports and
+24 airlines, a filter on the price index finds a page quickly (a `date` first page skips 106 entries). The one slow
+case is two selective filters outside the route index (origin + carrier + a low `maxPrice`, 365 matching rows):
+≈ 45–90 ms, accepted rather than adding indexes that slow every load; the cache serves its repeats in ≈ 3 ms.
+
+### 2.5 Keyset vs `OFFSET`, measured
+
+Same filters, page of 20, server side, median / p95 of 30 runs on 1,000,006 rows (`SearchPerformanceIT`,
+[full table](docs/measurements/search-1m.md)):
 
 | Filters (matching rows) | Page | Keyset | `OFFSET` |
 |---|---:|---:|---:|
 | none (1,000,006) | 1 | 0.75 / 1.24 ms | 0.61 / 0.76 ms |
 | none | 1,000 | **0.55 / 0.75 ms** | **50.30 / 68.81 ms** |
+| none | 50,001 (last)¹ | **0.51 / 0.66 ms** | **1,116.75 / 1,128.32 ms** |
 | `date` (142,858) | 1,000 | 0.47 / 0.63 ms | 63.68 / 65.51 ms |
 | `carrier` (42,082) | 1,000 | 0.76 / 0.94 ms | 159.11 / 176.64 ms |
 | `origin` (29,375) | 1,000 | 0.89 / 1.78 ms | 94.91 / 104.69 ms |
 | `carrier` + `maxPrice` (12,397) | 620 (last) | 0.99 / 1.22 ms | 174.92 / 192.35 ms |
-| busiest route, no date, `maxPrice` above all (993) | 50 (last) | 0.53 / 0.91 ms | 2.14 / 2.98 ms |
+| busiest route, `maxPrice` above all (993) | 50 (last) | 0.53 / 0.91 ms | 2.14 / 2.98 ms |
 
-- **Keyset cost does not depend on depth**: page 1,000 costs what page 1 costs, because the query seeks the cursor
-  position in the index and reads `limit + 1` entries.
-- **`OFFSET` grows linearly**: page 1,000 reads and discards 19,980 rows first (≈ 90× slower here), and with a
-  residual filter (carrier) every discarded row is also a heap fetch (≈ 200×). At the last page of the unfiltered
-  1M result it would read the whole index.
-- **Offset is not even correct here**: an ingestion run replaces whole days every 15 min, so a row inserted or deleted
-  before the current position shifts every later page (duplicates or gaps), whereas keyset continues from a position.
-- The price of keyset: no "jump to page N" and no total count (an exact `COUNT(*)` would read up to 1M rows per
-  request); the dashboard pages forward with "more results".
+¹ Added on 2026-11-07 by a re-run of the same test ([addendum](docs/measurements/search-1m.md#addendum-2026-11-07-the-last-page));
+the other rows are from the 2026-11-06 run and were within noise in the re-run.
+
+- **Keyset cost does not depend on depth**: the query seeks the cursor's position in the index and reads
+  `limit + 1` entries, so the last page costs what the first does.
+- **`OFFSET` grows linearly with depth**: page 1,000 reads and discards 19,980 rows first (≈ 90× slower), and with a
+  residual filter every discarded row is also a heap fetch (carrier: ≈ 200×). On the last page of the unfiltered
+  result it reads and discards a million index entries: **1.1 s against 0.5 ms**, ≈ 2,200×.
+- **`OFFSET` is not even correct here**: every run replaces whole days, so a row inserted or deleted before the
+  current position shifts every later page (duplicates or gaps); keyset continues from a position.
+- **The price of keyset:** no "jump to page N" and no total count (an exact `COUNT(*)` would read up to 1M rows per
+  request); the dashboard pages forward with "Load more". A cursor taken before a day's replacement continues from its
+  `(price, id)` position in the new data (see 3.1).
+
+### 2.6 Cache
+
+Keys are `v1 · data version · normalized filters · limit · position`, values are pages, TTL 10 min only as a safety
+net ([ADR-0022](docs/adr/0022-search-cache.md)). Measured through the API at 1M rows (median, client side): typical
+searches **2.6–8 ms uncached / 1.8–5.4 ms cached** — PostgreSQL is already sub-millisecond thanks to the indexes, so
+the cache mostly takes repeated load off the database; it pays off for the expensive requests: the **catalog**
+(420 ms grouped scan → 1.4 ms, ≈ 300×) and the two-filter combination no index serves (56 → 3.0 ms, ≈ 18×).
+
+### 2.7 Other measured results
+
+| | Result |
+|---|---|
+| gds-mock, full 1M feed in one request | Alpha 2.7 s (144 MB JSON) · Beta 10.6 s (332 MB XML) · Gamma 2.8 s (100 MB CSV); the three in parallel 11.4 s, ≈ the slowest; container ≈ 229 MiB with a 256 MB heap |
+| Reconciliation | Every figure of the report equals gds-mock's `/admin/world/stats` (per provider, reason and day) — in the build against recorded feeds, by hand at 100k and 1M, and in CI on every PR (smoke) |
+| Default compose stack (100,000, chaos on), clean clone | build 22 s (Maven cache mount pruned, base images local), all five services healthy 18 s after `up`, first scheduled run `COMPLETED` in 18.3 s (94,503 itineraries) — 61 s from `build` to searchable data; every quick-start URL answered |
+| Full-stack smoke in CI | 15 checks in 2 min 17 s with an empty layer cache (build 74 s), 1 min 21 s with it warm (build 14 s); on `main` after the PR 14 merge (`3c2dc3b`) 2 min 13 s — `main` cannot read PR caches |
+| `./mvnw verify` (both modules: format, unit and integration tests, ArchUnit, coverage gate) | **67 s** on an Apple M1 Max: flight-aggregator 509 unit + 182 integration tests, gds-mock 146 + 41 |
+| Frontend | `npm run check` **7 s**: 118 tests, 99.7 % lines / 95.2 % branches (gate 80 / 70); bundle 76 kB gzipped JS; image smoke test 23 checks |
 
 ## 3. System limitations and trade-offs
 
-Known from the accepted decisions:
+### 3.1 Freshness and consistency
 
-- Search data is up to one ingestion interval stale (15 min by default) — [ADR-0006](docs/adr/0006-scheduled-pre-ingestion.md).
-  A day missing a provider keeps its previous snapshot for up to 2 h (ADR-0017).
-- Keyset pagination has no "jump to page N" and no exact total count — [ADR-0008](docs/adr/0008-keyset-pagination.md).
-- EUR only, single-airline itineraries, fixed 45 min / 24 h connection thresholds — [ADR-0010](docs/adr/0010-domain-assumptions.md).
-- One-way itineraries only: visiting an airport twice (including a return to the origin) is discarded as
-  `REVISITED_AIRPORT` — [spec 001](specs/001-itinerary-aggregation/spec.md).
-- An itinerary that breaks several rules is counted under its first failing reason only, so the counts add up.
-- "Already departed" is evaluated at ingestion time and again at query time by search (spec 005), including on cached
-  pages.
-- `OfferAggregator` is single-threaded and holds a day's distinct itineraries in memory. Ingestion aggregates one day
-  per aggregator (ADR-0016), so memory follows the days in flight, not the world (measurements above).
-- Day partitioning assumes providers partition by the UTC date of the first departure (true for gds-mock). A provider
-  that broke it would make an itinerary served under two days appear twice: a duplicate, never a lost offer.
-- Flight numbers are canonical without leading zeros (`IB0123` = `IB123`), whatever the provider sends.
-- Arrival times aren't part of the identity. If providers disagree on arrival for the same flight, the earliest
-  arrival is kept (deterministic, but it may not be the true schedule).
+- **Search data is up to one ingestion interval old** (15 min by default) — the price of decoupling search from
+  provider latency ([ADR-0006](docs/adr/0006-scheduled-pre-ingestion.md)).
+- **Partial days favour completeness over freshness**: while a provider is missing, a day keeps its previous snapshot
+  (stale badge) for up to 2 h, ignoring the other providers' fresher prices for that day. A per-provider merge would be
+  fresher but cannot be exact, because rows keep only the selected offer ([ADR-0017](docs/adr/0017-day-snapshot-replacement.md)).
+- **Pagination across a refresh**: a replaced day gets new ids, so a walk that spans a run may skip or repeat an
+  itinerary at the boundary and see new prices. Each page is consistent; rejecting old cursors would send users back
+  to page 1 after every run.
+- **Every run invalidates the whole cache**, including unchanged days; and every request reads the data version from
+  PostgreSQL, so PostgreSQL must be up even for cache hits.
+- **Cached pages can be short**: items departed since caching are dropped, so a page can have fewer than `limit`
+  items (even none) while `hasMore` is true; the contract and the dashboard keep paging.
+- **The catalog is a grouped scan** (≈ 420 ms at 1M), once per data version per instance; a run bumps the version once
+  per day it writes, so up to 7 scans per run.
+- **Dead tuples**: replacing up to 7 days per run leaves dead rows until autovacuum catches up (1.9 M dead next to
+  0.95 M live after two 1M replacements in a row) — disk and some scan efficiency, not correctness.
 
-- gds-mock regenerates the world on every request (each provider call walks every itinerary, including those it
-  doesn't offer). That is CPU instead of memory, and cheap at this volume (see the measurements above). Records come
-  in generation order, not shuffled.
-- gds-mock's admin API is unauthenticated (a mock on an internal network), and the three providers share one JVM, so
-  a GC pause or a crash affects all of them at once. Real providers fail more independently.
-- gds-mock has no rate limiting: a full 1M feed keeps a CPU core busy for a few seconds (up to the 30 min async
-  timeout for a very slow client), so anyone who can reach it can load it. That is acceptable for a mock on an
-  internal network, next to the unauthenticated admin API.
-- gds-mock has no catch-all exception handler. Unexpected errors use Spring Boot's default error response. A
-  catch-all would also capture framework exceptions (unknown path, wrong method) and client disconnects, turning
-  them into 500s or ERROR logs.
-- gds-mock doesn't simulate failures in the middle of a stream (truncated responses), gzip or slow trickling. Failures
-  happen before the first byte only.
-- Changing the generator code changes the data for a given seed. Determinism holds per version of the mock.
+### 3.2 Pagination and search
 
-Ingestion (spec 003):
+- No total count, no page N, no backwards cursor, one sort order (price); another order needs its own index and
+  cursor version ([ADR-0008](docs/adr/0008-keyset-pagination.md)).
+- Cursors are not signed: a client can start anywhere (the data is public). Cache keys are client-controlled, so a
+  client looping over crafted positions fills Redis, bounded by `maxmemory 256mb` + LRU.
+- Selective filters outside the indexes scan more of the price index (measured cases in ADR-0020).
+- Times are shown in UTC: the API has no airport time zones.
 
-- A partition is buffered as parsed offers until its attempt completes (ADR-0015), and a retry re-downloads the whole
-  partition. There is no resume and no disk spooling.
-- Breaker state is per JVM instance and lives in memory: a restart closes every breaker, and replicas don't share
-  state.
-- A `RUN_TIMEOUT` partition reports 0 attempts: the attempts of a cancelled request aren't counted.
-- `HttpURLConnection` silently re-sends a GET once when a connection resets before the response. A single reset never
-  reaches our retry, and that extra request isn't counted in the report's attempts.
-- An attempt aborted by a deadline frees its virtual thread once the socket closes. The caller waits at most one
-  read timeout for that (logged at WARN if exceeded), so a run can overrun its deadline by that much at worst.
-- Any non-2xx status that isn't 5xx (4xx, but also an unexpected 1xx or an unfollowed 3xx) is a `CLIENT_ERROR`: not
-  retried, not a breaker failure.
-- Gamma is read as UTF-8: invalid bytes become U+FFFD (so the record is usually malformed), and a byte-order mark
-  makes the header check fail the document.
-- With too little heap for the days in flight, the run degrades rather than crashes: GC pauses cause read timeouts,
-  and the report is `PARTIAL`. With far too little, it runs out of memory; affected partitions are reported as
-  `UNEXPECTED_ERROR` and the error is rethrown.
-- **Time-zone rules must agree between provider and aggregator.** Mock-Gamma sends local times plus a zone, and
-  Mock-Beta sends offsets computed from the provider's rules. If the two sides run different tzdata versions, an
-  instant can shift silently. CI found exactly that: tzdata 2026 moved `Africa/Casablanca` from UTC+1 to UTC+0, so
-  fixtures recorded on an older JDK no longer reconciled. Two itineraries became invalid connections, and
-  cross-provider duplicates stopped matching.
-  - Mitigation in this repository: gds-mock only uses zones whose rules are stable across tzdata versions. A
-    `CatalogTimeZonesTest` checks this, and the four volatile ones (Casablanca, Mexico City, São Paulo, Istanbul) were
-    replaced, so the tests no longer depend on the JVM's tzdata.
-  - With real providers: keep JDKs (tzdata) current, prefer offsets or UTC, and detect disagreements by comparing the
-    same flight across providers.
-- Gamma local times in a DST gap or overlap are resolved by `java.time` defaults (shifted forward in a gap, earlier
-  offset in an overlap).
-Persistence and pipeline (spec 004):
+### 3.3 Domain assumptions
 
-- **Partial days favour completeness over freshness.** While a day is stale (a provider missing), the contributing
-  providers' fresh prices for that day are ignored, for at most `max-stale-age` (2 h). A per-provider merge would be
-  fresher but cannot be exact, because rows keep only the selected offer (ADR-0017).
-- **Dead tuples.** Every run replaces up to 7 days, so `itinerary` accumulates dead rows until autovacuum catches up:
-  after two 1M replacements in a row there were 1.9 M dead tuples next to 0.95 M live ones. That costs disk and some
-  scan efficiency, not correctness. Production would tune autovacuum for this table or move to day partitions
-  (ADR-0017).
-- **One bad row fails its day.** `COPY` has no per-row errors; the day is `WRITE_FAILED` and keeps its previous
-  snapshot.
-- **The run lock is a PostgreSQL session lock.** It needs a direct connection or a session-mode pooler (not PgBouncer
-  in transaction mode) and holds one extra (non-pooled) connection for up to 10 min. A lost lock is detected at the
-  next day boundary, so a run whose session died while writing a day can still commit that day after another
-  instance has started. Each day stays atomic and two writers of the same day are serialised by PostgreSQL (the
-  second one's rows conflict on the unique key or replace the first's whole day), so readers never see a mix; there
-  is no fencing token in the write itself — ADR-0019.
-- **Pool size vs. concurrent days.** Each day in flight writes on its own pooled connection; the default pool (10)
-  covers the default 2 days with room for the API. Raising `max-concurrent-days` well beyond the pool size makes
-  publishes wait for connections (and fail as `WRITE_FAILED` after Hikari's 30 s timeout); keep
-  `spring.datasource.hikari.maximum-pool-size` ≥ `max-concurrent-days` + 2.
-- **The ingestion endpoints are unauthenticated**, like the rest of the API for now; anyone who can reach the service
-  can start a run (at most one at a time).
-- **Runs started by `POST` are not cancellable**, and the history keeps only the last 7 days.
-- **A run cut short by a crash** stays `RUNNING` until the next run marks it `ABORTED`; with the default schedule that
-  is at most 15 min (plus the restart).
-- **Graceful shutdown** interrupts a run in progress and waits up to 30 s for it to store its `FAILED` state (compose
-  gives the container 40 s before killing it); a run killed harder stays `RUNNING` until the next run aborts it.
-- **Failure messages are generic** (`Unexpected error (IllegalStateException)…`): the API never serves exception
-  text, which may contain SQL or host names; the details are in the log under the run id.
+- EUR only, single-airline itineraries, fixed 45 min / 24 h connection thresholds, one-way only (a revisited airport,
+  including a return to the origin, is discarded) — [ADR-0010](docs/adr/0010-domain-assumptions.md).
+- An itinerary breaking several rules is counted under its first failing reason only, so the counts add up.
+- Arrival times are not part of the identity: if providers disagree for the same flight, the earliest arrival is kept.
+- Flight numbers are canonical without leading zeros (`IB0123` = `IB123`).
+- Day partitioning assumes providers partition by the UTC date of the first departure (true for gds-mock); one that
+  did not would produce a duplicate across days, never a lost offer.
+- **Time-zone rules must agree between provider and aggregator.** CI found a real case: tzdata 2026 moved
+  `Africa/Casablanca` from UTC+1 to UTC+0, so fixtures recorded on an older JDK stopped reconciling. gds-mock now uses
+  only zones whose rules are stable (checked by a test); with real providers, keep JDKs current, prefer offsets or UTC
+  and compare the same flight across providers.
 
-Search and cache (spec 005):
+### 3.4 Ingestion and resilience
 
-- **Pagination across a refresh.** A day's replacement gives its rows new ids. A cursor taken before continues from
-  its `(price, id)` position in the new data, so an itinerary at the boundary may be skipped or repeated and prices
-  may change between pages. Accepted: every page is consistent, it only affects a walk that spans a refresh (every
-  15 min, seconds of writes), and rejecting old cursors would send users back to page 1 after every run.
-- **No total count, no page N, no backwards cursor**, and only one sort order (price). Another order needs its own
-  index and cursor version.
-- **Cached pages can be short**: items that departed since the page was cached are dropped, so a page can have fewer
-  than `limit` items, even none, while `hasMore` is true. The contract tells clients to keep paging.
-- **Every run invalidates the whole cache**, also for days that did not change; a per-day version would keep more hits
-  at the cost of keys that span several days. Every request, hit or miss, reads the data version from PostgreSQL, so
-  PostgreSQL must be up even for cache hits.
-- **The catalog is computed by a grouped scan of the future rows** (≈ 420 ms at 1M rows; no index helps a `DISTINCT`
-  over every route). It runs once per data version per instance — memoised in the JVM behind a lock, also when Redis
-  is down — but a run bumps the version once per day it writes, so a run triggers up to 7 scans. A cached catalog
-  can list a route whose last flight has just departed until the next run; past days are dropped.
-- **Cache keys are client-controlled** (any position or `maxPrice` is a new key): a client looping over crafted
-  values gets misses and fills Redis, bounded by `maxmemory 256mb` + LRU. Signed cursors or caching only first pages
-  would close it if needed.
-- **Until the breaker opens**, a request with Redis hung can wait for two 100 ms timeouts (read and write); after 5
-  failed calls Redis is skipped for 30 s.
-- **`/actuator/metrics` is exposed on the application port without authentication**, like the API; production would
-  move management to its own port or behind the network policy.
-- **Cursors are not signed**: a client can craft one to start anywhere; the data is public, so nothing is gained.
-- **Selective filters outside the indexes** (e.g. a rare carrier on its own) scan more of the price index; measured
-  combinations are in ADR-0020.
-- **Search is unauthenticated and not rate limited**, like the rest of the API.
+- A retry re-downloads the whole partition (no resume, no disk spooling); a partition is buffered until its attempt
+  completes.
+- Breaker state is per JVM and in memory: a restart closes every breaker; replicas do not share state.
+- `HttpURLConnection` silently re-sends a GET once on a connection reset; that request is not counted in the report.
+- An attempt aborted by a deadline frees its thread once the socket closes, so a run can overrun its deadline by up to
+  one read timeout.
+- Any non-5xx error status is a `CLIENT_ERROR`: not retried, not a breaker failure.
+- `COPY` has no per-row errors: one bad row fails its day (`WRITE_FAILED`), which keeps its previous snapshot.
+- The run lock is a PostgreSQL session lock: it needs a direct connection or a session-mode pooler (not PgBouncer in
+  transaction mode) and holds one extra connection for up to 10 min. A lost lock is detected at the next day boundary;
+  each day stays atomic, but there is no fencing token in the write itself ([ADR-0019](docs/adr/0019-ingestion-run-lock.md)).
+- Keep `maximum-pool-size` ≥ `max-concurrent-days` + 2, or publishes wait for connections.
+- Runs are not cancellable; history keeps 7 days; a run cut by a crash stays `RUNNING` until the next run aborts it
+  (≤ 15 min). Graceful shutdown waits up to 30 s for a run to store its `FAILED` state.
 
-Dashboard (spec 006):
+### 3.5 Security and operations
 
-- **Times are UTC only**: the API exposes no airport time zones; local times would need a zone per airport in the
-  catalog.
-- **Polling, not push**: up to 30 s before a scheduled run is noticed, and every open tab polls (one primary-key read
-  every 30 s, every 3 s during a run). SSE is the upgrade path (ADR-0023).
-- **Charts describe the loaded results**, not the whole result set (there is no total by design).
-- **Demo controls and Refresh are unauthenticated and not CSRF-protected**: any page the user visits could POST to
-  `localhost:3000/api/v1/ingestions` or toggle a gds-mock outage. Acceptable for a local demo stack (gds-mock's admin
-  API is published unauthenticated on 8081 anyway); production would put authentication in front, disable
-  `DEMO_CONTROLS`, and check `Origin` on state-changing requests.
-- **No browser end-to-end flows**: behaviour is tested in jsdom with MSW, layout in headless Chromium with a mocked
-  API (one engine, four widths), the image with a smoke test, and the stack by `scripts/stack-smoke.sh` over HTTP (spec 007).
-- **`npm audit`: 7 moderate advisories** in `minimatch` inside the dev-only lint toolchain (`typescript-eslint`); they
-  concern glob patterns we write ourselves. Production dependencies audit clean. Accepted until upstream updates: the
-  author dismissed the Dependabot alert as *"Risk is tolerable"* (dev-only, transitive, not shipped, no compatible fix
-  yet) — [docs/ai/009](docs/ai/009-dependabot-triage.md#open-item-for-the-author--resolved).
-- **Pinned behind the latest majors**: TypeScript 5.9 and ESLint 9 until the tools support TypeScript 7 / ESLint 10;
-  Dependabot ignores those majors with a documented revisit condition (the first such PRs, #10 and #11, were
-  declined — [docs/frontend.md](docs/frontend.md#version-constraints)). For the same reason Dependabot's security
-  update for `minimatch` reports "not possible" (the fix needs a major `typescript-eslint` does not accept yet).
+- **Unauthenticated, not rate limited**: the API, the ingestion trigger, `/actuator/metrics`, the dashboard's demo
+  controls (no CSRF protection) and gds-mock's admin API. Acceptable for a local demo stack; see section 4.
+- API failure messages are generic (no exception text, which may contain SQL or host names); details are logged under
+  the run id.
+- `npm audit`: 7 moderate advisories in `minimatch` inside the dev-only lint toolchain; production dependencies audit
+  clean. The author dismissed the Dependabot alert as *risk is tolerable* (dev-only, transitive, not shipped, no
+  compatible fix yet) — [docs/ai/009](docs/ai/009-dependabot-triage.md#open-item-for-the-author--resolved).
+- TypeScript 5.9 and ESLint 9 are held behind the latest majors until the tools' peer ranges accept them; Dependabot
+  ignores those majors with a revisit condition ([docs/frontend.md](docs/frontend.md#version-constraints)).
 
-Full-stack smoke test (spec 007):
+### 3.6 The mock
 
-- **It runs the deterministic profile on a small world**, not the default chaos at 100,000: chaos would make the
-  first run's status random. Chaos and volume are covered by the spec 003/004 tests and the measurements above.
-- **The breaker's recovery is not checked** (half-open after 30 s, then closed): it would add at least 30 s per run;
-  spec 003 ITs cover it.
-- **It needs the stack's ports free** (3000, 5432, 6379, 8080, 8081), so it cannot run next to a developer's own
-  stack; it fails fast saying so.
-- The e2e IT and gds-mock both use today's UTC date: a run across midnight UTC can fail its reconciliation.
+- It regenerates the world on every request (CPU instead of memory; cheap at this volume); records come in generation
+  order, not shuffled.
+- The three providers share one JVM, so a GC pause or crash affects all three at once; real providers fail more
+  independently.
+- Failures happen before the first byte only: no truncated streams, gzip or trickling bodies.
+- No catch-all exception handler (it would turn framework errors and client disconnects into `500`s); determinism holds
+  per version of the generator.
 
-*To be completed:* what would change for production.
+### 3.7 Testing
+
+- No browser end-to-end flows: behaviour is tested in jsdom with MSW, layout in headless Chromium at four widths, the
+  image with a smoke test, and the stack over HTTP by the smoke script.
+- The smoke test runs the deterministic profile on 20,000 itineraries (chaos would make the first run's status
+  random); chaos and volume are covered by the spec 003/004 tests and the 1M measurements. It does not wait for the
+  breaker's half-open recovery (≥ 30 s; covered by ITs), and it needs the stack's ports free.
+- The e2e test and gds-mock both use today's UTC date: a run across midnight UTC can fail its reconciliation.
+
+## 4. What would change for production
+
+| Area | Today | Production |
+|---|---|---|
+| Access | Everything unauthenticated | OAuth2/OIDC at the edge; ingestion trigger and admin behind a role; rate limiting per client at the gateway; `DEMO_CONTROLS` off; `Origin` checks on state-changing requests |
+| Management | `/actuator/*` on the application port | Separate management port, not exposed publicly |
+| Secrets and config | Local credentials in compose | Secrets manager; per-environment configuration |
+| Scale-out | One aggregator instance (the lock already allows several) | Several instances behind a load balancer; breaker state shared or per-instance by design; Redis with persistence off but HA |
+| Data | Plain table, autovacuum defaults | Day partitions (instant retention, no dead tuples) or autovacuum tuned for the table; read replica for search; backups |
+| Freshness | Polling every 30 s | SSE for run events ([ADR-0023](docs/adr/0023-real-time-by-polling.md)); per-day cache versions |
+| Providers | Full feed per day, re-downloaded on retry | Incremental or delta feeds where providers offer them; resumable downloads; per-provider rate limits |
+| Delivery | `docker compose` | Container images built once in CI and promoted; Kubernetes with readiness/liveness from the existing probes; Flyway migrations as a separate job |
+
+### 4.1 Observability
+
+**What exists today.**
+
+- **Health:** Actuator liveness and readiness probes on both services (used by the compose healthchecks); readiness
+  does not depend on Redis, by design.
+- **Metrics** (`/actuator/metrics` on the aggregator, Micrometer; read from the running stack): Spring Boot's
+  auto-configured meters — `http.server.requests` (count and total time per URI template, status and outcome, no
+  percentile histograms), `jvm.*` (memory, GC pauses, threads), `hikaricp.connections.*` (active, pending, acquire
+  and usage time, timeouts), `jdbc.connections.*`, `lettuce` (Redis command latency), `executor.*`, `tomcat.sessions.*`,
+  `logback.events` (log lines per level), `process.*` / `system.*`. gds-mock exposes health only. The only custom meter
+  is the counter `search.cache` with `result=hit|miss|error|bypassed` — `error` counts failed Redis calls and `bypassed`
+  the calls skipped while the cache breaker is open, i.e. the Redis fallback rate.
+- **Persisted ingestion reports:** every run's report is stored as JSONB and served by `GET /api/v1/ingestions/{id}`:
+  status per provider, partitions succeeded and failed with `FailureKind` and attempts, the breaker state at the end,
+  offers received and malformed records per reason, and per day the outcome (`REPLACED`, `KEPT_STALE`, …), the
+  missing providers and the deduplication statistics. The dashboard's status panel is built on it.
+- **Logs:** plain text to stdout; one summary line per run (status, itineraries, offers, discards, duplicates,
+  duration, per provider `status(partitions, breaker)`), WARN on retention or statistics failures and orphaned runs,
+  the cache breaker logged once when it opens.
+
+**What is missing**: no time series of ingestion health (the reports are per run, not aggregated), no Resilience4j
+metrics (the breakers are not bound to Micrometer), no latency histograms with percentiles, no correlation id across
+nginx → aggregator → providers, no alerting.
+
+**Plan.**
+
+1. **Metrics → Prometheus + Grafana.** Add `micrometer-registry-prometheus` and expose `/actuator/prometheus` on the
+   management port. New meters, recorded in the adapters and the run service (the use cases stay framework-free:
+   a small `IngestionMetrics` port with a Micrometer adapter):
+   - Ingestion: `ingestion.run.duration` (timer, tag `status`), `ingestion.partition.duration` and
+     `ingestion.partition.failures` (tags `provider`, `kind`), `ingestion.attempts` / retries (tag `provider`),
+     `ingestion.malformed` (tags `provider`, `reason`), `ingestion.discarded` (tag `reason`),
+     `ingestion.days` (gauge, tag `outcome`, including `stale` and the age of the oldest stale day), plus
+     `resilience4j-micrometer` for breaker state, calls and transitions per provider.
+   - Search: `http.server.requests` with percentile histograms (p50 / p95 / p99) per URI template; cache hit ratio
+     from `search.cache` (`hit / (hit + miss)`); Redis fallbacks (`error`, `bypassed`) and the cache breaker's state.
+   - Platform: JVM memory and GC pauses (the ingestion heap is the tight resource), HikariCP pool usage and wait time
+     (the pool must cover days in flight + API), PostgreSQL via `postgres_exporter` (dead tuples, autovacuum), Redis
+     via `redis_exporter` (memory, evictions).
+   - Grafana: an *Ingestion* dashboard (run duration and status over time, per-provider failures by kind, retries,
+     breaker state timeline, malformed by reason, stale days) and a *Search* dashboard (latency percentiles per
+     endpoint, cache hit ratio, fallback rate, pool saturation).
+2. **Structured logs → Loki.** Spring Boot's structured logging (`logging.structured.format.console=ecs` or
+   `logstash`) for JSON lines with `traceId` / `spanId` and the run id in the MDC, shipped by Promtail or the
+   OpenTelemetry Collector to Loki; Grafana links a trace to its logs and a run id to everything it did.
+3. **Tracing → OpenTelemetry.** Micrometer Tracing with the OTLP exporter in both Spring services; nginx with the
+   OpenTelemetry module so the trace starts at the edge (W3C `traceparent` forwarded through `/api`); spans per
+   ingestion run, per day and per provider attempt (retries and breaker rejections visible), JDBC and Redis spans on
+   search; Tempo or Jaeger as the backend.
+4. **Alerting and SLOs** (Prometheus rules → Alertmanager):
+
+   | Alert / SLO | Condition |
+   |---|---|
+   | Provider breaker open | a provider's breaker `OPEN` for more than N minutes — N ≈ 30 (two consecutive runs: it only probes again when the next run calls it) |
+   | Ingestion failing | a run ended `FAILED`, or no `COMPLETED`/`PARTIAL` run for more than 2 intervals |
+   | Data too stale | a day stale for more than 1 h (at `max-stale-age`, 2 h, it is replaced by the incomplete data), or any day `INCOMPLETE` |
+   | Cache degraded | `search.cache` error + bypassed rate above a threshold for 10 min (search still works, but PostgreSQL carries all load) |
+   | Search latency SLO | p95 of `/api/v1/itineraries` < 100 ms and p99 < 300 ms over 30 days; error budget alerting on burn rate |
+   | Availability SLO | 99.9 % of search requests non-5xx over 30 days |
+   | Pool saturation | HikariCP pending connections > 0 for 5 min |
