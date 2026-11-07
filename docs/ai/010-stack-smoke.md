@@ -135,4 +135,8 @@ branches); layout check 5/5; image smoke test 23/23 with no container left; `scr
 `docker compose down -v`: **15 checks in 33 s — build 2 s (local Docker layer cache warm), health wait 16 s**. macOS
 has no `timeout` command, so the build was unbounded locally (the script says so); CI's runner has it.
 
-*CI: to be completed after the push.*
+**CI on the pushed commit `f98c50c`** (PR #14): CI run 42393907910 **success** — Format, Build/tests/coverage,
+Frontend, Dependency review and the new **Full stack smoke** (job 2 min 38 s; script 15 checks in **2 min 17 s: build
+74 s with an empty GHA cache, health wait 24 s**; the cache was exported for the next runs). CodeQL run 42393907880
+success (Java and JavaScript/TypeScript); code scanning: 0 open alerts on the PR and on the repository. The cold build
+fits well inside the 600 s build bound and the 12 min step timeout, so neither was raised.

@@ -390,8 +390,9 @@ and push, not by hand. `scripts/stack-smoke.sh` is the only implementation, run 
 start, not the builds (found by the review). Each phase has its own bound and both durations are printed.
 
 **Measured.** Locally, from `docker compose down -v`, with the local Docker layer cache warm: 15 checks in **33 s**
-(build 2 s, health wait 16 s, the rest is ingestion, e2e IT and the outage run).
-*CI: to be completed with the first runs (cold and cached).*
+(build 2 s, health wait 16 s, the rest is ingestion, e2e IT and the outage run). In CI (PR #14, `f98c50c`), with an
+empty layer cache: 15 checks in **2 min 17 s** (build 74 s, health wait 24 s); the whole job 2 min 38 s, inside the
+~10 min budget.
 
 **Found while implementing:** `GDS_MOCK_PROFILE=deterministic` alone, with the default compose, kept 10 % errors:
 the compose file sets `GDS_CHAOS_DEFAULT_ERROR_RATE` explicitly, and an environment variable beats a profile's file.
