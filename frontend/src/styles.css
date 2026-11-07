@@ -335,15 +335,33 @@ button[aria-busy='true']::after {
 .providers {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   margin-bottom: 0.5rem;
 }
 
+/* Cells wrap only between words (the panel's overflow-wrap: anywhere would split "COMPLETED"); a table that still
+   does not fit scrolls inside .table-scroll. */
 .providers th,
 .providers td {
   text-align: left;
   padding: 0.25rem 0.35rem;
   border-bottom: 1px solid var(--border);
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+/* Provider ids are identifiers: never split, not even at their hyphens ("mock-" / "alpha"). */
+.providers tbody th {
+  white-space: nowrap;
+}
+
+.providers .breaker {
+  font-size: 0.7rem;
+}
+
+.providers .count {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .days {

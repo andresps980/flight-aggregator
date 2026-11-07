@@ -35,7 +35,7 @@ function ProviderRow({ provider }: { provider: ProviderReport }) {
       <td>
         <span className={open ? 'breaker breaker-open' : 'breaker'}>{provider.circuitState}</span>
       </td>
-      <td>{plural(provider.failures.length, 'failure', 'failures')}</td>
+      <td className="count">{provider.failures.length}</td>
     </tr>
   );
 }
@@ -95,7 +95,9 @@ function RunDetails({ run }: { run: IngestionRun }) {
                   <th scope="col">Result</th>
                   <th scope="col">Partitions</th>
                   <th scope="col">Breaker</th>
-                  <th scope="col">Failures</th>
+                  <th scope="col" className="count">
+                    Failures
+                  </th>
                 </tr>
               </thead>
               <tbody>
