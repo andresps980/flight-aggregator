@@ -1,8 +1,10 @@
 # Architecture
 
-> Target system components (gds-mock, flight-aggregator, PostgreSQL, Redis, frontend) are summarised in the
-> [README](../README.md#components) and decided in [ADR-0006](adr/0006-scheduled-pre-ingestion.md) to
-> [ADR-0010](adr/0010-domain-assumptions.md). This page describes the internal structure every backend module follows.
+> **How to read the architecture.** Start with [architecture/overview.md](architecture/overview.md) (the five
+> containers and the package dependency rules as ArchUnit enforces them), then [architecture/flows.md](architecture/flows.md)
+> (an ingestion run and a search request, step by step) and the [package pages](architecture/packages/README.md) (a class
+> diagram per feature and layer). This page is the feature-by-feature narrative: the hexagonal template, each
+> feature's flow, the schema, the dependency rule and the testing strategy. Why: the [ADRs](adr/README.md).
 
 Each backend module (`flight-aggregator`, `gds-mock`) follows **hexagonal architecture** (ports & adapters), organised **by feature** first and by layer
 second. The rationale is in [ADR-0002](adr/0002-hexagonal-architecture.md).
@@ -288,6 +290,10 @@ The contract between the two is `docs/api/openapi.json`: generated from the cont
 | Integration | `*IT` | Full application on a random port, real HTTP; adapters against real servers | `@SpringBootTest`, `RestClient`, Testcontainers (one shared PostgreSQL and one shared Redis per build), WireMock |
 | Volume (`slow` tag) | `*IT` | 1M rows: bulk load, query plans, keyset vs offset, cache latency | `-Pslow-tests` |
 | Architecture | `ArchitectureTest` | Package dependencies and coding rules | ArchUnit |
+| Architecture docs | `ArchitectureDocsTest` | Every type in the `docs/architecture/` class diagrams exists in its package | JUnit; `scripts/check-mermaid.sh` renders every diagram (CI) |
+| End to end (`e2e` tag) | `IngestionReconciliationE2EIT` | A real ingestion against a running gds-mock reconciles exactly with `/admin/world/stats` | `-Pe2e-tests` |
+| Full stack | `scripts/stack-smoke.sh` | `docker compose up --build`, ingestion, search through nginx, e2e test, provider outage | Bash, `curl`, `jq`; CI job *Full stack smoke* |
+| Frontend | `*.test.ts(x)`, layout check | Behaviour in jsdom, layout in Chromium at four widths, image smoke test | Vitest, RTL, MSW, Playwright ([frontend.md](frontend.md#tests)) |
 
 Coverage from unit and integration tests is merged by JaCoCo per module; the build fails if any module drops below
 80 % lines / 70 % branches.
