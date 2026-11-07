@@ -19,6 +19,7 @@ Quality must be guaranteed mechanically, not by discipline alone, and checks sho
 | Coverage | JaCoCo, merged unit + IT, gate 80 % lines / 70 % branches | same | summary + PR comment + HTML artifact |
 | Vulnerable dependencies | Dependency Review (PRs), Dependabot (weekly) | — | yes |
 | Static security analysis | CodeQL `security-and-quality` | — | yes |
+| Architecture diagrams *(added in PR 15)* | `ArchitectureDocsTest`: every type in a `docs/architecture/` class diagram exists in the package it names; `scripts/check-mermaid.sh`: every Mermaid block renders | `verify` (and the Stop / pre-push hooks when `docs/architecture/` changes); the script on demand | `verify`; the script in the required *Format* job |
 
 `main` is protected by a GitHub ruleset that requires a PR and all checks green. Git hooks and Claude Code hooks
 duplicate the "no direct push to main" rule locally for faster feedback.
@@ -33,5 +34,8 @@ duplicate the "no direct push to main" rule locally for faster feedback.
 ## Consequences
 
 - **Positive:** problems surface before review; reviewers focus on design.
+- **Diagrams cannot go stale silently:** a rename or move fails the build until the class diagrams follow, and a
+  diagram GitHub cannot render blocks the merge. Only type names are checked, not members or relationships, so
+  the diagrams stay a curated view rather than generated output.
 - **Negative:** `verify` takes longer as integration tests grow; mitigated by running the full build on Stop/pre-push
   rather than after every edit.

@@ -9,25 +9,67 @@ Key constraints: 100,000 – 1,000,000 itinerary combinations per day, providers
 random HTTP 500s (one failing provider must not break aggregation), a framework-free core domain, and a full stack
 that boots with `docker compose up --build`.
 
-Full statement: [docs/exercise.md](docs/exercise.md). Design write-up: [SOLUTION.md](SOLUTION.md).
+Full statement: [docs/exercise.md](docs/exercise.md). Design write-up: **[SOLUTION.md](SOLUTION.md)**. Architecture:
+**[docs/architecture/overview.md](docs/architecture/overview.md)**.
 
-> **Status:** complete stack. Implemented: the framework-free aggregation domain
-> ([spec 001](specs/001-itinerary-aggregation/spec.md)), the mock providers ([spec 002](specs/002-gds-mock/spec.md)),
-> resilient provider ingestion ([spec 003](specs/003-provider-ingestion/spec.md)), and PostgreSQL persistence with
-> scheduled and on-demand runs and a first `docker compose` stack ([spec 004](specs/004-persistence-and-pipeline/spec.md)),
-> the search API with keyset pagination, a catalog and a Redis cache ([spec 005](specs/005-search-api/spec.md)),
-> and the dashboard with live ingestion status ([spec 006](specs/006-dashboard/spec.md)).
+> **Status:** complete. All seven specs are implemented — the framework-free aggregation domain
+> ([001](specs/001-itinerary-aggregation/spec.md)), the mock providers ([002](specs/002-gds-mock/spec.md)), resilient
+> ingestion ([003](specs/003-provider-ingestion/spec.md)), PostgreSQL persistence with scheduled and on-demand runs
+> ([004](specs/004-persistence-and-pipeline/spec.md)), the search API with keyset pagination and a Redis cache
+> ([005](specs/005-search-api/spec.md)), the dashboard ([006](specs/006-dashboard/spec.md)) and the full-stack smoke
+> test in CI ([007](specs/007-stack-smoke/spec.md)).
+
+## Quick start
+
+Requirements: Docker (with Compose v2). Nothing else is needed to run the stack.
+
+```bash
+docker compose up --build
+```
+
+What to expect, measured from a clean clone on a laptop (Apple M1 Max, 2026-11-07): after the base images are pulled
+(PostgreSQL, Redis, JDK/JRE, Node, nginx — the only step that depends on your connection), the build takes **22 s**
+(Maven and npm dependencies are downloaded inside the build), the five services are healthy **18 s** later, and the
+first ingestion — scheduled 10 s after start-up, ≈ 94,500 itineraries from the three mock providers with their
+latency and random errors — is `COMPLETED` **21 s** after that: **about a minute in all**. Then it runs every 15 min;
+later starts reuse the images and the data (named volume).
+
+The very first run also downloads the base images (Maven, Node, Temurin, nginx, PostgreSQL, Redis), which can add a
+few minutes depending on the connection.
+
+| URL | What |
+|---|---|
+| <http://localhost:3000> | **Dashboard** — search, filter, "Load more", data status, *Refresh data*, demo outage controls |
+| <http://localhost:8080/swagger-ui.html> | API documentation (OpenAPI; committed copy: [docs/api/openapi.json](docs/api/openapi.json)) |
+| <http://localhost:8080/api/v1/itineraries> | Search API (also through the dashboard's nginx at `localhost:3000/api/…`) |
+| <http://localhost:8081/admin/providers> | gds-mock: the three providers' chaos settings and outage switches |
+
+![Dashboard for MAD → JFK: search panel and data status of the latest run on the left; price distribution, results by selected provider and the cheapest itineraries with freshness badges on the right](docs/images/dashboard.png)
+
+**Try it:** search from the dashboard (the filters live in the URL, so a search can be shared), page with "Load more",
+watch the data status panel, press *Refresh data* to run an ingestion now, and in *Demo controls* take Mock-Beta down
+and refresh again: the run ends `PARTIAL`, Beta `FAILED` with its breaker `OPEN`, the days keep their previous complete
+data with `STALE` badges, and search keeps working ([docs/frontend.md](docs/frontend.md)). The same through the API:
+
+```bash
+curl http://localhost:8080/api/v1/ingestions/latest                              # the latest run, with its report
+curl 'http://localhost:8080/api/v1/itineraries?origin=MAD&maxPrice=300&limit=5'  # cheapest first; follow nextCursor
+curl http://localhost:8080/api/v1/catalog                                        # values for the filters
+curl -X POST http://localhost:8080/api/v1/ingestions                             # start one now (409 if running)
+docker compose down -v                                                           # stop and delete the data
+```
+
+Endpoints, configuration (volume, chaos, schedule, heap) and the 1M setup: [docs/usage.md](docs/usage.md).
 
 ## Components
 
-
 | Component | Role | Decision |
 |---|---|---|
-| `gds-mock` | Mock-Alpha (JSON), Mock-Beta (XML) and Mock-Gamma (CSV) provider APIs over a seeded, streamed world of up to 1M itineraries, with latency, random errors and an outage switch (**implemented**) | [ADR-0012](docs/adr/0012-single-gds-mock-application.md), [ADR-0013](docs/adr/0013-stateless-seeded-streamed-generation.md) |
-| `flight-aggregator` | Scheduled + on-demand **ingestion** from the 3 providers in parallel, **deduplication** and pricing in the domain, day snapshots in PostgreSQL, **search API** with filters, keyset pagination and a catalog (**implemented**) | [ADR-0006](docs/adr/0006-scheduled-pre-ingestion.md), [ADR-0010](docs/adr/0010-domain-assumptions.md), [ADR-0021](docs/adr/0021-search-cursor.md) |
-| PostgreSQL | Source of truth for itineraries and ingestion runs (**implemented**: Flyway schema, COPY bulk load, advisory run lock, search indexes) | [ADR-0007](docs/adr/0007-postgresql-and-redis.md), [ADR-0020](docs/adr/0020-search-indexes.md) |
-| Redis | Search and catalog cache, keyed by a data version that every ingestion write bumps; optional at runtime (**implemented**) | [ADR-0022](docs/adr/0022-search-cache.md) |
-| `frontend` | React + TypeScript dashboard served by nginx: search with URL state, keyset "load more", live ingestion status with refresh, charts, demo outage controls (**implemented**) | [ADR-0009](docs/adr/0009-react-frontend.md), [ADR-0023](docs/adr/0023-real-time-by-polling.md), [ADR-0024](docs/adr/0024-contract-generated-client-and-frontend-toolchain.md) |
+| `frontend` | React + TypeScript dashboard served by nginx, which also proxies `/api` (same origin): search with URL state, keyset "Load more", live ingestion status with refresh, charts, demo outage controls | [ADR-0009](docs/adr/0009-react-frontend.md), [ADR-0023](docs/adr/0023-real-time-by-polling.md), [ADR-0024](docs/adr/0024-contract-generated-client-and-frontend-toolchain.md) |
+| `flight-aggregator` | Scheduled + on-demand **ingestion** from the 3 providers in parallel with retries and circuit breakers, **deduplication** and pricing in a framework-free domain, day snapshots in PostgreSQL, **search API** with filters, keyset pagination and a catalog | [ADR-0006](docs/adr/0006-scheduled-pre-ingestion.md), [ADR-0010](docs/adr/0010-domain-assumptions.md), [ADR-0014](docs/adr/0014-provider-resilience.md) |
+| `gds-mock` | Mock-Alpha (JSON), Mock-Beta (XML) and Mock-Gamma (CSV) over a seeded, streamed world of up to 1M itineraries, with latency, random errors and an outage switch | [ADR-0012](docs/adr/0012-single-gds-mock-application.md), [ADR-0013](docs/adr/0013-stateless-seeded-streamed-generation.md) |
+| PostgreSQL | Source of truth: one row per itinerary, day snapshots, runs with their reports (Flyway, `COPY` bulk load, advisory run lock, search indexes) | [ADR-0007](docs/adr/0007-postgresql-and-redis.md), [ADR-0020](docs/adr/0020-search-indexes.md) |
+| Redis | Search and catalog cache keyed by a data version that every ingestion write bumps; optional at runtime | [ADR-0022](docs/adr/0022-search-cache.md) |
 
 ```mermaid
 flowchart LR
@@ -45,50 +87,23 @@ flowchart LR
 ```
 
 Search reads only from PostgreSQL/Redis, never from the providers, and pages with keyset pagination
-([ADR-0008](docs/adr/0008-keyset-pagination.md)).
+([ADR-0008](docs/adr/0008-keyset-pagination.md)). Containers, package dependencies, class diagrams per package and the
+runtime flows: [docs/architecture/](docs/architecture/overview.md).
 
-## Requirements
+## Build and test
 
-- JDK 21
-- Node 26 (only to work on the frontend outside Docker; see `frontend/.nvmrc`)
-- Docker (for the compose stack and the Testcontainers-based integration tests)
-- Git, and optionally the [GitHub CLI](https://cli.github.com/) (`gh`)
-- [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) for the AI-assisted workflow
-- `jq` or `python3` recommended (used by the Claude Code hooks to parse JSON)
-
-## Quick start
-
-**Current** — build and test all modules:
+Requirements for development: JDK 21, Docker (Testcontainers), Node 26 for the frontend (`frontend/.nvmrc`); `jq` for
+the smoke script and the Claude Code hooks; optionally the [GitHub CLI](https://cli.github.com/) and
+[Claude Code](https://docs.claude.com/en/docs/claude-code/overview) for the AI-assisted workflow.
 
 ```bash
-./mvnw verify                                   # format check, unit + IT tests, architecture rules, coverage gate
-./mvnw -pl flight-aggregator spring-boot:run    # start the aggregator on http://localhost:8080
-./mvnw verify -Pslow-tests                      # also the slow 1,000,000-record tests
+./mvnw verify                                   # both modules: format check, unit + integration tests, ArchUnit, coverage gate
+./mvnw verify -Pslow-tests                      # also the 1,000,000-record volume tests (bulk load, search plans, keyset vs offset)
+cd frontend && npm ci && npm run check          # frontend: Prettier, ESLint, tsc, Vitest with coverage gate
+scripts/stack-smoke.sh                          # the whole stack end to end (below)
+scripts/check-mermaid.sh                        # every Mermaid diagram in the docs renders
+./mvnw -pl flight-aggregator spring-boot:run    # the aggregator alone (needs postgres, redis, gds-mock: see docs/usage.md)
 ```
-
-**Docker** — `docker compose up --build` starts **PostgreSQL**, **Redis**, **gds-mock** (port 8081),
-**flight-aggregator** (port 8080) and the **dashboard** (port 3000), each with a healthcheck. The aggregator runs its
-first ingestion about 10 s after it is healthy, then every 15 min.
-
-![Dashboard: search panel, data status, "New data available" banner, price and provider charts, results with freshness badges](docs/images/dashboard.png)
-
-**Open the dashboard at <http://localhost:3000>**: search and filter (the filters live in the URL), page with
-"Load more", watch the data status panel, press *Refresh data* to run an ingestion now, and use the *Demo controls*
-panel to take a mock provider down and watch the breaker open and days go stale
-([docs/frontend.md](docs/frontend.md)). The same API through curl:
-
-```bash
-docker compose up --build -d --wait
-curl http://localhost:8080/api/v1/ingestions/latest                              # the initial run, with its report
-curl 'http://localhost:8080/api/v1/itineraries?origin=MAD&maxPrice=300&limit=5'  # cheapest first; follow nextCursor
-curl http://localhost:8080/api/v1/catalog                                        # values for the filters
-curl -X POST http://localhost:8080/api/v1/ingestions                             # start one now (409 if running)
-```
-
-The OpenAPI description is at `http://localhost:8080/swagger-ui.html` (committed copy:
-[docs/api/openapi.json](docs/api/openapi.json)); the dashboard's TypeScript types are generated from it.
-
-See [docs/usage.md](docs/usage.md) for the endpoints that currently exist and their configuration.
 
 ### Full-stack smoke test
 
@@ -128,6 +143,7 @@ Applied to every Maven module, and the equivalent to the frontend.
 | Unit tests (`*Test`) | JUnit 5, Mockito, AssertJ (Surefire) | `verify`, CI |
 | Integration tests (`*IT`) | `@SpringBootTest` on a random port (Failsafe) | `verify`, CI |
 | Architecture & SOLID rules | ArchUnit (`ArchitectureTest` per module) | `verify`, CI |
+| Architecture docs | `ArchitectureDocsTest` (class-diagram types exist) in `verify`; `scripts/check-mermaid.sh` (diagrams render) | `verify`; the script in CI and on demand |
 | Coverage ≥ 80 % lines / 70 % branches | JaCoCo (merged unit + IT, per module) | `verify`, CI (summary + PR comment) |
 | Frontend: format, lint, types | Prettier, ESLint (`jsx-a11y`, `react-hooks`), `tsc` strict | `npm run check`, pre-commit (Prettier), Claude hooks, CI |
 | Frontend: tests ≥ 80 % lines / 70 % branches | Vitest + React Testing Library + MSW | `npm run check`, pre-push, CI |
@@ -193,19 +209,25 @@ frontend/             dashboard (React + TypeScript + Vite), served by nginx; se
   docker/                    nginx config, entrypoint (runtime config), image smoke test
 docker-compose.yml    the whole stack (PostgreSQL, Redis, gds-mock, flight-aggregator, frontend)
 docker-compose.ci.yml override for the full-stack smoke test (deterministic, small, fast)
-scripts/              stack-smoke.sh: the full-stack smoke test (locally and in CI)
+scripts/              stack-smoke.sh (full-stack smoke test), check-mermaid.sh (diagrams render); locally and in CI
 .claude/              shared Claude Code config: settings + hooks, skills, agents
 .githooks/            versioned git hooks (pre-commit, pre-push)
 .github/              CI, CodeQL, Dependabot, PR template
-docs/                 exercise, usage, architecture, ADRs, AI log, GitHub setup, OpenAPI (docs/api)
+docs/                 exercise, usage, architecture (+ diagrams in docs/architecture/), ADRs, AI log, measurements,
+                      provider formats, frontend, GitHub setup, OpenAPI (docs/api)
 specs/                one spec per feature (SDD)
 ```
 
 ## Documentation
 
-- [SOLUTION.md](SOLUTION.md) — architectural decisions, data modelling and pagination, limitations
+- [SOLUTION.md](SOLUTION.md) — executive summary, architectural decisions and AI tools, data modelling and pagination
+  at 1M rows, limitations and trade-offs, what would change for production
 - [Assessment statement](docs/exercise.md)
-- [Architecture](docs/architecture.md)
+- **Architecture** — how to read it: [overview](docs/architecture/overview.md) (containers, package dependency rules)
+  → [flows](docs/architecture/flows.md) (ingestion run, search request) → [package pages](docs/architecture/packages/README.md)
+  (class diagrams); feature narrative and schema in [docs/architecture.md](docs/architecture.md)
+- [Measurements at 1M rows](docs/measurements/search-1m.md) — indexes, query plans, keyset vs offset, cache latency
+- [Provider formats](docs/providers.md) — Mock-Alpha JSON, Mock-Beta XML, Mock-Gamma CSV
 - [Architecture Decision Records](docs/adr/README.md)
 - [Specs](specs/README.md)
 - [Usage](docs/usage.md)

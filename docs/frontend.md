@@ -6,8 +6,8 @@ small React + TypeScript single-page app in [`frontend/`](../frontend), built wi
 [ADR-0023](adr/0023-real-time-by-polling.md), [ADR-0024](adr/0024-contract-generated-client-and-frontend-toolchain.md)).
 This page is written for a backend developer: it maps each frontend idea to something familiar.
 
-![The dashboard for MAD → JFK: search panel and data status on the left; "New data available" banner, price
-distribution, results by selected provider and the cheapest itineraries with STALE badges on the right](images/dashboard.png)
+![The dashboard for MAD → JFK: search panel and data status of the latest run on the left; price distribution,
+results by selected provider and the cheapest itineraries with their freshness badges on the right](images/dashboard.png)
 
 ## Run it
 
@@ -219,8 +219,9 @@ then results, then status and demo. Rules that keep content inside its panel:
 - `minmax(0, 1fr)` and `min-width: 0` on grid/flex children: by default they cannot shrink below their widest content
   (a table, an SVG, a long `<select>` option) and spill over their neighbour — **the bug found by hand: at 1170 px in
   Brave, the results column painted over the search form and the status table**.
-- `<select>` / inputs are `width: 100%`; long words wrap (`overflow-wrap: anywhere`); the providers table scrolls
-  inside its panel; result rows wrap the price block under the details; chart SVGs clip and long provider labels are
+- `<select>` / inputs are `width: 100%`; long words in panels wrap (`overflow-wrap: anywhere`), but table cells wrap
+  only at spaces (`overflow-wrap: normal`, provider ids `nowrap`) and the providers table scrolls inside its panel
+  if it still does not fit (a Playwright check fails if any word of that table is split across lines); result rows wrap the price block under the details; chart SVGs clip and long provider labels are
   shortened (full name in the tooltip and the table).
 - Screen-reader tables are hidden through a wrapping `<div class="visually-hidden">`: `overflow: hidden` does not
   apply to a `<table>` box, so a hidden table still widened the page by 14 px at 768 px (found by the layout check).
@@ -232,7 +233,8 @@ then results, then status and demo. Rules that keep content inside its panel:
   (ADR-0023).
 - Charts describe the loaded results, not the whole result set (there is no total count by design).
 - No browser end-to-end flows: behaviour is tested in jsdom, layout in Chromium with mocked data (one browser
-  engine; Safari/Firefox differences would be caught by eye), the stack by hand.
+  engine; Safari/Firefox differences would be caught by eye); the whole stack over HTTP by `scripts/stack-smoke.sh`
+  (spec 007).
 - The demo controls are unauthenticated, like gds-mock's admin API itself; demo-only, off with `DEMO_CONTROLS=false`.
 - `npm audit` reports 7 moderate advisories in `minimatch` inside the dev-only lint toolchain (`typescript-eslint`);
   they affect glob patterns we write ourselves, and production dependencies audit clean. Accepted until upstream

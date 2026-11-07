@@ -46,11 +46,15 @@ activates it in its own `<build><plugins>`, so formatting, the coverage gate and
 | Frontend: production build / image smoke test | `npm run build` / `bash frontend/docker/smoke-test.sh` |
 | Full-stack smoke test (compose up --build, ingestion, search via nginx, e2e IT, outage; also a CI job) | `scripts/stack-smoke.sh` |
 | Frontend: layout check in Chromium (after `npm run build`; once: `npx playwright install chromium`) | `npm run test:layout` |
+| Check that every Mermaid diagram in the docs renders (also in CI) | `scripts/check-mermaid.sh` |
 
 Always run `./mvnw verify` and, when `frontend/` changed, `npm run check` before declaring a task done. The Stop hook
 runs whichever applies.
 
 ## Architecture (enforced by `ArchitectureTest`)
+
+Diagrams: `docs/architecture/` (overview, flows, one page per package). When a type in a class diagram is renamed or
+moved, update the diagram: `ArchitectureDocsTest` fails otherwise.
 
 Package layout per feature, under `<base-package>.<feature>` (e.g. `com.andresps.flights.<feature>`).
 Every module with code has its own `ArchitectureTest` (`<module>/src/test/java/.../architecture/`):
@@ -149,8 +153,9 @@ contracts (LSP).
   Tests: `bash .claude/hooks/tests/guard-git.test.sh` (also run in CI); extend them when changing the hook.
 - `PostToolUse(Edit|Write)` — `format-java.sh` runs Spotless after Java/POM edits (scoped to the edited module);
   `format-frontend.sh` runs Prettier after edits to `frontend/` files.
-- `Stop` — `verify-on-stop.sh` runs `./mvnw verify` when any `pom.xml` or backend `<module>/src` changed, and the
-  frontend checks when `frontend/` changed, each since its last green run.
+- `Stop` — `verify-on-stop.sh` runs `./mvnw verify` when any `pom.xml`, backend `<module>/src` or `docs/architecture/`
+  (checked by `ArchitectureDocsTest`) changed, and the frontend checks when `frontend/` changed, each since its last
+  green run.
 - Git hooks (`.githooks`): pre-commit checks Spotless / Prettier on staged files; pre-push runs `./mvnw verify` and/or
   the frontend checks for the gates the pushed commits touch (`classify_paths` in `.claude/hooks/lib.sh`, tested by
   `.claude/hooks/tests/classify-paths.test.sh`).

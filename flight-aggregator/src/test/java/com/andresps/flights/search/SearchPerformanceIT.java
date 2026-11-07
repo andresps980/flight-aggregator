@@ -43,7 +43,8 @@ import org.springframework.web.client.RestClient;
  *   <li>{@code COPY} time of 1M rows without, then with, the search indexes (ADR-0020);
  *   <li>{@code EXPLAIN (ANALYZE, BUFFERS)} of the search query per filter combination: never a sequential scan, and no
  *       sort where the matching set is large;
- *   <li>keyset vs {@code OFFSET}, first page and page 1,000 (or the deepest page a filter has), server side;
+ *   <li>keyset vs {@code OFFSET}, first page and page 1,000 (or the deepest page a filter has), server side, plus the
+ *       last page of the unfiltered result (the worst case for {@code OFFSET});
  *   <li>cached vs uncached latency through the HTTP API, and the uncached catalog.
  * </ol>
  *
@@ -64,6 +65,9 @@ class SearchPerformanceIT {
 
     private static final int PAGE = 20;
     private static final int DEEP_PAGE = 1_000;
+    /** The combination without filters: the only one whose last page is also timed (the worst case for OFFSET). */
+    private static final String UNFILTERED = "none";
+
     private static final int WARMUP = 5;
     private static final int RUNS = 30;
     private static final Path REPORT = Path.of("target", "search-performance.md");
@@ -167,7 +171,7 @@ class SearchPerformanceIT {
         report.append(String.format(
                 Locale.ROOT, "Busiest route %s-%s: %s rows; busiest carrier %s.%n%n", o, d, route.get("n"), c));
         return List.of(
-                combination("none", "", null, null, null, null, null, true),
+                combination(UNFILTERED, "", null, null, null, null, null, true),
                 combination("maxPrice", "&maxPrice=" + max, null, null, null, max, null, true),
                 combination("date", "&date=" + day, null, null, day, null, null, true),
                 combination("date + maxPrice", "&date=" + day + "&maxPrice=" + max, null, null, day, max, null, true),
@@ -264,7 +268,10 @@ class SearchPerformanceIT {
         }
     }
 
-    /** AC-23: first page and page 1,000 (or the deepest), keyset vs the equivalent OFFSET query. */
+    /**
+     * AC-23: first page and page 1,000 (or the deepest), keyset vs the equivalent OFFSET query; for the unfiltered
+     * result also its last page, where OFFSET reads and discards the whole matching set.
+     */
     private void compareKeysetAndOffset(JdbcClient jdbc, List<Combination> combinations) {
         report.append("## Keyset vs OFFSET, server side (ms, median / p95 of ")
                 .append(RUNS)
@@ -275,8 +282,13 @@ class SearchPerformanceIT {
                     .params(first.params().subList(0, first.params().size() - 1))
                     .query(Long.class)
                     .single();
-            int deepest = (int) Math.min(DEEP_PAGE, Math.max(1, (matching - 1) / PAGE + 1));
-            for (int page : deepest > 1 ? List.of(1, deepest) : List.of(1)) {
+            int lastPage = (int) Math.max(1, (matching - 1) / PAGE + 1);
+            int deepest = Math.min(DEEP_PAGE, lastPage);
+            List<Integer> pages = new ArrayList<>(deepest > 1 ? List.of(1, deepest) : List.of(1));
+            if (combination.name().equals(UNFILTERED) && lastPage > deepest) {
+                pages.add(lastPage);
+            }
+            for (int page : pages) {
                 int offset = (page - 1) * PAGE;
                 PagePosition after = page == 1 ? null : positionAt(jdbc, first, offset - 1);
                 ItinerarySearchSql.SqlQuery keyset =
@@ -291,7 +303,7 @@ class SearchPerformanceIT {
                         page,
                         keysetStats,
                         offsetStats));
-                if (page == DEEP_PAGE && combination.name().equals("none")) {
+                if (page == DEEP_PAGE && combination.name().equals(UNFILTERED)) {
                     assertThat(keysetStats.medianMs()).isLessThan(offsetStats.medianMs());
                 }
                 assertThat(keysetStats.medianMs())

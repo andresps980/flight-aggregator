@@ -11,7 +11,7 @@
 | Task | Command |
 |---|---|
 | Full build (unit + IT + coverage gate + format check, both modules) | `./mvnw verify` |
-| Also run the slow volume tests (tagged `slow`: 1,000,000-record generation and streaming) | `./mvnw verify -Pslow-tests` |
+| Also run the slow volume tests (tagged `slow`: 1,000,000-record generation and streaming, bulk load, search plans and latency at 1M rows) | `./mvnw verify -Pslow-tests` |
 | Also run the end-to-end ingestion test (tagged `e2e`, needs gds-mock running in the `deterministic` profile) | `./mvnw -pl flight-aggregator verify -Pe2e-tests` |
 | Full-stack smoke test: compose boot, ingestion, search through nginx, e2e test, provider outage (spec 007, also in CI) | `scripts/stack-smoke.sh` |
 | Also run the 1M-row bulk load benchmark (tagged `slow`, ADR-0018) | `./mvnw -pl flight-aggregator verify -Pslow-tests -Dit.test=BulkLoadBenchmarkIT` |
@@ -19,8 +19,8 @@
 | Frontend image smoke test (needs Docker) | `bash frontend/docker/smoke-test.sh` |
 | Start the stack (PostgreSQL, Redis, gds-mock, flight-aggregator, frontend) | `docker compose up --build` |
 
-Integration tests start one PostgreSQL container (`postgres:17`, Testcontainers) for the whole build, so Docker must
-be running.
+Integration tests start one PostgreSQL (`postgres:17`) and one Redis (`redis:8`) container (Testcontainers) for the
+whole build, so Docker must be running.
 
 ## flight-aggregator
 
@@ -224,11 +224,11 @@ Itineraries whose first departure falls on another UTC day than their partition 
 
 ### Domain behaviour (spec 001)
 
-How offers become sellable itineraries. This is the behaviour the future ingestion run will expose through its report.
+How offers become sellable itineraries; every count below appears in the ingestion run's report.
 
 | Step | Rule |
 |---|---|
-| Malformed data | Rejected when the value objects are built (e.g. airport not 3 letters, base price ≤ 0, non-EUR, amount ≥ 1,000,000,000 or more than 10 decimals). Never reaches the aggregation; the ingestion report will count it per provider. |
+| Malformed data | Rejected when the value objects are built (e.g. airport not 3 letters, base price ≤ 0, non-EUR, amount ≥ 1,000,000,000 or more than 10 decimals). Never reaches the aggregation; the ingestion report counts it per provider and reason. |
 | Validation | Discarded with one reason, first match in this order: `MIXED_AIRLINES`, `ARRIVAL_NOT_AFTER_DEPARTURE`, `SEGMENTS_NOT_CHAINED`, `REVISITED_AIRPORT`, `CONNECTION_TOO_SHORT` (< 45 min), `LAYOVER_TOO_LONG` (> 24 h), `ALREADY_DEPARTED`. |
 | Identity | Same flight numbers (with airline), segment airports and departure instants ⇒ same itinerary, whatever the provider. |
 | Selection | Lowest base price → provider id → earliest arrivals → canonical representation. Independent of input order. |
@@ -334,7 +334,7 @@ Container settings (`frontend` service):
 
 ```bash
 DEMO_CONTROLS=false FRONTEND_PORT=8000 docker compose up --build -d --wait   # no demo panel, on port 8000
-curl -s localhost:3000/config.json                                          # {"demoControls": true}
+curl -s localhost:3000/config.json                                          # default stack: {"demoControls": true}
 curl -s localhost:3000/api/v1/catalog | head -c 200                         # the API through nginx
 ```
 
@@ -440,4 +440,4 @@ GDS_WORLD_VOLUME=1000000 docker compose up --build    # full volume
 ```
 
 At 1,000,000 itineraries the feeds are about 144 MB (Alpha), 332 MB (Beta) and 100 MB (Gamma), and the mock serves
-them with a 256 MB heap (measurements in [SOLUTION.md](../SOLUTION.md#mock-gds-providers-spec-002)).
+them with a 256 MB heap (measurements in [SOLUTION.md](../SOLUTION.md#27-other-measured-results)).

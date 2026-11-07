@@ -50,9 +50,10 @@ gate() {
   rm -f "$log"
 }
 
-# Multi-module Maven build: the root pom plus every module's pom.xml and src/ (the frontend is not a Maven module).
+# Multi-module Maven build: the root pom plus every module's pom.xml and src/ (the frontend is not a Maven module), and
+# docs/architecture/, whose class diagrams ArchitectureDocsTest checks against the code.
 if [ -x ./mvnw ]; then
-  gate backend pom.xml ':(glob)*/pom.xml' ':(glob)*/src/**' ':(exclude)frontend/**' -- ./mvnw -q -B verify
+  gate backend pom.xml ':(glob)*/pom.xml' ':(glob)*/src/**' 'docs/architecture' ':(exclude)frontend/**' -- ./mvnw -q -B verify
 fi
 if [ -f frontend/package.json ]; then
   # docs/api/openapi.json: the frontend's types are generated from it (npm run check verifies they match).

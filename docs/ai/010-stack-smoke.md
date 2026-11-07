@@ -140,3 +140,13 @@ Frontend, Dependency review and the new **Full stack smoke** (job 2 min 38 s; sc
 74 s with an empty GHA cache, health wait 24 s**; the cache was exported for the next runs). CodeQL run 42393907880
 success (Java and JavaScript/TypeScript); code scanning: 0 open alerts on the PR and on the repository. The cold build
 fits well inside the 600 s build bound and the 12 min step timeout, so neither was raised.
+
+**CI on the final commit `b97f25a`** (docs only, recorded in the next PR because the author froze PR 14 here): CI run
+42394695506 **success** — every job green; Full stack smoke 15 checks in **1 min 21 s: build 14 s with the warm GHA
+layer cache** (35 cached steps), health wait 28 s. CodeQL run 42394695501 success; 0 open code-scanning alerts.
+
+**Merge.** The author merged PR 14 as `3c2dc3b` (merge commit). CI run 42395229006 on `main` at `3c2dc3b`:
+**success** (Format, Build/tests/coverage, Frontend, Full stack smoke; Dependency review is PR-only and skipped);
+the smoke script 15 checks in **2 min 13 s: build 70 s**, health wait 25 s — a cold build again, because a push to
+`main` cannot read caches written by pull-request refs (GitHub Actions cache scoping), so `main`'s first run filled
+its own scope. CodeQL run 42395228991 on `main`: success.

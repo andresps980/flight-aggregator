@@ -31,6 +31,21 @@ jobs:
         run: |
           bash .claude/hooks/tests/guard-git.test.sh
           bash .claude/hooks/tests/classify-paths.test.sh
+      # In this required job so a diagram GitHub cannot render blocks the merge (the job keeps its name: rulesets
+      # require it by name). The drift of class-diagram type names is checked by ArchitectureDocsTest in the build.
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: frontend/.nvmrc
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.npm
+            ~/.cache/puppeteer
+          key: mermaid-cli-11.17.0-${{ runner.os }}
+      - name: Mermaid diagrams render (mermaid-cli, every *.md)
+        env:
+          PUPPETEER_NO_SANDBOX: '1'
+        run: scripts/check-mermaid.sh
 
   build:
     name: Build, tests & coverage

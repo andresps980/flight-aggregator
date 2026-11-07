@@ -39,7 +39,8 @@ classify_paths() {
     case "$path" in
       "") ;;
       frontend/* | docs/api/openapi.json) frontend=1 ;;
-      pom.xml | */pom.xml | mvnw | mvnw.cmd | .mvn/* | */src/*) backend=1 ;;
+      # docs/architecture/: ArchitectureDocsTest checks its class diagrams against the code.
+      pom.xml | */pom.xml | mvnw | mvnw.cmd | .mvn/* | */src/* | docs/architecture/*) backend=1 ;;
     esac
   done
   [ "$backend" = 1 ] && echo backend
