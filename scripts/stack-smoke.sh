@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Full-stack smoke test (spec 007): proves that `docker compose up --build` boots the whole stack and that it works end
 # to end, with the same script locally and in CI. Steps:
-#   1. up --build --wait (AC-1)                 4. e2e reconciliation IT against the running gds-mock (AC-4)
+#   1. build, then up --wait (AC-1)             4. e2e reconciliation IT against the running gds-mock (AC-4)
 #   2. first ingestion COMPLETED (AC-2)         5. mock-beta outage: run PARTIAL, breaker OPEN, search still works (AC-5)
 #   3. catalog and searches return data (AC-3)  6. outage removed (AC-6)
 # Every HTTP check goes through the frontend's nginx (port 3000), so its proxy is exercised. On failure it prints the
@@ -9,7 +9,9 @@
 #
 # Usage: scripts/stack-smoke.sh            (needs Docker, curl, jq and JDK 21 for the Maven wrapper)
 # Settings (environment):
-#   STACK_SMOKE_UP_TIMEOUT         seconds for `up --build --wait`, build included (default 300)
+#   STACK_SMOKE_BUILD_TIMEOUT      seconds for `docker compose build` (default 600; needs `timeout` or `gtimeout`,
+#                                  otherwise the build is unbounded and the script says so)
+#   STACK_SMOKE_UP_TIMEOUT         seconds for `up --wait` to bring every service to healthy, build excluded (default 300)
 #   STACK_SMOKE_INGESTION_TIMEOUT  seconds to wait for each ingestion run (default 180)
 #   STACK_SMOKE_EXTRA_COMPOSE      an extra compose file, e.g. CI's build cache settings (default none)
 #   STACK_SMOKE_LOG_DIR            where the compose log is saved on failure (default target/stack-smoke)
@@ -24,6 +26,7 @@ cd "$root"
 project="flight-aggregator-smoke"
 compose=(docker compose -p "$project" -f docker-compose.yml -f docker-compose.ci.yml)
 if [ -n "${STACK_SMOKE_EXTRA_COMPOSE:-}" ]; then compose+=(-f "$STACK_SMOKE_EXTRA_COMPOSE"); fi
+build_timeout="${STACK_SMOKE_BUILD_TIMEOUT:-600}"
 up_timeout="${STACK_SMOKE_UP_TIMEOUT:-300}"
 ingestion_timeout="${STACK_SMOKE_INGESTION_TIMEOUT:-180}"
 log_dir="${STACK_SMOKE_LOG_DIR:-target/stack-smoke}"
@@ -72,7 +75,7 @@ finish() {
   local elapsed=$(($(date +%s) - started_at))
   echo
   if [ "$status" -eq 0 ]; then
-    echo "stack smoke test: PASSED ($passed checks) in $((elapsed / 60)) min $((elapsed % 60)) s"
+    echo "stack smoke test: PASSED ($passed checks) in $((elapsed / 60)) min $((elapsed % 60)) s (build ${build_seconds:-?} s, health wait ${health_seconds:-?} s)"
   else
     echo "stack smoke test: FAILED (exit $status, $passed checks passed) after $((elapsed / 60)) min $((elapsed % 60)) s"
   fi
@@ -85,7 +88,7 @@ wait_for_run() {
   while :; do
     http GET "$1"
     if [ "$code" = 200 ]; then
-      status="$(jq -r .status <<<"$body")"
+      status="$(jq -er .status <<<"$body" 2>/dev/null)" || fail "GET $1: 200 without a run status (not JSON?): ${body:0:300}"
       if [ "$status" != RUNNING ]; then printf '%s' "$body"; return 0; fi
     fi
     [ "$(date +%s)" -lt "$deadline" ] || fail "GET $1: no finished run within ${ingestion_timeout} s (last: $code ${body:0:300})"
@@ -108,15 +111,30 @@ trap finish EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-step "AC-1: docker compose up --build --wait (timeout ${up_timeout} s)"
-"${compose[@]}" up --build -d --wait --wait-timeout "$up_timeout" \
+# `up --wait-timeout` bounds only the wait for health after start, not the image builds; so the build is its own step,
+# with its own bound, and both durations are reported.
+step "AC-1: docker compose build (timeout ${build_timeout} s)"
+bounded=()
+if command -v timeout >/dev/null; then bounded=(timeout "$build_timeout")
+elif command -v gtimeout >/dev/null; then bounded=(gtimeout "$build_timeout")
+else echo "note: no timeout/gtimeout command, the build is not bounded"; fi
+phase_start="$(date +%s)"
+${bounded[@]+"${bounded[@]}"} "${compose[@]}" build || fail "docker compose build failed or exceeded ${build_timeout} s"
+build_seconds=$(($(date +%s) - phase_start))
+pass "images built in ${build_seconds} s"
+
+step "AC-1: docker compose up --wait (health timeout ${up_timeout} s)"
+phase_start="$(date +%s)"
+"${compose[@]}" up -d --wait --wait-timeout "$up_timeout" \
   || fail "the stack did not become healthy within ${up_timeout} s"
-pass "all services healthy: $("${compose[@]}" ps --format '{{.Service}}' | sort | tr '\n' ' ')"
+health_seconds=$(($(date +%s) - phase_start))
+pass "all services healthy in ${health_seconds} s: $("${compose[@]}" ps --format '{{.Service}}' | sort | tr '\n' ' ')"
 
 step "AC-2: first ingestion through nginx"
 run="$(wait_for_run /api/v1/ingestions/latest)"
 [ "$(jq -r .status <<<"$run")" = COMPLETED ] \
   || fail "first run finished $(jq -r .status <<<"$run"), expected COMPLETED: $(jq -c '{status, failure}' <<<"$run")"
+[ "$(jq -r .trigger <<<"$run")" = SCHEDULED ] || fail "the first run was $(jq -r .trigger <<<"$run"), expected SCHEDULED"
 pass "first run $(jq -r '.trigger + " " + .status + ", " + (.report.storedItineraries | tostring) + " itineraries stored in " + (.durationMs | tostring) + " ms"' <<<"$run")"
 
 step "AC-3: catalog and search through nginx"
@@ -143,8 +161,12 @@ rm -f flight-aggregator/target/failsafe-reports/TEST-*IngestionReconciliationE2E
   -Dtest=NoUnitTestsInThisRun -Dsurefire.failIfNoSpecifiedTests=false \
   -Djacoco.skip=true -Dspotless.check.skip=true \
   || fail "IngestionReconciliationE2EIT failed (reports: flight-aggregator/target/failsafe-reports/)"
-tests="$(grep -ho 'tests="[0-9]*"' flight-aggregator/target/failsafe-reports/TEST-*IngestionReconciliationE2EIT.xml 2>/dev/null | head -n1 || true)"
-[ "$tests" != 'tests="0"' ] && [ -n "$tests" ] || fail "IngestionReconciliationE2EIT did not run"
+report_xml="$(ls flight-aggregator/target/failsafe-reports/TEST-*IngestionReconciliationE2EIT.xml 2>/dev/null | head -n1 || true)"
+[ -n "$report_xml" ] || fail "IngestionReconciliationE2EIT did not run (no report)"
+tests="$(grep -o 'tests="[0-9]*"' "$report_xml" | head -n1)"
+skipped="$(grep -o 'skipped="[0-9]*"' "$report_xml" | head -n1)"
+[ "$tests" != 'tests="0"' ] && [ -n "$tests" ] || fail "IngestionReconciliationE2EIT ran no test"
+[ "$skipped" = 'skipped="0"' ] || fail "IngestionReconciliationE2EIT skipped tests ($skipped): a skip is not a pass"
 pass "IngestionReconciliationE2EIT reconciles with /admin/world/stats ($tests)"
 
 step "AC-5: outage of $outage_provider through nginx /gds-admin/"
@@ -165,6 +187,8 @@ provider() { jq -r --arg p "$1" ".report.providers[] | select(.provider == \$p) 
 [ "$(provider "$outage_provider" .circuitState)" = OPEN ] \
   || fail "$outage_provider breaker is $(provider "$outage_provider" .circuitState), expected OPEN"
 pass "$outage_provider FAILED $(provider "$outage_provider" '"\(.partitionsSucceeded)/\(.partitionsRequested)"') with its breaker OPEN"
+total_others="$(jq -r --arg p "$outage_provider" '[.report.providers[] | select(.provider != $p)] | length' <<<"$run")"
+[ "$total_others" = 2 ] || fail "expected the 2 other providers in the report, found $total_others"
 others="$(jq -r --arg p "$outage_provider" '[.report.providers[] | select(.provider != $p and .status != "COMPLETED")] | length' <<<"$run")"
 [ "$others" = 0 ] || fail "other providers did not complete: $(jq -c '.report.providers | map({provider, status})' <<<"$run")"
 pass "the other providers COMPLETED: $(jq -r --arg p "$outage_provider" '[.report.providers[] | select(.provider != $p) | .provider] | join(", ")' <<<"$run")"
