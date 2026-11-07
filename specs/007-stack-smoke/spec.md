@@ -1,6 +1,6 @@
 # Spec 007: Full-stack smoke test — `docker compose up --build` proven in CI
 
-- **Status:** Approved
+- **Status:** Implemented
 - **Branch:** chore/007-stack-smoke
 - **Related ADRs:** [ADR-0004](../../docs/adr/0004-quality-gates.md) (quality gates),
   [ADR-0014](../../docs/adr/0014-provider-resilience.md) (breakers), [ADR-0017](../../docs/adr/0017-day-snapshot-replacement.md)
@@ -35,8 +35,11 @@ The script runs compose with `-f docker-compose.yml -f docker-compose.ci.yml` un
 All HTTP checks go through `http://localhost:${FRONTEND_PORT:-3000}` (nginx proxy) except the e2e IT, which talks to
 gds-mock on 8081 as it does today.
 
-- **AC-1 (boot)** — Given a clean Docker state, when the script runs, then `docker compose up --build -d --wait
-  --wait-timeout <N>` (default 300 s, set with `STACK_SMOKE_UP_TIMEOUT`; CI raises it if a cold build needs more) brings all five services to healthy, or the script fails.
+- **AC-1 (boot)** — Given a clean Docker state, when the script runs, then `docker compose build` (bounded by
+  `STACK_SMOKE_BUILD_TIMEOUT`, default 600 s) followed by `docker compose up -d --wait --wait-timeout <N>` (default
+  300 s, set with `STACK_SMOKE_UP_TIMEOUT`) brings all five services to healthy, or the script fails; both durations
+  are reported. *Amended after review:* `--wait-timeout` only bounds the health wait after start, not the builds, so
+  the build is its own bounded step (equivalent to `up --build`).
 - **AC-2 (first ingestion)** — Given the stack is healthy, when the script polls `GET /api/v1/ingestions/latest`
   through nginx (bounded wait, default 180 s), then the first scheduled run reaches `COMPLETED`; any other finished
   status, or the timeout, fails the script.

@@ -27,3 +27,4 @@ The guardrails (rules, skills, agents, hooks) are versioned in the repository an
 | [007](007-search-api.md) | Search API: filters, keyset cursor, indexes measured at 1M, Redis cache-aside with data version, catalog, OpenAPI (spec 005), review findings | `feat/005-search-api` |
 | [008](008-dashboard.md) | Dashboard: React + TypeScript + Vite, live ingestion status, nginx, frontend CI and hooks (spec 006), OpenAPI follow-up, review findings | `feat/006-dashboard` |
 | [009](009-dependabot-triage.md) | Dependabot triage: Spotless bump merged, TypeScript 7 / ESLint 10 declined with ignore rules, `minimatch` security update not possible | `chore/dependabot-ignore-majors` |
+| [010](010-stack-smoke.md) | Full-stack smoke test in CI (spec 007): `scripts/stack-smoke.sh`, CI override, CI job; providers table wrapping, smoke-test container leak, `minimatch` dismissal recorded, deterministic-profile doc fix; review findings | `chore/007-stack-smoke` |

@@ -99,7 +99,7 @@ See [docs/usage.md](docs/usage.md) for the endpoints that currently exist and th
 scripts/stack-smoke.sh
 ```
 
-It runs `docker compose up --build --wait` with [`docker-compose.ci.yml`](docker-compose.ci.yml) on top
+It runs `docker compose build`, then `up --wait`, with [`docker-compose.ci.yml`](docker-compose.ci.yml) on top
 (deterministic gds-mock, 20,000 itineraries, first ingestion after 2 s). Then, through the dashboard's nginx on port
 3000, it:
 
@@ -114,7 +114,9 @@ On failure it prints `docker compose logs` (saved to `target/stack-smoke/compose
 `docker compose down -v`, also on Ctrl-C. It runs under its own compose project (`flight-aggregator-smoke`), so it
 never deletes the volume of your own stack, but it needs ports 3000, 5432, 6379, 8080 and 8081 free: stop your
 `docker compose up` stack first. With images already built it takes under a minute.
-`STACK_SMOKE_UP_TIMEOUT` (default 300 s) and `STACK_SMOKE_INGESTION_TIMEOUT` (180 s) change the waits.
+`STACK_SMOKE_BUILD_TIMEOUT` (default 600 s, applied when a `timeout` or `gtimeout` command exists),
+`STACK_SMOKE_UP_TIMEOUT` (300 s for every service to become healthy, build excluded) and
+`STACK_SMOKE_INGESTION_TIMEOUT` (180 s per run) change the waits.
 
 ## Quality gates
 
