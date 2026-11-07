@@ -370,6 +370,34 @@ fixed); keyboard focus was lost after every search (the form remounted); a non-n
 by `<input type="number">`; repeated items across pages are de-duplicated; upstream URLs are validated before they
 reach the nginx config; the OpenAPI → types check runs locally too.
 
+### Full-stack smoke test (spec 007)
+
+The statement's *"must boot flawlessly using a single command: docker compose up --build"* is now checked on every PR
+and push, not by hand. `scripts/stack-smoke.sh` is the only implementation, run the same way locally and by the CI job
+*Full stack smoke*.
+
+| Decision | Why |
+|---|---|
+| One Bash script (`curl`, `jq`), the same locally and in CI | Parity: a red CI job reproduces with one command on a laptop |
+| `docker-compose.ci.yml` on top of the default file: deterministic gds-mock, 20,000 itineraries, first run after 2 s, next one in 6 h, demo controls on | Fast and exact (no random errors, so the first run must be `COMPLETED` and the e2e IT reconciles exactly), no scheduled run colliding with the script's own (`409`); the default compose that reviewers run is unchanged |
+| Every check through nginx on port 3000, the outage through `/gds-admin/` | It exercises the proxy and the live demo's path, not only the services |
+| Its own compose project (`flight-aggregator-smoke`) | `down -v` can never delete the volume of a reviewer's own stack |
+| Checks: boot healthy, first run `COMPLETED`, catalog + two searches, e2e reconciliation IT, Mock-Beta outage → run `PARTIAL`, Beta `FAILED` with breaker `OPEN`, others `COMPLETED`, search still answers, recovery | The statement's two stack-level promises: it boots, and one provider dropping out does not take the system down |
+| Compose logs printed and uploaded on failure; `down -v` always (trap on exit, INT and TERM) | A red run explains itself, and leaves nothing behind |
+| BuildKit layer cache in the GitHub Actions cache through a CI-only compose file | Keeps the job inside its budget; never needed locally |
+
+`docker compose build` runs as its own step before `up --wait`: `--wait-timeout` bounds only the health wait after
+start, not the builds (found by the review). Each phase has its own bound and both durations are printed.
+
+**Measured.** Locally, from `docker compose down -v`, with the local Docker layer cache warm: 15 checks in **33 s**
+(build 2 s, health wait 16 s, the rest is ingestion, e2e IT and the outage run). In CI (PR #14, `f98c50c`), with an
+empty layer cache: 15 checks in **2 min 17 s** (build 74 s, health wait 24 s); the whole job 2 min 38 s, inside the
+~10 min budget.
+
+**Found while implementing:** `GDS_MOCK_PROFILE=deterministic` alone, with the default compose, kept 10 % errors:
+the compose file sets `GDS_CHAOS_DEFAULT_ERROR_RATE` explicitly, and an environment variable beats a profile's file.
+The docs said otherwise; they (and the compose comment) are fixed, and the CI override sets the rate to `0`.
+
 ### AI tools used
 
 The code is developed with **Claude Code** under versioned guardrails ([ADR-0005](docs/adr/0005-ai-assisted-development.md)):
@@ -609,12 +637,24 @@ Dashboard (spec 006):
   API is published unauthenticated on 8081 anyway); production would put authentication in front, disable
   `DEMO_CONTROLS`, and check `Origin` on state-changing requests.
 - **No browser end-to-end flows**: behaviour is tested in jsdom with MSW, layout in headless Chromium with a mocked
-  API (one engine, four widths), the image with a smoke test, and the stack by hand.
+  API (one engine, four widths), the image with a smoke test, and the stack by `scripts/stack-smoke.sh` over HTTP (spec 007).
 - **`npm audit`: 7 moderate advisories** in `minimatch` inside the dev-only lint toolchain (`typescript-eslint`); they
-  concern glob patterns we write ourselves. Production dependencies audit clean. Accepted until upstream updates.
+  concern glob patterns we write ourselves. Production dependencies audit clean. Accepted until upstream updates: the
+  author dismissed the Dependabot alert as *"Risk is tolerable"* (dev-only, transitive, not shipped, no compatible fix
+  yet) — [docs/ai/009](docs/ai/009-dependabot-triage.md#open-item-for-the-author--resolved).
 - **Pinned behind the latest majors**: TypeScript 5.9 and ESLint 9 until the tools support TypeScript 7 / ESLint 10;
   Dependabot ignores those majors with a documented revisit condition (the first such PRs, #10 and #11, were
   declined — [docs/frontend.md](docs/frontend.md#version-constraints)). For the same reason Dependabot's security
   update for `minimatch` reports "not possible" (the fix needs a major `typescript-eslint` does not accept yet).
+
+Full-stack smoke test (spec 007):
+
+- **It runs the deterministic profile on a small world**, not the default chaos at 100,000: chaos would make the
+  first run's status random. Chaos and volume are covered by the spec 003/004 tests and the measurements above.
+- **The breaker's recovery is not checked** (half-open after 30 s, then closed): it would add at least 30 s per run;
+  spec 003 ITs cover it.
+- **It needs the stack's ports free** (3000, 5432, 6379, 8080, 8081), so it cannot run next to a developer's own
+  stack; it fails fast saying so.
+- The e2e IT and gds-mock both use today's UTC date: a run across midnight UTC can fail its reconciliation.
 
 *To be completed:* what would change for production.

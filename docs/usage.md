@@ -13,6 +13,7 @@
 | Full build (unit + IT + coverage gate + format check, both modules) | `./mvnw verify` |
 | Also run the slow volume tests (tagged `slow`: 1,000,000-record generation and streaming) | `./mvnw verify -Pslow-tests` |
 | Also run the end-to-end ingestion test (tagged `e2e`, needs gds-mock running in the `deterministic` profile) | `./mvnw -pl flight-aggregator verify -Pe2e-tests` |
+| Full-stack smoke test: compose boot, ingestion, search through nginx, e2e test, provider outage (spec 007, also in CI) | `scripts/stack-smoke.sh` |
 | Also run the 1M-row bulk load benchmark (tagged `slow`, ADR-0018) | `./mvnw -pl flight-aggregator verify -Pslow-tests -Dit.test=BulkLoadBenchmarkIT` |
 | Frontend checks (Prettier, ESLint, tsc, Vitest with coverage gate) | `cd frontend && npm ci && npm run check` |
 | Frontend image smoke test (needs Docker) | `bash frontend/docker/smoke-test.sh` |
@@ -46,7 +47,7 @@ docker compose up --build        # postgres + redis + gds-mock + flight-aggregat
 |---|---|---|
 | `postgres` | `5432` (`POSTGRES_PORT`) | `postgres:17`, database/user `flights`, password `flights` (`POSTGRES_PASSWORD`); data in the named volume `postgres-data` (`docker compose down -v` deletes it) |
 | `redis` | `6379` (`REDIS_PORT`) | `redis:8`, search cache only: no persistence, `maxmemory 256mb`, `allkeys-lru` |
-| `gds-mock` | `8081` | Chaos on by default; `GDS_MOCK_PROFILE=deterministic` turns it off, `GDS_WORLD_VOLUME=1000000` for the full volume |
+| `gds-mock` | `8081` | Chaos on by default; `GDS_MOCK_PROFILE=deterministic GDS_CHAOS_DEFAULT_ERROR_RATE=0` turns it off (the profile alone keeps the compose file's 10 % errors), `GDS_WORLD_VOLUME=1000000` for the full volume |
 | `flight-aggregator` | `8080` | Starts when the other three are healthy; healthy on `/actuator/health/readiness`; restarts if the JVM exits on `OutOfMemoryError` |
 | `frontend` | `3000` (`FRONTEND_PORT`) | nginx serving the dashboard and proxying `/api`; starts when the aggregator is healthy; healthy on `/healthz`; `DEMO_CONTROLS` (default `true`) shows the demo panel and proxies `/gds-admin` |
 
@@ -55,7 +56,7 @@ Variables for the aggregator: `INGESTION_INITIAL_DELAY` (default `10s`), `INGEST
 maps them to `aggregator.*` properties, the datasource and `GDS_MOCK_URL`. For example, a 1M run without chaos:
 
 ```bash
-GDS_WORLD_VOLUME=1000000 GDS_MOCK_PROFILE=deterministic docker compose up --build -d --wait
+GDS_WORLD_VOLUME=1000000 GDS_MOCK_PROFILE=deterministic GDS_CHAOS_DEFAULT_ERROR_RATE=0 docker compose up --build -d --wait
 curl -X POST http://localhost:8080/api/v1/ingestions
 docker compose exec postgres psql -U flights -c "SELECT departure_date, count(*) FROM itinerary GROUP BY 1 ORDER BY 1"
 ```
@@ -254,9 +255,12 @@ providers, aggregates each day with the rules above and stores it in PostgreSQL 
 Run the end-to-end check against a real mock (it reconciles every figure with `/admin/world/stats`):
 
 ```bash
-./mvnw -pl gds-mock spring-boot:run -Dspring-boot.run.profiles=deterministic   # terminal 1 (or docker compose up)
+./mvnw -pl gds-mock spring-boot:run -Dspring-boot.run.profiles=deterministic   # terminal 1
 ./mvnw -pl flight-aggregator verify -Pe2e-tests                                # terminal 2; -De2e.gds-mock.url=… to change
 ```
+
+The default compose stack runs chaos, which the test refuses; `scripts/stack-smoke.sh` runs it against a
+deterministic stack (spec 007).
 
 ### Configuration
 

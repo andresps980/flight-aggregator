@@ -82,9 +82,17 @@ typescript is no longer being updated by Dependabot"* (#11): **the ignore rules 
 outcome; noted so the record says what happened. Next time: the ignore rule alone is enough to close a declined
 Dependabot PR once merged.
 
-## Open item for the author
+## Open item for the author — resolved
 
 The `minimatch` security update keeps reporting "not possible" on Dependabot security runs until `typescript-eslint`
 moves to `minimatch` 11. The usual way to stop the repeated attempts is to dismiss those Dependabot alerts in the
 Security tab as *tolerable risk* (dev-only lint tooling, see docs/frontend.md → *Version constraints*). Not done by the
 agent: it changes the repository's security state.
+
+**Resolution (recorded in PR 14, [docs/ai/010](010-stack-smoke.md)).** The author dismissed the alert themselves:
+Dependabot alert #1 (`minimatch`, GHSA-g3hv-75wg-m249, moderate, development scope), dismissed on 2026-11-06 at
+18:32 UTC with the reason **"Risk is tolerable"** (`tolerable_risk`). Why: the package is dev-only and transitive (the
+lint toolchain, via `typescript-eslint`), it is not shipped (the nginx image contains only the static build), and no
+compatible fix exists yet (11.0.1 is outside `typescript-eslint`'s `^10` range). Revisit when `typescript-eslint`
+accepts `minimatch` 11: the alert can then be reopened and fixed by a normal update. Read back with
+`gh api repos/andresps980/flight-aggregator/dependabot/alerts`.

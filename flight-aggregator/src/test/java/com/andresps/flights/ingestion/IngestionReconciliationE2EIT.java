@@ -33,9 +33,12 @@ import tools.jackson.databind.json.JsonMapper;
  * with its live {@code GET /admin/world/stats}. Excluded from the default build (tag {@code e2e}). Run it with:
  *
  * <pre>
- * ./mvnw -pl gds-mock spring-boot:run -Dspring-boot.run.profiles=deterministic     # or docker compose up --build
+ * ./mvnw -pl gds-mock spring-boot:run -Dspring-boot.run.profiles=deterministic
  * ./mvnw -pl flight-aggregator verify -Pe2e-tests [-De2e.gds-mock.url=http://localhost:8081]
  * </pre>
+ *
+ * Not against the default {@code docker compose up}: it runs chaos, which {@link #mockIsDeterministic()} rejects.
+ * {@code scripts/stack-smoke.sh} (spec 007) runs this test against a deterministic compose stack.
  *
  * Both sides use today's UTC date as reference date, so don't run it across midnight UTC.
  */

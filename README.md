@@ -90,6 +90,34 @@ The OpenAPI description is at `http://localhost:8080/swagger-ui.html` (committed
 
 See [docs/usage.md](docs/usage.md) for the endpoints that currently exist and their configuration.
 
+### Full-stack smoke test
+
+`scripts/stack-smoke.sh` checks the whole stack end to end, with the same script CI runs (job *Full stack smoke*,
+[spec 007](specs/007-stack-smoke/spec.md)). It needs Docker, `curl`, `jq` and JDK 21:
+
+```bash
+scripts/stack-smoke.sh
+```
+
+It runs `docker compose build`, then `up --wait`, with [`docker-compose.ci.yml`](docker-compose.ci.yml) on top
+(deterministic gds-mock, 20,000 itineraries, first ingestion after 2 s). Then, through the dashboard's nginx on port
+3000, it:
+
+1. waits for the first ingestion to finish `COMPLETED`;
+2. checks that the catalog and two searches return data;
+3. runs the e2e reconciliation test (`-Pe2e-tests`) against the running gds-mock;
+4. forces a Mock-Beta outage and starts a run, which must finish `PARTIAL` with Beta `FAILED`, its breaker `OPEN`
+   and search still answering;
+5. recovers Beta.
+
+On failure it prints `docker compose logs` (saved to `target/stack-smoke/compose.log`). It always ends with
+`docker compose down -v`, also on Ctrl-C. It runs under its own compose project (`flight-aggregator-smoke`), so it
+never deletes the volume of your own stack, but it needs ports 3000, 5432, 6379, 8080 and 8081 free: stop your
+`docker compose up` stack first. With images already built it takes under a minute.
+`STACK_SMOKE_BUILD_TIMEOUT` (default 600 s, applied when a `timeout` or `gtimeout` command exists),
+`STACK_SMOKE_UP_TIMEOUT` (300 s for every service to become healthy, build excluded) and
+`STACK_SMOKE_INGESTION_TIMEOUT` (180 s per run) change the waits.
+
 ## Quality gates
 
 Applied to every Maven module, and the equivalent to the frontend.
@@ -105,6 +133,7 @@ Applied to every Maven module, and the equivalent to the frontend.
 | Frontend: tests ≥ 80 % lines / 70 % branches | Vitest + React Testing Library + MSW | `npm run check`, pre-push, CI |
 | Frontend: contract | types generated from `docs/api/openapi.json`, regenerated and diffed | CI |
 | Frontend: image | `frontend/docker/smoke-test.sh` (headers, proxy scope, demo flag, non-root) | CI |
+| Full stack | `scripts/stack-smoke.sh`: compose boot, ingestion, catalog and search through nginx, e2e reconciliation, provider outage | locally, CI |
 | Vulnerable dependencies | Dependency Review, Dependabot (Maven, npm, Docker, Actions) | CI on PRs, weekly |
 | Static security analysis | CodeQL (`security-and-quality`, Java and JavaScript/TypeScript) | CI on PRs, weekly |
 
@@ -163,6 +192,8 @@ frontend/             dashboard (React + TypeScript + Vite), served by nginx; se
   src/hooks/, src/components/  state and presentation
   docker/                    nginx config, entrypoint (runtime config), image smoke test
 docker-compose.yml    the whole stack (PostgreSQL, Redis, gds-mock, flight-aggregator, frontend)
+docker-compose.ci.yml override for the full-stack smoke test (deterministic, small, fast)
+scripts/              stack-smoke.sh: the full-stack smoke test (locally and in CI)
 .claude/              shared Claude Code config: settings + hooks, skills, agents
 .githooks/            versioned git hooks (pre-commit, pre-push)
 .github/              CI, CodeQL, Dependabot, PR template

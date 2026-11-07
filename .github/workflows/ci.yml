@@ -154,6 +154,40 @@ jobs:
       - name: nginx image smoke test
         run: bash docker/smoke-test.sh
 
+  stack-smoke:
+    name: Full stack smoke (docker compose up --build, ingestion, search, e2e, outage)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      # Layer cache for the compose builds (.github/docker-compose.build-cache.yml): a buildx builder that can export
+      # to the GitHub Actions cache, and the runtime token it needs.
+      - uses: docker/setup-buildx-action@v4
+      - uses: crazy-max/ghaction-github-runtime@v4
+
+      # A step timeout (below the job's) fails the step and signals the script, whose trap saves the compose log; a job
+      # timeout would cancel the job and skip the upload.
+      - name: Stack smoke test (scripts/stack-smoke.sh, same as locally)
+        timeout-minutes: 12
+        env:
+          STACK_SMOKE_EXTRA_COMPOSE: .github/docker-compose.build-cache.yml
+        run: scripts/stack-smoke.sh
+
+      - name: Upload compose logs
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v7
+        with:
+          name: stack-smoke-compose-logs
+          path: |
+            target/stack-smoke/
+            flight-aggregator/target/failsafe-reports/
+          if-no-files-found: ignore
+
   dependency-review:
     name: Dependency review (vulnerable dependencies)
     if: github.event_name == 'pull_request'

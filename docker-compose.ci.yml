@@ -1,0 +1,23 @@
+# Override for the full-stack smoke test (spec 007): deterministic and fast. Used by scripts/stack-smoke.sh, locally and
+# in CI; the default docker-compose.yml that reviewers run is unchanged.
+#   docker compose -f docker-compose.yml -f docker-compose.ci.yml up --build
+services:
+  gds-mock:
+    environment:
+      # No latency, no random errors (the outage switch still works), and a small world.
+      SPRING_PROFILES_ACTIVE: deterministic
+      # docker-compose.yml sets this variable explicitly, and an environment variable beats the profile's file, so the
+      # profile alone would keep 10 % errors.
+      GDS_CHAOS_DEFAULT_ERROR_RATE: "0"
+      GDS_WORLD_VOLUME: "20000"
+
+  flight-aggregator:
+    environment:
+      # First run right away; the next scheduled one far enough away not to collide with the script's own run (409).
+      AGGREGATOR_INGESTION_SCHEDULE_INITIAL_DELAY: 2s
+      AGGREGATOR_INGESTION_SCHEDULE_FIXED_DELAY: 6h
+
+  frontend:
+    environment:
+      # The outage scenario goes through nginx /gds-admin/, the live demo's path.
+      DEMO_CONTROLS: "true"

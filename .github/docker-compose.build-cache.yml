@@ -1,0 +1,17 @@
+# CI only (spec 007): BuildKit layer cache in the GitHub Actions cache for the three images built by compose, added by
+# the "Full stack smoke" job through STACK_SMOKE_EXTRA_COMPOSE. Needs a docker-container buildx builder and the Actions
+# runtime token (both set up by the job); never used locally. ignore-error: a cache export failure (GHA cache throttled)
+# must not fail the build of a required check.
+services:
+  gds-mock:
+    build:
+      cache_from: ["type=gha,scope=stack-smoke-gds-mock"]
+      cache_to: ["type=gha,scope=stack-smoke-gds-mock,mode=max,ignore-error=true"]
+  flight-aggregator:
+    build:
+      cache_from: ["type=gha,scope=stack-smoke-flight-aggregator"]
+      cache_to: ["type=gha,scope=stack-smoke-flight-aggregator,mode=max,ignore-error=true"]
+  frontend:
+    build:
+      cache_from: ["type=gha,scope=stack-smoke-frontend"]
+      cache_to: ["type=gha,scope=stack-smoke-frontend,mode=max,ignore-error=true"]

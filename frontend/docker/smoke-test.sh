@@ -9,8 +9,17 @@ here="$(cd "$(dirname "$0")/.." && pwd)"
 image="flight-aggregator/frontend:smoke"
 passed=0
 failed=0
+# Every container of this run carries this label, so the end can assert none is left.
+label="flight-aggregator.smoke-test=$$-$(date +%s)"
 containers=()
-cleanup() { [ "${#containers[@]}" -gt 0 ] && docker rm -f "${containers[@]}" >/dev/null 2>&1; }
+cleanup() {
+  local ids
+  if [ "${#containers[@]}" -gt 0 ]; then docker rm -f "${containers[@]}" >/dev/null 2>&1; fi
+  containers=()
+  # Also by label: a container that "docker run" created but failed to start never had its id recorded.
+  ids="$(docker ps -aq --filter "label=$label")"
+  if [ -n "$ids" ]; then docker rm -f $ids >/dev/null 2>&1; fi
+}
 trap cleanup EXIT
 
 check() { # check <description> <command...>
@@ -25,22 +34,32 @@ check() { # check <description> <command...>
 
 docker build -q -t "$image" "$here" >/dev/null || { echo "FAIL  docker build"; exit 1; }
 
-start() { # start <DEMO_CONTROLS> -> prints the base URL
-  local id port
-  id="$(docker run -d -P -e DEMO_CONTROLS="$1" "$image")" || return 1
+# Containers are started here, in the main shell, so their ids reach the EXIT trap. (A helper called through
+# "$(...)" or "< <(...)" runs in a subshell: its containers+=() is lost and the containers are left behind.)
+start() { # start <DEMO_CONTROLS>: starts a container, appends its id to containers
+  local id
+  id="$(docker run -d -P --label "$label" -e DEMO_CONTROLS="$1" "$image")" || { echo "FAIL  docker run"; exit 1; }
   containers+=("$id")
-  port="$(docker port "$id" 8080/tcp | head -n1 | sed 's/.*://')"
+}
+
+base_url() { # base_url <id>: waits for /healthz, prints http://localhost:<port>
+  local port
+  port="$(docker port "$1" 8080/tcp | head -n1 | sed 's/.*://')"
   for _ in $(seq 1 50); do
     curl -fs "http://localhost:$port/healthz" >/dev/null 2>&1 && break
     sleep 0.2
   done
-  echo "$id http://localhost:$port"
+  echo "http://localhost:$port"
 }
 
 status() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
 
-read -r off_id off < <(start false)
-read -r on_id on < <(start true)
+start false
+off_id="${containers[0]}"
+start true
+on_id="${containers[1]}"
+off="$(base_url "$off_id")"
+on="$(base_url "$on_id")"
 
 echo "--- AC-24: image"
 check "runs as a non-root user" test "$(docker exec "$off_id" id -u)" != "0"
@@ -80,6 +99,10 @@ check "DEMO_CONTROLS=true: config.json says on" bash -c "curl -fs $on/config.jso
 check "DEMO_CONTROLS=true: /gds-admin/providers is proxied (502 while gds-mock is down)" \
   test "$(status "$on/gds-admin/providers")" = 502
 check "DEMO_CONTROLS=true: only provider admin paths are proxied" test "$(status "$on/gds-admin/world/stats")" = 404
+
+echo "--- cleanup"
+cleanup
+check "no container of this run is left" test -z "$(docker ps -aq --filter "label=$label")"
 
 echo
 echo "frontend image smoke test: $passed passed, $failed failed"
