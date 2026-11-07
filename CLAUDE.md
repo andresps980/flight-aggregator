@@ -44,6 +44,7 @@ activates it in its own `<build><plugins>`, so formatting, the coverage gate and
 | Regenerate `docs/api/openapi.json` after an API change (explicit; verify only compares and fails on drift) | `./mvnw -pl flight-aggregator verify -Popenapi-write`, review the diff |
 | Frontend: regenerate API types after an OpenAPI change | `cd frontend && npm run gen:api` |
 | Frontend: production build / image smoke test | `npm run build` / `bash frontend/docker/smoke-test.sh` |
+| Full-stack smoke test (compose up --build, ingestion, search via nginx, e2e IT, outage; also a CI job) | `scripts/stack-smoke.sh` |
 | Frontend: layout check in Chromium (after `npm run build`; once: `npx playwright install chromium`) | `npm run test:layout` |
 
 Always run `./mvnw verify` and, when `frontend/` changed, `npm run check` before declaring a task done. The Stop hook

@@ -13,6 +13,7 @@
 | Full build (unit + IT + coverage gate + format check, both modules) | `./mvnw verify` |
 | Also run the slow volume tests (tagged `slow`: 1,000,000-record generation and streaming) | `./mvnw verify -Pslow-tests` |
 | Also run the end-to-end ingestion test (tagged `e2e`, needs gds-mock running in the `deterministic` profile) | `./mvnw -pl flight-aggregator verify -Pe2e-tests` |
+| Full-stack smoke test: compose boot, ingestion, search through nginx, e2e test, provider outage (spec 007, also in CI) | `scripts/stack-smoke.sh` |
 | Also run the 1M-row bulk load benchmark (tagged `slow`, ADR-0018) | `./mvnw -pl flight-aggregator verify -Pslow-tests -Dit.test=BulkLoadBenchmarkIT` |
 | Frontend checks (Prettier, ESLint, tsc, Vitest with coverage gate) | `cd frontend && npm ci && npm run check` |
 | Frontend image smoke test (needs Docker) | `bash frontend/docker/smoke-test.sh` |
