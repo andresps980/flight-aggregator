@@ -356,7 +356,7 @@ button[aria-busy='true']::after {
 }
 
 .providers .breaker {
-  font-size: 0.7rem;
+  font-size: 0.75rem;
 }
 
 .providers .count {

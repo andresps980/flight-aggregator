@@ -13,8 +13,12 @@ failed=0
 label="flight-aggregator.smoke-test=$$-$(date +%s)"
 containers=()
 cleanup() {
+  local ids
   if [ "${#containers[@]}" -gt 0 ]; then docker rm -f "${containers[@]}" >/dev/null 2>&1; fi
   containers=()
+  # Also by label: a container that "docker run" created but failed to start never had its id recorded.
+  ids="$(docker ps -aq --filter "label=$label")"
+  if [ -n "$ids" ]; then docker rm -f $ids >/dev/null 2>&1; fi
 }
 trap cleanup EXIT
 

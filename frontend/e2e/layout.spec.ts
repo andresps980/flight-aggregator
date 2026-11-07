@@ -166,7 +166,10 @@ function layoutProblems(): string[] {
   }
   // 4. Status panel table cells wrap only between words: a word whose text spans two line boxes was broken inside
   //    (the "COMPLE TED" / "CLOS ED" bug, from overflow-wrap: anywhere inherited by the cells).
-  for (const cell of document.querySelectorAll('.providers th, .providers td')) {
+  const cells = document.querySelectorAll('.providers th, .providers td');
+  if (cells.length === 0)
+    problems.push('no providers table cells rendered (check 4 would pass vacuously)');
+  for (const cell of cells) {
     const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
       const text = node.textContent ?? '';

@@ -45,8 +45,13 @@ describe('status panel', () => {
     const beta = await screen.findByRole('row', { name: /mock-beta/ });
     expect(beta).toHaveTextContent('FAILED');
     expect(beta).toHaveTextContent('0/7');
-    // Failures as a plain count, in the "Failures" column (short cells that never need to wrap).
-    expect(within(beta).getAllByRole('cell').at(-1)).toHaveTextContent(/^7$/);
+    // Failures as a plain count in the "Failures" column (a short cell that never needs to wrap); screen readers
+    // reading the row still hear "7 failures".
+    const columns = screen.getAllByRole('columnheader').map((header) => header.textContent);
+    const failures = within(beta).getAllByRole('cell')[columns.indexOf('Failures') - 1];
+    expect(failures).toHaveTextContent(/^7 failures$/);
+    expect(within(failures!).getByText('7')).toBeVisible();
+    expect(within(failures!).getByText('failures')).toHaveClass('visually-hidden');
     expect(within(beta).getByText('OPEN')).toHaveClass('breaker-open');
     const alpha = screen.getByRole('row', { name: /mock-alpha/ });
     expect(alpha).toHaveTextContent('7/7');

@@ -35,7 +35,10 @@ function ProviderRow({ provider }: { provider: ProviderReport }) {
       <td>
         <span className={open ? 'breaker breaker-open' : 'breaker'}>{provider.circuitState}</span>
       </td>
-      <td className="count">{provider.failures.length}</td>
+      <td className="count">
+        {provider.failures.length}
+        <span className="visually-hidden"> failures</span>
+      </td>
     </tr>
   );
 }
