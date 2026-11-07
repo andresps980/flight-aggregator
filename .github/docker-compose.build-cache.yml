@@ -1,0 +1,16 @@
+# CI only (spec 007): BuildKit layer cache in the GitHub Actions cache for the three images built by compose, added by
+# the "Full stack smoke" job through STACK_SMOKE_EXTRA_COMPOSE. Needs a docker-container buildx builder and the Actions
+# runtime token (both set up by the job); never used locally.
+services:
+  gds-mock:
+    build:
+      cache_from: ["type=gha,scope=stack-smoke-gds-mock"]
+      cache_to: ["type=gha,scope=stack-smoke-gds-mock,mode=max"]
+  flight-aggregator:
+    build:
+      cache_from: ["type=gha,scope=stack-smoke-flight-aggregator"]
+      cache_to: ["type=gha,scope=stack-smoke-flight-aggregator,mode=max"]
+  frontend:
+    build:
+      cache_from: ["type=gha,scope=stack-smoke-frontend"]
+      cache_to: ["type=gha,scope=stack-smoke-frontend,mode=max"]
