@@ -31,6 +31,9 @@ expect "frontend" frontend/package.json
 expect "frontend" frontend/nginx/default.conf.template
 expect "frontend" docs/api/openapi.json
 expect "" docs/frontend.md
+expect "backend" docs/architecture/overview.md
+expect "backend" docs/architecture/packages/gds-mock/chaos.md
+expect "" docs/architecture.md
 expect "" specs/006-dashboard/spec.md
 expect "" .github/workflows/ci.yml README.md
 expect "" ""
