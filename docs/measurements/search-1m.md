@@ -3,7 +3,7 @@
 Output of `SearchPerformanceIT` (`./mvnw -pl flight-aggregator verify -Pslow-tests -Dit.test=SearchPerformanceIT`),
 2026-11-06, Apple M1 Max, Docker with 6 CPUs / 16 GB, `postgres:17` and `redis:8` Testcontainers, 1,000,006
 gds-mock-shaped rows over 7 days written through the real ingestion store. Summarised in
-[ADR-0020](../adr/0020-search-indexes.md) and [SOLUTION.md](../../SOLUTION.md#keyset-vs-offset-measured-spec-005).
+[ADR-0020](../adr/0020-search-indexes.md) and [SOLUTION.md](../../SOLUTION.md#25-keyset-vs-offset-measured).
 
 ## Bulk load (COPY, 1M rows, 7 days)
 
@@ -441,3 +441,18 @@ Execution Time: 0.064 ms
 | `/api/v1/itineraries?limit=20&origin=FRA&destination=JNB&maxPrice=999999` | 2.91 / 4.65 | 1.87 / 2.31 |
 | `/api/v1/catalog` | 419.66 / 461.85 | 1.40 / 1.72 |
 
+
+## Addendum, 2026-11-07: the last page
+
+`SearchPerformanceIT` now also times the **last page** of the unfiltered result (the worst case for `OFFSET`, which
+reads and discards every matching row first). Re-run on the same machine and setup; the unfiltered rows of that run
+(ms, median / p95 of 30 runs):
+
+| Filters | Matching rows | Page | Keyset | OFFSET |
+|---|---:|---:|---:|---:|
+| none | 1,000,006 | 1 | 0.74 / 1.26 | 0.58 / 0.76 |
+| none | 1,000,006 | 1,000 | 0.58 / 0.73 | 47.35 / 66.13 |
+| none | 1,000,006 | 50,001 (last) | **0.51 / 0.66** | **1116.75 / 1128.32** |
+
+Every other figure of the re-run is within run-to-run noise of the tables above (e.g. `COPY` with the search indexes
+18.1 s first load / 30.4 s replacement, the catalog 449 ms uncached / 1.43 ms cached), so they are not repeated.
