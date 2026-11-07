@@ -48,7 +48,7 @@ services:
       # Any gds.* setting can be overridden here (see docs/usage.md), e.g.:
       GDS_WORLD_VOLUME: ${GDS_WORLD_VOLUME:-100000}
       GDS_CHAOS_DEFAULT_ERROR_RATE: ${GDS_CHAOS_DEFAULT_ERROR_RATE:-0.10}
-      # "deterministic" turns chaos off (no latency, no errors)
+      # "deterministic" turns latency off; with GDS_CHAOS_DEFAULT_ERROR_RATE=0 errors too (this variable beats the profile)
       SPRING_PROFILES_ACTIVE: ${GDS_MOCK_PROFILE:-default}
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8081/actuator/health/readiness"]
