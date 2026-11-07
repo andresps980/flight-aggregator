@@ -2,17 +2,24 @@
 # Renders every ```mermaid block of the repository's Markdown files with mermaid-cli, so a diagram GitHub cannot render
 # fails here (locally and in CI) instead of showing up as an error box after the merge.
 #   scripts/check-mermaid.sh            # every tracked *.md file that contains a mermaid block
-#   scripts/check-mermaid.sh FILE...    # only these files
+#   scripts/check-mermaid.sh FILE...    # only these files (paths relative to the current directory)
 # Needs Node. MMDC overrides the mermaid-cli command (default: npx with a pinned version, which downloads it and a
 # headless Chromium on first use). PUPPETEER_NO_SANDBOX=1 (CI) starts Chromium with --no-sandbox.
 set -euo pipefail
 
 MERMAID_CLI_VERSION=11.17.0
-cd "$(dirname "$0")/.."
+fence='^[[:space:]]*(```|~~~)mermaid'
 
-if [ "$#" -gt 0 ]; then files=("$@"); else
-  files=()
-  while IFS= read -r f; do files+=("$f"); done < <(git ls-files -z -co --exclude-standard '*.md' | xargs -0 grep -l '^```mermaid' || true)
+files=()
+if [ "$#" -gt 0 ]; then
+  for f in "$@"; do files+=("$(cd "$(dirname "$f")" && pwd)/$(basename "$f")"); done
+  cd "$(dirname "$0")/.."
+else
+  cd "$(dirname "$0")/.."
+  tracked=$(git ls-files -co --exclude-standard '*.md') # fails loudly outside a checkout (set -e)
+  while IFS= read -r f; do
+    [ -n "$f" ] && grep -Eq "$fence" "$f" && files+=("$f")
+  done <<<"$tracked"
 fi
 if [ "${#files[@]}" -eq 0 ]; then echo "mermaid: no diagrams found"; exit 0; fi
 
@@ -28,7 +35,7 @@ read -r -a mmdc <<<"${MMDC:-npx --yes @mermaid-js/mermaid-cli@$MERMAID_CLI_VERSI
 blocks=0 failed=0 n=0
 for f in "${files[@]}"; do
   n=$((n + 1))
-  count=$(grep -c '^```mermaid' "$f" || true)
+  count=$(grep -Ec "$fence" "$f" || true)
   blocks=$((blocks + count))
   # A Markdown input renders each block to an SVG and fails on the first diagram that does not parse.
   if ! "${mmdc[@]}" --quiet -p "$work/puppeteer.json" -i "$f" -o "$work/$n.md" >"$work/$n.log" 2>&1; then

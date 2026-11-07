@@ -65,6 +65,9 @@ class SearchPerformanceIT {
 
     private static final int PAGE = 20;
     private static final int DEEP_PAGE = 1_000;
+    /** The combination without filters: the only one whose last page is also timed (the worst case for OFFSET). */
+    private static final String UNFILTERED = "none";
+
     private static final int WARMUP = 5;
     private static final int RUNS = 30;
     private static final Path REPORT = Path.of("target", "search-performance.md");
@@ -168,7 +171,7 @@ class SearchPerformanceIT {
         report.append(String.format(
                 Locale.ROOT, "Busiest route %s-%s: %s rows; busiest carrier %s.%n%n", o, d, route.get("n"), c));
         return List.of(
-                combination("none", "", null, null, null, null, null, true),
+                combination(UNFILTERED, "", null, null, null, null, null, true),
                 combination("maxPrice", "&maxPrice=" + max, null, null, null, max, null, true),
                 combination("date", "&date=" + day, null, null, day, null, null, true),
                 combination("date + maxPrice", "&date=" + day + "&maxPrice=" + max, null, null, day, max, null, true),
@@ -282,7 +285,7 @@ class SearchPerformanceIT {
             int lastPage = (int) Math.max(1, (matching - 1) / PAGE + 1);
             int deepest = Math.min(DEEP_PAGE, lastPage);
             List<Integer> pages = new ArrayList<>(deepest > 1 ? List.of(1, deepest) : List.of(1));
-            if (combination.name().equals("none") && lastPage > deepest) {
+            if (combination.name().equals(UNFILTERED) && lastPage > deepest) {
                 pages.add(lastPage);
             }
             for (int page : pages) {
@@ -300,7 +303,7 @@ class SearchPerformanceIT {
                         page,
                         keysetStats,
                         offsetStats));
-                if (page == DEEP_PAGE && combination.name().equals("none")) {
+                if (page == DEEP_PAGE && combination.name().equals(UNFILTERED)) {
                     assertThat(keysetStats.medianMs()).isLessThan(offsetStats.medianMs());
                 }
                 assertThat(keysetStats.medianMs())

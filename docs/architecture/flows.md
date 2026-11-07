@@ -100,13 +100,19 @@ sequenceDiagram
             end
             Pub-->>Day: DayPublication (REPLACED, PUBLISHED_INCOMPLETE, KEPT_STALE or WRITE_FAILED)
         else no provider delivered
-            Day->>Pub: unavailable(day) → NO_DATA, stored snapshot untouched
+            Day->>Pub: unavailable(day)
+            alt nothing stored for the day
+                Pub-->>Day: NO_DATA
+            else a snapshot is stored
+                Pub->>Store: markStale(day) — bumps data_version
+                Pub-->>Day: KEPT_STALE
+            end
         end
         Day-->>Ing: DayReport (statistics summed into the run)
     end
     Ing-->>Run: IngestionReport (per provider: status, failures, attempts, breaker state, malformed)
     Run->>Store: refreshStatistics() — ANALYZE itinerary
-    Run->>PG: update run: COMPLETED · PARTIAL · FAILED (only if every provider failed), report as JSONB
+    Run->>PG: update run: COMPLETED · PARTIAL · FAILED (every provider failed, lock lost or unexpected error), report as JSONB
     Run->>Run: lease.close() — advisory lock released with the session
 ```
 
@@ -147,7 +153,7 @@ sequenceDiagram
     opt cursor present
         Svc->>Svc: Cursor.decode + requireIssuedFor(criteria.fingerprint()) (400 if other filters)
     end
-    Svc->>Cache: find(criteria, after, limit + 1, now)
+    Svc->>Cache: find(criteria, after, limit, now)
     Cache->>Ver: current()
     Ver->>PG: SELECT version FROM data_version (one primary-key read, every request)
     Cache->>RCS: get(key = v1 · version · filters · limit · position)
@@ -160,7 +166,8 @@ sequenceDiagram
     alt hit
         Cache->>Cache: drop itineraries departed since cached (page may be short, hasMore kept)
     else miss (or Redis unavailable)
-        Cache->>SQL: find(criteria, after, limit + 1, now)
+        Cache->>SQL: find(criteria, after, limit, now)
+        Note over SQL: asks for limit + 1 rows to know whether more follow
         SQL->>PG: SELECT … FROM itinerary JOIN day_snapshot<br/>WHERE departure_at > now AND filters AND (final_price, id) > (cursor)<br/>ORDER BY final_price, id LIMIT limit + 1
         Note over PG: index range scan on (final_price, id) or<br/>(origin, destination, final_price, id), stopped by LIMIT
         PG-->>SQL: rows

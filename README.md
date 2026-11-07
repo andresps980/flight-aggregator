@@ -28,10 +28,10 @@ docker compose up --build
 ```
 
 What to expect, measured from a clean clone on a laptop (Apple M1 Max, 2026-11-07): after the base images are pulled
-(PostgreSQL, Redis, JDK/JRE, Node, nginx — the only step that depends on your connection), the build takes **≈ 25 s**
-(Maven and npm dependencies are downloaded inside the build), the five services are healthy **≈ 20 s** later, and the
+(PostgreSQL, Redis, JDK/JRE, Node, nginx — the only step that depends on your connection), the build takes **22 s**
+(Maven and npm dependencies are downloaded inside the build), the five services are healthy **18 s** later, and the
 first ingestion — scheduled 10 s after start-up, ≈ 94,500 itineraries from the three mock providers with their
-latency and random errors — is `COMPLETED` **≈ 20 s** after that: **about a minute in all**. Then it runs every 15 min;
+latency and random errors — is `COMPLETED` **21 s** after that: **about a minute in all**. Then it runs every 15 min;
 later starts reuse the images and the data (named volume).
 
 | URL | What |
@@ -140,7 +140,7 @@ Applied to every Maven module, and the equivalent to the frontend.
 | Unit tests (`*Test`) | JUnit 5, Mockito, AssertJ (Surefire) | `verify`, CI |
 | Integration tests (`*IT`) | `@SpringBootTest` on a random port (Failsafe) | `verify`, CI |
 | Architecture & SOLID rules | ArchUnit (`ArchitectureTest` per module) | `verify`, CI |
-| Architecture docs | `ArchitectureDocsTest` (class-diagram types exist), `scripts/check-mermaid.sh` (diagrams render) | `verify`, CI |
+| Architecture docs | `ArchitectureDocsTest` (class-diagram types exist) in `verify`; `scripts/check-mermaid.sh` (diagrams render) | `verify`; the script in CI and on demand |
 | Coverage ≥ 80 % lines / 70 % branches | JaCoCo (merged unit + IT, per module) | `verify`, CI (summary + PR comment) |
 | Frontend: format, lint, types | Prettier, ESLint (`jsx-a11y`, `react-hooks`), `tsc` strict | `npm run check`, pre-commit (Prettier), Claude hooks, CI |
 | Frontend: tests ≥ 80 % lines / 70 % branches | Vitest + React Testing Library + MSW | `npm run check`, pre-push, CI |

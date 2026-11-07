@@ -102,9 +102,9 @@ classDiagram
         +update(IngestionRun run)
         +findById(UUID id) Optional~IngestionRun~
         +findLatest() Optional~IngestionRun~
-        +findRunning() Optional~IngestionRun~
+        +findRunning() Optional~UUID~
         +abortRunning(Instant at) int
-        +deleteStartedBefore(Instant instant)
+        +deleteStartedBefore(Instant instant) int
     }
 
     ProviderFeed ..> PartitionFetchException : throws

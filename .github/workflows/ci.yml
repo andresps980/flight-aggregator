@@ -36,6 +36,12 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version-file: frontend/.nvmrc
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.npm
+            ~/.cache/puppeteer
+          key: mermaid-cli-11.17.0-${{ runner.os }}
       - name: Mermaid diagrams render (mermaid-cli, every *.md)
         env:
           PUPPETEER_NO_SANDBOX: '1'

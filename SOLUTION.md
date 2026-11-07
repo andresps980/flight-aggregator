@@ -25,13 +25,13 @@ indexes, through a Redis cache that is optional at runtime ([flows](docs/archite
 |---|---|
 | Deepest page, 1M rows, keyset vs `OFFSET` | page 1,000: **0.55 ms vs 50 ms**; last page (50,001): **0.51 ms vs 1.1 s** |
 | Full 1M ingestion in compose | **21.5 s** first load, 29.5 s replacement, at the shipped `-Xmx768m` (container peak ≈ 1 GB); ≈ 250 MB working set per day in flight |
-| Search, server side, first page | 0.05–2.9 ms for the common filter combinations (one rare two-filter case ≈ 50–90 ms) |
+| Search, server side, first page | 0.05–2.9 ms for the common filter combinations (one rare case, origin + carrier + low `maxPrice`, ≈ 45–90 ms) |
 | One provider down | run `PARTIAL`, provider `FAILED` with breaker `OPEN`, the previous complete day kept, search unaffected — **checked in CI on every PR** |
 | `docker compose up --build`, clean clone | build ≈ 22 s, healthy 18 s later, first ingestion `COMPLETED` 21 s after that: **≈ 1 min** on a laptop, base image pulls aside |
 
 **How it was built.** Spec-driven, test-first, with Claude Code under versioned guardrails (rules, skills, review
-agents, hooks), every prompt and review finding logged; 7 specs, 24 ADRs, 15 PRs, each merged only with green
-quality gates ([1.5](#15-ai-tools-and-the-agent-system)).
+agents, hooks), every prompt and review finding logged; 7 specs, 24 ADRs, 13 merged PRs (two Dependabot
+major bumps declined), each merged only with green quality gates ([1.5](#15-ai-tools-and-the-agent-system)).
 
 **Where to look.** [Architecture](docs/architecture/overview.md) · [ADRs](docs/adr/README.md) ·
 [specs](specs/README.md) · [usage](docs/usage.md) · [measurements at 1M](docs/measurements/search-1m.md) ·
@@ -46,8 +46,8 @@ Hexagonal architecture **by feature, then by layer** in each backend module
 composition root live in `infrastructure`; use cases are wired as beans, never annotated. The rules are executable:
 each module's `ArchitectureTest` (ArchUnit) fails the build if a dependency points outwards, a framework leaks into
 the domain, PostgreSQL or Redis code leaves its adapter, or features form a cycle. `ingestion` and `search` never
-import each other — they meet only in the PostgreSQL schema. Diagrams, derived from the code and checked against it
-by a test: [overview](docs/architecture/overview.md), [package pages](docs/architecture/packages/README.md),
+import each other — they meet only in the PostgreSQL schema. Diagrams derived from the code (a test checks that every
+type in the class diagrams exists in the package it names): [overview](docs/architecture/overview.md), [package pages](docs/architecture/packages/README.md),
 [flows](docs/architecture/flows.md).
 
 ### 1.2 Decisions
@@ -421,7 +421,7 @@ the cache mostly takes repeated load off the database; it pays off for the expen
   auto-configured meters — `http.server.requests` (count and total time per URI template, status and outcome, no
   percentile histograms), `jvm.*` (memory, GC pauses, threads), `hikaricp.connections.*` (active, pending, acquire
   and usage time, timeouts), `jdbc.connections.*`, `lettuce` (Redis command latency), `executor.*`, `tomcat.sessions.*`,
-  `logback.events` (log lines per level), `process.*` / `system.*`. gds-mock exposes health only. The only custom meter
+  `logback.events` (log lines per level), `process.*` / `system.*`. gds-mock exposes `health` and `info` only. The only custom meter
   is the counter `search.cache` with `result=hit|miss|error|bypassed` — `error` counts failed Redis calls and `bypassed`
   the calls skipped while the cache breaker is open, i.e. the Redis fallback rate.
 - **Persisted ingestion reports:** every run's report is stored as JSONB and served by `GET /api/v1/ingestions/{id}`:
