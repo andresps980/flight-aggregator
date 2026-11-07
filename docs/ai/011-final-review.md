@@ -153,6 +153,36 @@ maintenance is hidden by the parallel fetch on a first load and shows on replace
 two loads, **623 MB after `VACUUM FULL`** (455 MB rows + 168 MB indexes; the search indexes 28 + 37 MB), 690 bytes per
 row — SOLUTION.md had shown the pre-index 558 MB as "with today's indexes".
 
+## Code review (`code-reviewer` agent)
+
+Verdict: *needs changes*, nothing blocking. It ran `./mvnw verify` and the render check (green), compared every
+package arrow of overview.md with an import scan (exact match), every member name in the class blocks with its source,
+and the config values and numbers in flows.md / SOLUTION.md with the code and measurements. Findings and outcome:
+
+| # | Finding | Outcome |
+|---|---|---|
+| S1 | flows.md: "no provider delivered" drawn as `NO_DATA`, untouched; `unavailable` marks a stored day stale (bumping the data version) and returns `KEPT_STALE` | **Fixed** (both branches drawn) |
+| S2 | flows.md: `limit + 1` drawn on the use case → cache arrows; only the SQL adapter adds 1 | **Fixed** |
+| S3 | ingestion-application.md: `findRunning()` returns `Optional<UUID>`, `deleteStartedBefore` returns `int` (members are not checked by the guard, by design) | **Fixed** |
+| S4 | SOLUTION.md: "15 PRs, each merged" — #10 and #11 were declined Dependabot bumps | **Fixed**: 13 merged PRs |
+| S5 | `ArchitectureDocsTest` could miss types silently (two-way and lollipop links, a generic on the left, `<<annotation>> Foo` lines, `Foo : member`, indented or `~~~` fences), and an all-unrecognised diagram passed | **Fixed**: strict parser — every line outside a class body must be a known statement or it is reported; full arrow set; each diagram must yield a type; self-test covers each case. Checked by hand that a `-.->` line in a page fails the build |
+| S6 | SOLUTION.md overstated the guard ("checked against the code") | **Fixed**: "every type in the class diagrams" |
+| 1 | Declarations matched in raw source, so a Javadoc sentence could keep a deleted type "declared" | **Fixed**: comments stripped first |
+| 2–3 | Self-test depends on the real `Cursor`; the test also guards gds-mock pages from the aggregator module | **Fixed**: both said in Javadoc |
+| 4 | No spec for this PR | **Accepted**: documentation and checks only; said in the PR description |
+| 5–6 | Script: relative paths broke after the `cd`; indented fences not found; a `git ls-files` failure read as "no diagrams" | **Fixed** |
+| 8 | Only mermaid-cli is pinned, its dependencies float; GitHub's renderer version differs | **Accepted**: a pinned top-level version catches syntax errors, which is the goal; a lockfile can follow if it ever flakes |
+| 9 | Every PR now downloads mermaid-cli and Chromium in a required job | **Fixed**: `~/.npm` and `~/.cache/puppeteer` cached by version |
+| 10 | Hook pathspec and `classify_paths` pattern | Verified correct, no change |
+| 11–16 | Doc nits: one range for the slow search case, gds-mock exposes `health,info`, README and SOLUTION timings disagreed (rounded vs measured), the README gates row implied the script runs in `verify`, `FAILED` also on a lost lock or unexpected error | **Fixed**. 13 (183 vs 182 ITs): kept 182, Failsafe's own count; 183 counts report entries |
+| 17 | Magic string `"none"` in `SearchPerformanceIT` | **Fixed**: `UNFILTERED` constant |
+
 ## Verification and CI
 
-«TBD»
+Locally after the review fixes: `./mvnw verify` green in 68 s (flight-aggregator 509 unit + 182 integration tests,
+gds-mock 146 + 41; `ArchitectureDocsTest` included); `npm run check` green (118 tests, 99.7 % lines / 95.2 %
+branches; no frontend change in this PR); `scripts/check-mermaid.sh`: 45 diagrams in 21 files render; hook tests
+(guard-git 39, classify-paths 18) pass; link check over every tracked Markdown file: no broken path or anchor;
+external links answer `200`. `SearchPerformanceIT` (`-Pslow-tests`) green in 2 min 42 s.
+
+CI on the pushed commit: recorded after the push.
