@@ -34,6 +34,9 @@ first ingestion — scheduled 10 s after start-up, ≈ 94,500 itineraries from t
 latency and random errors — is `COMPLETED` **21 s** after that: **about a minute in all**. Then it runs every 15 min;
 later starts reuse the images and the data (named volume).
 
+The very first run also downloads the base images (Maven, Node, Temurin, nginx, PostgreSQL, Redis), which can add a
+few minutes depending on the connection.
+
 | URL | What |
 |---|---|
 | <http://localhost:3000> | **Dashboard** — search, filter, "Load more", data status, *Refresh data*, demo outage controls |
@@ -41,7 +44,7 @@ later starts reuse the images and the data (named volume).
 | <http://localhost:8080/api/v1/itineraries> | Search API (also through the dashboard's nginx at `localhost:3000/api/…`) |
 | <http://localhost:8081/admin/providers> | gds-mock: the three providers' chaos settings and outage switches |
 
-![Dashboard: search panel, data status, "New data available" banner, price and provider charts, results with freshness badges](docs/images/dashboard.png)
+![Dashboard for MAD → JFK: search panel and data status of the latest run on the left; price distribution, results by selected provider and the cheapest itineraries with freshness badges on the right](docs/images/dashboard.png)
 
 **Try it:** search from the dashboard (the filters live in the URL, so a search can be shared), page with "Load more",
 watch the data status panel, press *Refresh data* to run an ingestion now, and in *Demo controls* take Mock-Beta down

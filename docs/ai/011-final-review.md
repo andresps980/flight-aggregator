@@ -185,4 +185,8 @@ branches; no frontend change in this PR); `scripts/check-mermaid.sh`: 45 diagram
 (guard-git 39, classify-paths 18) pass; link check over every tracked Markdown file: no broken path or anchor;
 external links answer `200`. `SearchPerformanceIT` (`-Pslow-tests`) green in 2 min 42 s.
 
-CI on the pushed commit: recorded after the push.
+**CI:** the results for the pushed commit are visible in PR 15's checks. They are not recorded here by a follow-up
+commit, which would trigger another run to record (the author's decision for this last PR).
+
+Screenshots `docs/images/dashboard.png` and `dashboard-outage.png` were retaken by the author after the
+providers-table fix, with a Mock-Beta outage (matching the smoke test and spec 006).
