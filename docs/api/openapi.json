@@ -337,7 +337,7 @@
           },
           "kind" : {
             "type" : "string",
-            "enum" : [ "TIMEOUT", "SERVER_ERROR", "CLIENT_ERROR", "IO_ERROR", "MALFORMED_DOCUMENT", "CIRCUIT_OPEN", "RUN_TIMEOUT", "UNEXPECTED_ERROR" ]
+            "enum" : [ "TIMEOUT", "SERVER_ERROR", "CLIENT_ERROR", "IO_ERROR", "MALFORMED_DOCUMENT", "CIRCUIT_OPEN", "RUN_TIMEOUT", "EXCHANGE_RATES_UNAVAILABLE", "UNEXPECTED_ERROR" ]
           },
           "attempts" : {
             "type" : "integer",

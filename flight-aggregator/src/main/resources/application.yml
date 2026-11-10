@@ -62,6 +62,10 @@ aggregator:
       enabled: true
       initial-delay: 10s
       fixed-delay: 15m
+  # Live exchange rates (spec 008, ADR-0025): read once per run to convert every non-EUR price to EUR. FX_API_URL
+  # (set by docker-compose's CI override) points it at gds-mock's Frankfurter-compatible double instead.
+  exchange-rates:
+    base-url: ${FX_API_URL:https://api.frankfurter.dev/v1}
   # Search API (spec 005): Redis cache-aside keyed by the data version; the TTL is only a safety net (ADR-0022).
   search:
     cache:

@@ -1,6 +1,7 @@
 package com.andresps.flights.ingestion.infrastructure.adapter.out.provider.alpha;
 
 import com.andresps.flights.aggregation.domain.model.AirportCode;
+import com.andresps.flights.aggregation.domain.model.ExchangeRates;
 import com.andresps.flights.aggregation.domain.model.FlightNumber;
 import com.andresps.flights.aggregation.domain.model.FlightOffer;
 import com.andresps.flights.aggregation.domain.model.Money;
@@ -17,6 +18,7 @@ import java.io.InputStream;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Currency;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -60,7 +62,7 @@ public final class AlphaJsonParser implements FeedParser {
     }
 
     @Override
-    public void parse(InputStream body, PartitionBuffer buffer) throws IOException {
+    public void parse(InputStream body, ExchangeRates rates, PartitionBuffer buffer) throws IOException {
         try (JsonParser json = FACTORY.createParser(ObjectReadContext.empty(), body)) {
             JsonToken first = json.nextToken();
             if (first != JsonToken.START_ARRAY) {
@@ -70,7 +72,7 @@ public final class AlphaJsonParser implements FeedParser {
                 if (token == null) {
                     throw new MalformedDocumentException("Mock-Alpha feed ended before the closing ']'");
                 }
-                readRecord(json, token, buffer);
+                readRecord(json, token, rates, buffer);
             }
             if (json.nextToken() != null) {
                 throw new MalformedDocumentException("Mock-Alpha feed has content after the closing ']'");
@@ -82,7 +84,7 @@ public final class AlphaJsonParser implements FeedParser {
         }
     }
 
-    private static void readRecord(JsonParser json, JsonToken token, PartitionBuffer buffer) {
+    private static void readRecord(JsonParser json, JsonToken token, ExchangeRates rates, PartitionBuffer buffer) {
         if (token != JsonToken.START_OBJECT) {
             json.skipChildren();
             buffer.addMalformed(MalformedReason.INVALID_RECORD);
@@ -90,7 +92,7 @@ public final class AlphaJsonParser implements FeedParser {
         }
         List<Field> fields = readObject(json, RECORD_FIELDS);
         try {
-            buffer.addOffer(toOffer(fields));
+            buffer.addOffer(toOffer(fields, rates));
         } catch (MalformedRecordException e) {
             buffer.addMalformed(e.reason());
         }
@@ -147,24 +149,26 @@ public final class AlphaJsonParser implements FeedParser {
         return legs;
     }
 
-    private static FlightOffer toOffer(List<Field> fields) {
+    /** Converts the price as soon as both its amount and currency have been read, in whichever order (spec 008). */
+    private static FlightOffer toOffer(List<Field> fields, ExchangeRates rates) {
+        BigDecimal amount = null;
+        Currency currency = null;
         Money price = null;
-        boolean eur = false;
         List<Segment> segments = null;
         for (Field field : fields) {
             switch (field.name()) {
-                case "totFare" -> price = RecordValues.price(number(field));
-                case "cur" -> {
-                    RecordValues.requireEur(string(field));
-                    eur = true;
-                }
+                case "totFare" -> amount = RecordValues.amount(number(field));
+                case "cur" -> currency = RecordValues.currency(string(field));
                 case "legs" -> segments = toSegments(field);
                 default -> {
                     // offerRef, cxr and unknown fields are not needed
                 }
             }
+            if (price == null && amount != null && currency != null) {
+                price = RecordValues.toEur(amount, currency, rates);
+            }
         }
-        if (!eur) {
+        if (currency == null) {
             throw RecordValues.invalid("missing currency");
         }
         return RecordValues.offer(segments, PROVIDER, price);

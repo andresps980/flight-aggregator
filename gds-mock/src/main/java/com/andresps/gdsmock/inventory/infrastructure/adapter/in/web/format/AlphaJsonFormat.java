@@ -64,7 +64,7 @@ public final class AlphaJsonFormat implements ProviderFormat {
         json.writeStringProperty("cxr", record.segments().getFirst().airline());
         json.writeName("totFare");
         json.writeNumber(record.price());
-        json.writeStringProperty("cur", "EUR");
+        json.writeStringProperty("cur", record.currency().getCurrencyCode()); // spec 008: per record
         json.writeName("legs");
         json.writeStartArray();
         int unparseable = record.unparseableTimeIndex();

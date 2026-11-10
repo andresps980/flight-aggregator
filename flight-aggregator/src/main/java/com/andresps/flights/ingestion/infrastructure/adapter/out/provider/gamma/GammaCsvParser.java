@@ -1,6 +1,7 @@
 package com.andresps.flights.ingestion.infrastructure.adapter.out.provider.gamma;
 
 import com.andresps.flights.aggregation.domain.model.AirportCode;
+import com.andresps.flights.aggregation.domain.model.ExchangeRates;
 import com.andresps.flights.aggregation.domain.model.FlightNumber;
 import com.andresps.flights.aggregation.domain.model.FlightOffer;
 import com.andresps.flights.aggregation.domain.model.Money;
@@ -15,6 +16,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -31,13 +33,15 @@ import java.util.regex.Pattern;
 public final class GammaCsvParser implements FeedParser {
 
     public static final ProviderId PROVIDER = new ProviderId("mock-gamma");
-    static final String HEADER = "REF,PRICE_EUR,SEGMENTS";
+    /** Spec 008: each line declares its own currency. */
+    static final String HEADER = "REF,PRICE,CURRENCY,SEGMENTS";
+
     static final int MAX_LINE_LENGTH = 64 * 1024;
 
     private static final Pattern FIELDS = Pattern.compile(",");
     private static final Pattern SEGMENTS = Pattern.compile("\\|");
     private static final Pattern SUB_FIELDS = Pattern.compile("~");
-    private static final int FIELD_COUNT = 3;
+    private static final int FIELD_COUNT = 4;
     private static final int SUB_FIELD_COUNT = 7;
 
     @Override
@@ -46,7 +50,7 @@ public final class GammaCsvParser implements FeedParser {
     }
 
     @Override
-    public void parse(InputStream body, PartitionBuffer buffer) throws IOException {
+    public void parse(InputStream body, ExchangeRates rates, PartitionBuffer buffer) throws IOException {
         // not closed: closing the reader would close the caller's body
         LineReader lines = new LineReader(new InputStreamReader(body, StandardCharsets.UTF_8));
         String header = lines.next();
@@ -61,21 +65,22 @@ public final class GammaCsvParser implements FeedParser {
                 continue;
             }
             try {
-                buffer.addOffer(toOffer(line));
+                buffer.addOffer(toOffer(line, rates));
             } catch (MalformedRecordException e) {
                 buffer.addMalformed(e.reason());
             }
         }
     }
 
-    /** {@code REF,PRICE_EUR,SEGMENTS}, checked in that order. */
-    private static FlightOffer toOffer(String line) {
+    /** {@code REF,PRICE,CURRENCY,SEGMENTS}, checked in that order; the price is converted to EUR (spec 008). */
+    private static FlightOffer toOffer(String line, ExchangeRates rates) {
         String[] fields = FIELDS.split(line, -1);
         if (fields.length != FIELD_COUNT) {
             throw RecordValues.invalid("expected " + FIELD_COUNT + " fields, got " + fields.length);
         }
-        Money price = RecordValues.price(fields[1]);
-        String[] rawSegments = SEGMENTS.split(fields[2], -1);
+        BigDecimal amount = RecordValues.amount(fields[1]);
+        Money price = RecordValues.toEur(amount, RecordValues.currency(fields[2]), rates);
+        String[] rawSegments = SEGMENTS.split(fields[3], -1);
         List<Segment> segments = new ArrayList<>(rawSegments.length);
         for (String rawSegment : rawSegments) {
             segments.add(toSegment(rawSegment));

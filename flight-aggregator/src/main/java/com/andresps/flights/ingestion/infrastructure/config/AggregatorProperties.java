@@ -28,6 +28,7 @@ import org.springframework.boot.context.properties.bind.Name;
  * aggregator.resilience.default.*               timeouts, retry and circuit breaker of every provider
  * aggregator.ingestion.schedule.*               scheduled runs (spec 004)
  * aggregator.persistence.*                      max stale age of a day snapshot, run history (spec 004)
+ * aggregator.exchange-rates.base-url            the FX API (spec 008): Frankfurter, or gds-mock's /fx double
  * </pre>
  */
 @ConfigurationProperties("aggregator")
@@ -35,7 +36,8 @@ public record AggregatorProperties(
         Map<String, ProviderProperties> providers,
         @DefaultValue IngestionProperties ingestion,
         @DefaultValue ResilienceProperties resilience,
-        @DefaultValue PersistenceProperties persistence) {
+        @DefaultValue PersistenceProperties persistence,
+        @DefaultValue ExchangeRatesProperties exchangeRates) {
 
     public AggregatorProperties {
         Map<String, ProviderProperties> copy = new LinkedHashMap<>(providers == null ? Map.of() : providers);
@@ -55,6 +57,7 @@ public record AggregatorProperties(
         // fail fast on invalid values: resolve everything once
         ingestion.validate();
         persistence.validate();
+        exchangeRates.validate();
         ResilienceProperties defaults = resilience;
         copy.forEach((id, provider) -> resolve(defaults, id, provider));
     }
@@ -127,6 +130,21 @@ public record AggregatorProperties(
             if (runRetention == null || runRetention.isNegative() || runRetention.isZero()) {
                 throw new IllegalArgumentException(
                         "aggregator.persistence.run-retention must be positive, got " + runRetention);
+            }
+        }
+    }
+
+    /** Spec 008: where the live exchange rates come from (a Frankfurter-compatible API, ADR-0025). */
+    public record ExchangeRatesProperties(
+            @DefaultValue("https://api.frankfurter.dev/v1") URI baseUrl) {
+
+        void validate() {
+            if (baseUrl == null
+                    || !baseUrl.isAbsolute()
+                    || !List.of("http", "https").contains(baseUrl.getScheme())
+                    || baseUrl.getHost() == null) {
+                throw new IllegalArgumentException(
+                        "aggregator.exchange-rates.base-url must be an absolute http(s) URL, got " + baseUrl);
             }
         }
     }

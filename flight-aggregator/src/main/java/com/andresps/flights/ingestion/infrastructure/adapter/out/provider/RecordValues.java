@@ -2,6 +2,8 @@ package com.andresps.flights.ingestion.infrastructure.adapter.out.provider;
 
 import com.andresps.flights.aggregation.domain.model.AirlineCode;
 import com.andresps.flights.aggregation.domain.model.AirportCode;
+import com.andresps.flights.aggregation.domain.model.ExchangeRates;
+import com.andresps.flights.aggregation.domain.model.ExchangeRatesUnavailableException;
 import com.andresps.flights.aggregation.domain.model.FlightNumber;
 import com.andresps.flights.aggregation.domain.model.FlightOffer;
 import com.andresps.flights.aggregation.domain.model.InvalidFlightDataException;
@@ -16,7 +18,9 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
+import java.util.Currency;
 import java.util.List;
+import java.util.regex.Pattern;
 
 /**
  * Builds spec 001 values from raw provider fields, classifying every failure (shared by the three parsers). A field
@@ -24,7 +28,7 @@ import java.util.List;
  */
 public final class RecordValues {
 
-    private static final String EUR = "EUR";
+    private static final Pattern ISO_CODE = Pattern.compile("[A-Z]{3}");
 
     private RecordValues() {}
 
@@ -58,16 +62,17 @@ public final class RecordValues {
         }
     }
 
-    public static Money price(String raw) {
+    /** A provider amount, in whatever currency: present, numeric and positive (spec 008: converted afterwards). */
+    public static BigDecimal amount(String raw) {
         String value = required(raw, "price");
         try {
-            return price(new BigDecimal(value.strip()));
+            return amount(new BigDecimal(value.strip()));
         } catch (NumberFormatException e) {
             throw invalid("price is not a number: '" + value + "'");
         }
     }
 
-    public static Money price(BigDecimal amount) {
+    public static BigDecimal amount(BigDecimal amount) {
         if (amount == null) {
             throw invalid("missing price");
         }
@@ -75,16 +80,32 @@ public final class RecordValues {
             throw new MalformedRecordException(
                     MalformedReason.NON_POSITIVE_PRICE, "price must be positive, got " + amount.toPlainString());
         }
+        return amount;
+    }
+
+    /** An ISO 4217 code in upper case, e.g. {@code USD} (spec 008 AC-6). */
+    public static Currency currency(String raw) {
+        String value = required(raw, "currency").strip();
+        if (!ISO_CODE.matcher(value).matches()) {
+            throw invalid("currency must be an ISO 4217 code, got '" + raw + "'");
+        }
         try {
-            return Money.eur(amount);
-        } catch (InvalidFlightDataException e) {
-            throw invalid(e.getMessage());
+            return Currency.getInstance(value);
+        } catch (IllegalArgumentException e) {
+            throw invalid("unknown currency '" + value + "'");
         }
     }
 
-    public static void requireEur(String currency) {
-        if (!EUR.equals(currency == null ? null : currency.strip())) {
-            throw invalid("currency must be EUR, got " + currency);
+    /**
+     * The amount in EUR with the run's rates (spec 008). A currency the rates don't include, or an amount out of
+     * bounds, is an {@code INVALID_RECORD}; without rates, a non-EUR amount throws
+     * {@link ExchangeRatesUnavailableException}, which fails the partition.
+     */
+    public static Money toEur(BigDecimal amount, Currency currency, ExchangeRates rates) {
+        try {
+            return rates.toEur(amount, currency);
+        } catch (InvalidFlightDataException e) {
+            throw invalid(e.getMessage());
         }
     }
 

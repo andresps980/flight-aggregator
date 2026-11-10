@@ -1,5 +1,6 @@
 package com.andresps.flights.ingestion.infrastructure.adapter.out.provider.beta;
 
+import com.andresps.flights.aggregation.domain.model.ExchangeRates;
 import com.andresps.flights.aggregation.domain.model.FlightOffer;
 import com.andresps.flights.aggregation.domain.model.Money;
 import com.andresps.flights.aggregation.domain.model.ProviderId;
@@ -11,6 +12,7 @@ import com.andresps.flights.ingestion.infrastructure.adapter.out.provider.Partit
 import com.andresps.flights.ingestion.infrastructure.adapter.out.provider.RecordValues;
 import java.io.IOException;
 import java.io.InputStream;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import javax.xml.XMLConstants;
@@ -49,14 +51,14 @@ public final class BetaXmlParser implements FeedParser {
     }
 
     @Override
-    public void parse(InputStream body, PartitionBuffer buffer) throws IOException {
+    public void parse(InputStream body, ExchangeRates rates, PartitionBuffer buffer) throws IOException {
         XMLStreamReader xml = null;
         try {
             xml = FACTORY.createXMLStreamReader(body);
             requireStart(nextTag(xml), xml, "response");
             while (nextTag(xml) == XMLStreamConstants.START_ELEMENT) {
                 if ("itineraries".equals(xml.getLocalName())) {
-                    readItineraries(xml, buffer);
+                    readItineraries(xml, rates, buffer);
                 } else {
                     skipElement(xml);
                 }
@@ -76,10 +78,11 @@ public final class BetaXmlParser implements FeedParser {
         }
     }
 
-    private static void readItineraries(XMLStreamReader xml, PartitionBuffer buffer) throws XMLStreamException {
+    private static void readItineraries(XMLStreamReader xml, ExchangeRates rates, PartitionBuffer buffer)
+            throws XMLStreamException {
         while (nextTag(xml) == XMLStreamConstants.START_ELEMENT) {
             if ("itinerary".equals(xml.getLocalName())) {
-                readItinerary(xml, buffer);
+                readItinerary(xml, rates, buffer);
             } else {
                 skipElement(xml);
             }
@@ -90,7 +93,8 @@ public final class BetaXmlParser implements FeedParser {
      * Reads one {@code itinerary} element to its end. Fields are checked as they appear (pricing, then each segment
      * when it ends); after the first failure the rest of the element is only consumed.
      */
-    private static void readItinerary(XMLStreamReader xml, PartitionBuffer buffer) throws XMLStreamException {
+    private static void readItinerary(XMLStreamReader xml, ExchangeRates rates, PartitionBuffer buffer)
+            throws XMLStreamException {
         Itinerary itinerary = new Itinerary();
         int depth = 1;
         while (depth > 0) {
@@ -103,9 +107,10 @@ public final class BetaXmlParser implements FeedParser {
                     case "totalAmount" -> {
                         String currency = xml.getAttributeValue(null, "currency");
                         String amount = readText(xml);
+                        // amount, then its currency (spec 008), converted to EUR with the run's rates
                         itinerary.check(() -> {
-                            RecordValues.requireEur(currency);
-                            itinerary.price = RecordValues.price(amount);
+                            BigDecimal value = RecordValues.amount(amount);
+                            itinerary.price = RecordValues.toEur(value, RecordValues.currency(currency), rates);
                         });
                     }
                     case "option" -> {

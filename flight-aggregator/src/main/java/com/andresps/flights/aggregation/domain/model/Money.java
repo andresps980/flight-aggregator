@@ -27,12 +27,22 @@ public record Money(BigDecimal amount, Currency currency) implements Comparable<
         if (amount.signum() < 0) {
             throw new InvalidFlightDataException("Amount must not be negative, got " + amount.toPlainString());
         }
+        requireBounded(amount);
+        amount = amount.setScale(SCALE, RoundingMode.HALF_EVEN);
+    }
+
+    /**
+     * Rejects magnitudes outside the bounds (at most {@value #MAX_INTEGER_DIGITS} integer digits and
+     * {@value #MAX_DECIMALS} decimals), whatever the currency: also applied to a provider amount before it is converted
+     * to EUR (spec 008 AC-8), so untrusted input never reaches expensive arithmetic.
+     */
+    public static void requireBounded(BigDecimal amount) {
+        InvalidFlightDataException.requireField(amount, "Amount");
         BigDecimal significant = amount.stripTrailingZeros();
         if (significant.precision() - significant.scale() > MAX_INTEGER_DIGITS || significant.scale() > MAX_DECIMALS) {
             throw new InvalidFlightDataException("Amount out of range (max " + MAX_INTEGER_DIGITS + " integer digits, "
                     + MAX_DECIMALS + " decimals): " + amount.toString());
         }
-        amount = amount.setScale(SCALE, RoundingMode.HALF_EVEN);
     }
 
     public static Money eur(BigDecimal amount) {
