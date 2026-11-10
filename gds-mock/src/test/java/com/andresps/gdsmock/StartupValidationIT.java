@@ -23,17 +23,31 @@ class StartupValidationIT {
         "gds.chaos.default.error-rate=2, error-rate",
         "gds.chaos.providers.mock-beta.latency-min=9s, providers.mock-beta",
         "gds.chaos.providers.mock-btea.error-rate=0.5, unknown provider",
-        "gds.chaos.providers.mockbeta.error-rate=0.5, gds.chaos.providers.mockbeta",
-        // spec 008 AC-14: currencies must be ISO 4217 codes with a rate; rates must be positive, for ISO codes
+        "gds.chaos.providers.mockbeta.error-rate=0.5, gds.chaos.providers.mockbeta"
+    })
+    @DisplayName("AC-3 (error): invalid settings fail the startup with a message naming the setting")
+    void invalidSettingsFailStartup(String property, String named) {
+        assertStartupFails(property, named);
+    }
+
+    @ParameterizedTest(name = "{0} -> {1}")
+    @CsvSource({
         "'gds.providers.mock-beta.currencies=EUR,XYZ', gds.providers.mock-beta.currencies",
         "gds.providers.mock-beta.currencies=CHF, gds.providers.mock-beta.currencies",
         "gds.providers.mock-beta.currencies=, gds.providers.mock-beta.currencies",
         "gds.providers.mock-btea.currencies=USD, gds.providers.mock-btea",
         "gds.fx.rates.USD=0, gds.fx.rates.USD",
-        "gds.fx.rates.ZZZ=1.5, gds.fx.rates.ZZZ"
+        "gds.fx.rates.ZZZ=1.5, gds.fx.rates.ZZZ",
+        "gds.fx.rates.EUR=1.5, gds.fx.rates.EUR"
     })
-    @DisplayName("AC-3 (error): invalid settings fail the startup with a message naming the setting")
-    void invalidSettingsFailStartup(String property, String named) {
+    @DisplayName(
+            "AC-14 (error): a non-ISO currency, a currency without a rate, an empty list, an unknown provider or a "
+                    + "rate that is not positive (or not 1 for EUR) fails the startup naming the property")
+    void invalidCurrencySettingsFailStartup(String property, String named) {
+        assertStartupFails(property, named);
+    }
+
+    private static void assertStartupFails(String property, String named) {
         assertThatThrownBy(() -> new SpringApplicationBuilder(GdsMockApplication.class)
                         .profiles("deterministic")
                         .run("--server.port=0", "--" + property)

@@ -6,11 +6,14 @@ import com.andresps.gdsmock.shared.domain.ProviderId;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.Currency;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.regex.Pattern;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -41,15 +44,23 @@ public record CurrencyProperties(Map<String, ProviderProperties> providers, FxPr
 
     /** The configured rates by currency, EUR excluded (it is the base); sorted by code. */
     public Map<Currency, BigDecimal> rates() {
-        Map<Currency, BigDecimal> rates = new TreeMap<>(java.util.Comparator.comparing(Currency::getCurrencyCode));
+        Map<Currency, BigDecimal> rates = new TreeMap<>(Comparator.comparing(Currency::getCurrencyCode));
+        Set<String> codes = new HashSet<>();
         fx.rates().forEach((key, rate) -> {
             String code = key.toUpperCase(Locale.ROOT);
             String property = "gds.fx.rates." + code;
+            if (!codes.add(code)) {
+                throw new IllegalArgumentException(property + " is set twice (keys differ only by case)");
+            }
             Currency currency = iso(code, property);
             if (rate == null || rate.signum() <= 0) {
                 throw new IllegalArgumentException(property + " must be positive, got " + rate);
             }
-            if (!EUR.equals(code)) {
+            if (EUR.equals(code)) {
+                if (rate.compareTo(BigDecimal.ONE) != 0) {
+                    throw new IllegalArgumentException(property + " must be 1 (EUR is the base), got " + rate);
+                }
+            } else {
                 rates.put(currency, rate);
             }
         });

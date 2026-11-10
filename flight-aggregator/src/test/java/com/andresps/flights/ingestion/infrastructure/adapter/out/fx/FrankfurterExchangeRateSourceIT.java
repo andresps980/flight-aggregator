@@ -66,7 +66,11 @@ class FrankfurterExchangeRateSourceIT {
 
     private static FrankfurterExchangeRateSource source(Duration readTimeout) {
         return new FrankfurterExchangeRateSource(
-                URI.create(server.baseUrl() + "/v1"), Duration.ofSeconds(5), readTimeout, RETRY);
+                URI.create(server.baseUrl() + "/v1"),
+                Duration.ofSeconds(5),
+                readTimeout,
+                Duration.ofSeconds(10),
+                RETRY);
     }
 
     private static FrankfurterExchangeRateSource source() {
@@ -108,6 +112,19 @@ class FrankfurterExchangeRateSourceIT {
                 .isEqualTo(Money.eur("10.00"));
         assertThatThrownBy(() -> rates.toEur(BigDecimal.ONE, Currency.getInstance("XAF")))
                 .isInstanceOf(InvalidFlightDataException.class);
+    }
+
+    @Test
+    @DisplayName("AC-11: an EUR entry other than 1 in the body is ignored: EUR is the base and converts at 1")
+    void eurEntryIgnored() {
+        always(okJson("""
+                {"amount":1.0,"base":"EUR","date":"2026-11-09","rates":{"EUR":1.5,"USD":1.25}}"""));
+
+        ExchangeRates rates = source().latest();
+
+        assertThat(rates.toEur(new BigDecimal("10"), Currency.getInstance("EUR")))
+                .isEqualTo(Money.eur("10.00"));
+        assertThat(rates.toEur(new BigDecimal("10"), USD)).isEqualTo(Money.eur("8.00"));
     }
 
     @Test
@@ -172,7 +189,11 @@ class FrankfurterExchangeRateSourceIT {
             closedPort = socket.getLocalPort();
         }
         FrankfurterExchangeRateSource source = new FrankfurterExchangeRateSource(
-                URI.create("http://localhost:" + closedPort), Duration.ofSeconds(1), Duration.ofSeconds(1), RETRY);
+                URI.create("http://localhost:" + closedPort),
+                Duration.ofSeconds(1),
+                Duration.ofSeconds(1),
+                Duration.ofSeconds(10),
+                RETRY);
 
         assertThatThrownBy(source::latest).isInstanceOf(ExchangeRatesUnavailableException.class);
     }
@@ -190,14 +211,47 @@ class FrankfurterExchangeRateSourceIT {
                 "{\"amount\":1.0,\"base\":\"EUR\",\"date\":\"2026-11-09\",\"rates\":{\"USD\":-1.1}}",
                 "{\"amount\":1.0,\"base\":\"EUR\",\"date\":\"2026-11-09\",\"rates\":{\"USD\":\"1.1\"}}",
                 "{\"amount\":1.0,\"base\":\"EUR\",\"date\":\"yesterday\",\"rates\":{\"USD\":1.1}}",
-                "{\"amount\":2.0,\"base\":\"EUR\",\"date\":\"2026-11-09\",\"rates\":{\"USD\":2.2}}"
+                "{\"amount\":2.0,\"base\":\"EUR\",\"date\":\"2026-11-09\",\"rates\":{\"USD\":2.2}}",
+                "{\"amount\":1.0,\"base\":\"EUR\",\"date\":\"2026-11-09\",\"rates\":{\"USD\":1e100000000}}",
+                "{\"amount\":1.0,\"base\":\"EUR\",\"date\":\"2026-11-09\",\"rates\":{\"USD\":1e-100000000}}"
             })
-    @DisplayName("AC-10: a body that is not valid Frankfurter JSON with base EUR and positive rates is "
+    @DisplayName("AC-10: a body that is not valid Frankfurter JSON with base EUR and positive, bounded rates is "
             + "unavailable, without retrying")
     void invalidBody(String body) {
         always(okJson(body));
 
         assertThatThrownBy(() -> source().latest()).isInstanceOf(ExchangeRatesUnavailableException.class);
+        assertThat(requests()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("AC-10: a server dribbling the body under the read timeout is cut by the attempt deadline, so a run "
+            + "is delayed by seconds, never blocked")
+    void dribblingBodyHitsTheAttemptDeadline() {
+        always(okJson(BODY).withChunkedDribbleDelay(BODY.length(), 20_000));
+        FrankfurterExchangeRateSource source = new FrankfurterExchangeRateSource(
+                URI.create(server.baseUrl() + "/v1"),
+                Duration.ofSeconds(5),
+                Duration.ofSeconds(5),
+                Duration.ofMillis(500),
+                RETRY);
+        long start = System.nanoTime();
+
+        assertThatThrownBy(source::latest)
+                .isInstanceOf(ExchangeRatesUnavailableException.class)
+                .hasMessageContaining("no complete answer");
+        assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofSeconds(15));
+        assertThat(requests()).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("AC-10: a body larger than 64 KiB is rejected without being read whole, and not retried")
+    void hugeBodyRejected() {
+        always(okJson("{\"amount\":1.0,\"pad\":\"" + "x".repeat(FrankfurterExchangeRateSource.MAX_BODY_BYTES) + "\"}"));
+
+        assertThatThrownBy(() -> source().latest())
+                .isInstanceOf(ExchangeRatesUnavailableException.class)
+                .hasMessageContaining("larger than");
         assertThat(requests()).isEqualTo(1);
     }
 }

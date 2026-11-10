@@ -2,8 +2,6 @@ package com.andresps.gdsmock.inventory.infrastructure.adapter.in.web;
 
 import com.andresps.gdsmock.inventory.domain.generator.WorldGenerator;
 import com.andresps.gdsmock.inventory.domain.model.FxRates;
-import java.util.LinkedHashMap;
-import java.util.Map;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -28,15 +26,10 @@ public class FxRatesController {
     }
 
     @GetMapping(path = "/fx/latest", produces = MediaType.APPLICATION_JSON_VALUE)
-    public Map<String, Object> latest(@RequestParam(defaultValue = EUR) String base) {
+    public FxRatesResponse latest(@RequestParam(defaultValue = EUR) String base) {
         if (!EUR.equals(base)) {
             throw new UnsupportedBaseCurrencyException(base);
         }
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("amount", 1.0);
-        body.put("base", EUR);
-        body.put("date", generator.horizon().referenceDate().toString());
-        body.put("rates", rates.byCode());
-        return body;
+        return new FxRatesResponse(1.0, EUR, generator.horizon().referenceDate().toString(), rates.byCode());
     }
 }

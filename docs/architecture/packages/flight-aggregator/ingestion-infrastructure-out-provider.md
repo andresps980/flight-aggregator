@@ -124,14 +124,15 @@ segments per record, `max-records-per-partition` per attempt). Formats: [docs/pr
 classDiagram
     %% package: com.andresps.flights.ingestion.infrastructure.adapter.out.fx
     class FrankfurterExchangeRateSource {
-        +FrankfurterExchangeRateSource(URI baseUrl, Duration connectTimeout, Duration readTimeout, RetrySettings retry)
+        +FrankfurterExchangeRateSource(URI baseUrl, Duration connectTimeout, Duration readTimeout, Duration attemptTimeout, RetrySettings retry)
         +latest() ExchangeRates
     }
 ```
 
 Implements `ExchangeRateSource`: `GET {base-url}/latest?base=EUR` against the [Frankfurter](https://frankfurter.dev)
-API (or gds-mock's `/fx/latest` double), 1 s connect / 5 s read timeouts, 3 attempts for 5xx, timeouts and I/O errors.
-Any failure, or a body without `amount` 1, base `EUR`, a date and positive rates, ends as
+API (or gds-mock's `/fx/latest` double), 1 s connect / 5 s read timeouts, 10 s per attempt (the attempt runs on its
+own virtual thread, like a provider attempt), 3 attempts for 5xx, timeouts and I/O errors. Any failure, or a body over
+64 KiB or without `amount` 1, base `EUR`, a date and positive, bounded rates, ends as
 `ExchangeRatesUnavailableException`; entries whose code is not ISO 4217 are skipped.
 ([ADR-0025](../../../adr/0025-currency-normalisation-live-rates.md))
 

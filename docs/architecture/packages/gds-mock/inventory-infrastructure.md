@@ -50,9 +50,17 @@ classDiagram
     }
     class InvalidDateException
     class FxRatesController {
-        +latest(String base) Map
+        +latest(String base) FxRatesResponse
+    }
+    class FxRatesResponse {
+        <<record>>
+        +double amount
+        +String base
+        +String date
+        +Map rates
     }
     class UnsupportedBaseCurrencyException
+    FxRatesController ..> FxRatesResponse : returns
     FxRatesController ..> UnsupportedBaseCurrencyException : throws
 
     ProviderFeedController --> ProviderFormats

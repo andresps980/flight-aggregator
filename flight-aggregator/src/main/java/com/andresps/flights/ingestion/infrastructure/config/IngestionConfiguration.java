@@ -62,6 +62,11 @@ class IngestionConfiguration {
 
     private static final Duration FX_READ_TIMEOUT = Duration.ofSeconds(5);
 
+    private static final Duration FX_ATTEMPT_TIMEOUT = Duration.ofSeconds(10);
+
+    /** 3 attempts, 500 ms then 1 s (± 50 %): at worst about 3 × 10 s + 1.5 s before a run gives up on the rates. */
+    private static final RetrySettings FX_RETRY = new RetrySettings(3, Duration.ofMillis(500), 2.0, 0.5);
+
     @Bean
     AlphaJsonParser alphaJsonParser() {
         return new AlphaJsonParser();
@@ -128,7 +133,8 @@ class IngestionConfiguration {
                 properties.exchangeRates().baseUrl(),
                 FX_CONNECT_TIMEOUT,
                 FX_READ_TIMEOUT,
-                new RetrySettings(3, Duration.ofMillis(500), 2.0, 0.5));
+                FX_ATTEMPT_TIMEOUT,
+                FX_RETRY);
     }
 
     // ----- persistence (spec 004): PostgreSQL adapters behind the outbound ports -----

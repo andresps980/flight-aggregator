@@ -34,7 +34,7 @@ public record Money(BigDecimal amount, Currency currency) implements Comparable<
     /**
      * Rejects magnitudes outside the bounds (at most {@value #MAX_INTEGER_DIGITS} integer digits and
      * {@value #MAX_DECIMALS} decimals), whatever the currency: also applied to a provider amount before it is converted
-     * to EUR (spec 008 AC-8), so untrusted input never reaches expensive arithmetic.
+     * to EUR and to every exchange rate (spec 008 AC-8), so untrusted input never reaches expensive arithmetic.
      */
     public static void requireBounded(BigDecimal amount) {
         InvalidFlightDataException.requireField(amount, "Amount");

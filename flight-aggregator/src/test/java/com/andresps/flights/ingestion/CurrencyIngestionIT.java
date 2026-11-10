@@ -120,7 +120,7 @@ class CurrencyIngestionIT extends RecordedFeedsSpringTest {
     }
 
     @Test
-    @DisplayName("AC-1/AC-2/AC-5/AC-16: feeds mixing EUR, USD and GBP per record publish exactly the all-EUR "
+    @DisplayName("AC-16/AC-1/AC-2/AC-5: feeds mixing EUR, USD and GBP per record publish exactly the all-EUR "
             + "read model and reconcile with gds-mock's stats")
     void mixedCurrenciesPublishTheSameReadModel() {
         IngestionReport eurReport = ingestion.ingest(UUID.randomUUID(), PublicationGuard.ALWAYS);
@@ -173,5 +173,32 @@ class CurrencyIngestionIT extends RecordedFeedsSpringTest {
                         .orElseThrow()
                         .missingProviders())
                 .containsExactly(BETA);
+    }
+
+    @Test
+    @DisplayName("AC-10: with the FX API down and every provider mixing currencies, the run fails and each day keeps "
+            + "its previous snapshot, marked stale, with the same itineraries")
+    void fxDownKeepsPreviousSnapshots() {
+        IngestionReport first = ingestion.ingest(UUID.randomUUID(), PublicationGuard.ALWAYS);
+        Map<String, String> before = readModel();
+        stubMixedCurrencies();
+        SERVER.stubFor(
+                RecordedGdsMock.exchangeRatesRequest().willReturn(aResponse().withStatus(503)));
+
+        IngestionReport report = ingestion.ingest(UUID.randomUUID(), PublicationGuard.ALWAYS);
+
+        assertThat(first.status()).isEqualTo(IngestionStatus.COMPLETED);
+        assertThat(report.status()).isEqualTo(IngestionStatus.FAILED);
+        assertThat(report.providers())
+                .allSatisfy(provider -> assertThat(provider.failures())
+                        .extracting(PartitionFailure::kind)
+                        .containsOnly(FailureKind.EXCHANGE_RATES_UNAVAILABLE));
+        StoredData store = new StoredData(dataSource);
+        assertThat(DAYS).allSatisfy(day -> {
+            StoredData.DayRow row = store.snapshot(day).orElseThrow();
+            assertThat(row.runId()).isEqualTo(first.runId());
+            assertThat(row.staleSince()).isNotNull();
+        });
+        assertThat(readModel()).isEqualTo(before);
     }
 }

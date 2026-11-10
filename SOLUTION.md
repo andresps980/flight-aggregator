@@ -411,7 +411,9 @@ the cache mostly takes repeated load off the database; it pays off for the expen
 
 - Currencies are drawn uniformly per record and priced at fixed rates (`gds.fx.rates`), the same ones `/fx/latest`
   serves; with the live API the aggregator's EUR prices differ from the mock's by the gap between the two sets of
-  rates (counts still reconcile; the e2e test uses the mock's rates).
+  rates (counts still reconcile; the e2e test uses the mock's rates). Even with the same rates, a rate below 1
+  (GBP 0.85) brings about 15 % of prices back one cent off (two roundings, ×0.85 then ÷0.85), which can flip a
+  near-tie between providers; the exact end-to-end test uses a rate of 2 for that reason.
 - It regenerates the world on every request (CPU instead of memory; cheap at this volume); records come in generation
   order, not shuffled.
 - The three providers share one JVM, so a GC pause or crash affects all three at once; real providers fail more

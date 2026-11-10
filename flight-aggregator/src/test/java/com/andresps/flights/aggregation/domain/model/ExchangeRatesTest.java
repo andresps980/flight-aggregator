@@ -106,6 +106,14 @@ class ExchangeRatesTest {
                 .hasMessageContaining("USD");
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"1E+100000000", "1E-100000000", "1234567890", "0.00000000001"})
+    @DisplayName("AC-10: a rate out of the Money bounds is rejected, so an untrusted rate never makes division costly")
+    void rejectsRateOutOfBounds(String rate) {
+        assertThatThrownBy(() -> ExchangeRates.of(DATE, Map.of(USD, new BigDecimal(rate))))
+                .isInstanceOf(InvalidFlightDataException.class);
+    }
+
     @Test
     @DisplayName("AC-10: a EUR rate other than 1 is rejected (the base is EUR)")
     void rejectsEurRateOtherThanOne() {

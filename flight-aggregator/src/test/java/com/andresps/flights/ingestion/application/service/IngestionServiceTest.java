@@ -733,7 +733,24 @@ class IngestionServiceTest {
         }
 
         @Test
-        @DisplayName("AC-10: partitions failing with EXCHANGE_RATES_UNAVAILABLE make their provider PARTIAL")
+        @DisplayName("AC-10: a rate source breaking its contract (any other exception) still lets the run continue")
+        void unexpectedSourceFailure() {
+            ExchangeRateSource broken = () -> {
+                throw new IllegalStateException("adapter bug (test)");
+            };
+
+            IngestionReport report = new IngestionService(
+                            broken, List.of(alpha), sink, PercentageMarkupPolicy.defaultPolicy(), CLOCK, SETTINGS)
+                    .ingest(RUN_ID, PublicationGuard.ALWAYS);
+
+            assertThat(report.status()).isEqualTo(IngestionStatus.COMPLETED);
+            assertThat(alpha.ratesReceived())
+                    .allSatisfy(rates -> assertThat(rates.available()).isFalse());
+        }
+
+        @Test
+        @DisplayName(
+                "AC-10: partitions failing with EXCHANGE_RATES_UNAVAILABLE fail their provider; the run is PARTIAL")
         void unavailableRatesFailOnlyThosePartitions() {
             beta.byDefault(fails(FailureKind.EXCHANGE_RATES_UNAVAILABLE, 1));
 

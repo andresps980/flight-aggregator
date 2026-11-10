@@ -88,7 +88,8 @@ class IngestionReconciliationE2EIT {
     private Clock clock;
 
     @Test
-    @DisplayName("AC-22: a real ingestion reconciles exactly with the running gds-mock's /admin/world/stats")
+    @DisplayName("AC-22/AC-16: a real ingestion reconciles exactly with the running gds-mock's /admin/world/stats, "
+            + "whatever currencies its providers price in")
     void reconcilesWithRunningMock() {
         JsonNode stats = get("/admin/world/stats");
         assertThat(LocalDate.parse(stats.path("referenceDate").asString()))

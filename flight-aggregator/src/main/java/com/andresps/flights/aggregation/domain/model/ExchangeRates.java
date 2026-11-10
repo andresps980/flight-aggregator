@@ -7,6 +7,7 @@ import java.util.Currency;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.TreeMap;
 
 /**
  * Exchange rates of one ingestion run (spec 008, ADR-0025): units of each currency per 1 EUR, as the FX API publishes
@@ -42,6 +43,8 @@ public final class ExchangeRates {
                 throw new InvalidFlightDataException("Rate for " + currency + " must be positive, got "
                         + (rate == null ? null : rate.toPlainString()));
             }
+            // untrusted (FX API): a rate like 1e100000000 would make every division a CPU sink
+            Money.requireBounded(rate);
             if (EUR.equals(currency) && rate.compareTo(BigDecimal.ONE) != 0) {
                 throw new InvalidFlightDataException("Rate for EUR must be 1 (the base), got " + rate.toPlainString());
             }
@@ -88,6 +91,11 @@ public final class ExchangeRates {
 
     @Override
     public String toString() {
-        return available() ? "ExchangeRates" + unitsPerEur + " of " + date : "ExchangeRates[unavailable]";
+        if (!available()) {
+            return "ExchangeRates[unavailable]";
+        }
+        Map<String, BigDecimal> sorted = new TreeMap<>();
+        unitsPerEur.forEach((currency, rate) -> sorted.put(currency.getCurrencyCode(), rate));
+        return "ExchangeRates" + sorted + " of " + date;
     }
 }

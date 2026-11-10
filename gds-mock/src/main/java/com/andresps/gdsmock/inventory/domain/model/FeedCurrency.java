@@ -7,7 +7,8 @@ import java.util.Objects;
 
 /**
  * A currency a provider may price in, with its fixed rate in units per 1 EUR (spec 008): the same rates gds-mock serves
- * on {@code /fx/latest}, so a client converting back gets the world's EUR price (to the cent).
+ * on {@code /fx/latest}. A client converting back gets the world's EUR price only up to the two roundings: with a rate
+ * below 1 (GBP 0.85) it can be a cent off, which is why the exact tests use a rate of 2.
  */
 public record FeedCurrency(Currency currency, BigDecimal unitsPerEur) {
 

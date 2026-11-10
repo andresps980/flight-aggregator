@@ -226,6 +226,26 @@ class ProviderCurrencyTest {
     @Nested
     class Malformed {
 
+        @Test
+        @DisplayName("AC-6/AC-8: with a bad currency and a non-positive price, the reason is the first field in "
+                + "document order")
+        void firstFailingFieldInDocumentOrder() {
+            String alphaCurrencyFirst = """
+                    [{"cur":"XYZ","totFare":-5.00,
+                      "legs":[{"fltNum":"IB345","org":"MAD","dst":"BCN","depTs":1794297600000,"arrTs":1794302700000}]}]""";
+
+            // Alpha: totFare before cur in the usual layout, cur first here; Beta: the currency attribute comes first
+            assertThat(parse(alpha, alphaFeed(alphaPriced("-5.00", "XYZ")), RATES)
+                            .malformed())
+                    .containsOnlyKeys(MalformedReason.NON_POSITIVE_PRICE);
+            assertThat(parse(alpha, alphaCurrencyFirst, RATES).malformed())
+                    .containsOnlyKeys(MalformedReason.INVALID_RECORD);
+            assertThat(parse(beta, betaFeed(betaPriced("-5.00", "XYZ")), RATES).malformed())
+                    .containsOnlyKeys(MalformedReason.INVALID_RECORD);
+            assertThat(parse(gamma, gammaFeed(gammaLine("-5.00", "XYZ")), RATES).malformed())
+                    .containsOnlyKeys(MalformedReason.NON_POSITIVE_PRICE);
+        }
+
         private static void assertOneInvalidThenOneOffer(PartitionBuffer buffer, String currency) {
             assertThat(buffer.malformed())
                     .as("currency '%s'", currency)

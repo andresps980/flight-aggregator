@@ -6,6 +6,7 @@ import com.andresps.gdsmock.shared.domain.ProviderId;
 import java.util.List;
 import java.util.Map;
 import java.util.SplittableRandom;
+import java.util.stream.Collectors;
 
 /**
  * The currencies each provider prices in (spec 008, ADR-0025); a provider not listed prices in EUR only. Each record's
@@ -31,7 +32,7 @@ public final class ProviderCurrencies {
             }
         });
         return new ProviderCurrencies(Map.copyOf(byProvider.entrySet().stream()
-                .collect(java.util.stream.Collectors.toMap(Map.Entry::getKey, e -> List.copyOf(e.getValue())))));
+                .collect(Collectors.toMap(Map.Entry::getKey, e -> List.copyOf(e.getValue())))));
     }
 
     /** Every provider in EUR: the worlds generated before spec 008. */

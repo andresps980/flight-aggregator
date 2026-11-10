@@ -67,6 +67,7 @@ class IngestionParallelismIT {
     private static WireMockServer startServer() {
         WireMockServer server = new WireMockServer(options().dynamicPort());
         server.start();
+        RecordedGdsMock.stubExchangeRates(server); // spec 008: a run reads the rates first; no retries on a dead URL
         LocalDate day = DAYS.getFirst();
         LATENCY_MS.forEach((provider, latency) -> server.stubFor(request(provider, day)
                 .willReturn(ok(provider, feed(provider, day)).withFixedDelay(latency))));
@@ -76,6 +77,7 @@ class IngestionParallelismIT {
     @DynamicPropertySource
     static void providers(DynamicPropertyRegistry registry) {
         PROVIDERS.forEach(p -> registry.add("aggregator.providers." + p + ".base-url", SERVER::baseUrl));
+        registry.add("aggregator.exchange-rates.base-url", () -> SERVER.baseUrl() + RecordedGdsMock.FX_BASE_PATH);
     }
 
     @TestConfiguration

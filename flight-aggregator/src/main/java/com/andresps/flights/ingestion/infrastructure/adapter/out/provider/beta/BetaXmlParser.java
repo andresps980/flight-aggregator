@@ -14,6 +14,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Currency;
 import java.util.List;
 import javax.xml.XMLConstants;
 import javax.xml.stream.XMLInputFactory;
@@ -107,10 +108,12 @@ public final class BetaXmlParser implements FeedParser {
                     case "totalAmount" -> {
                         String currency = xml.getAttributeValue(null, "currency");
                         String amount = readText(xml);
-                        // amount, then its currency (spec 008), converted to EUR with the run's rates
+                        // document order: the currency attribute, then the amount (spec 008); converted to EUR
+                        // with the run's rates
                         itinerary.check(() -> {
+                            Currency code = RecordValues.currency(currency);
                             BigDecimal value = RecordValues.amount(amount);
-                            itinerary.price = RecordValues.toEur(value, RecordValues.currency(currency), rates);
+                            itinerary.price = RecordValues.toEur(value, code, rates);
                         });
                     }
                     case "option" -> {

@@ -145,6 +145,10 @@ public final class IngestionService implements IngestFlightsUseCase {
                     runId,
                     e.getMessage());
             return ExchangeRates.unavailable();
+        } catch (RuntimeException e) {
+            // an adapter breaking the port contract must not cost the EUR offers of the whole run
+            LOG.error("Ingestion {}: the exchange rate source failed unexpectedly; continuing without rates", runId, e);
+            return ExchangeRates.unavailable();
         }
     }
 

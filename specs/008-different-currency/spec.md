@@ -66,9 +66,11 @@ API and dashboard stay in EUR.
   rates don't include (`XAF`) is skipped as `INVALID_RECORD`; the following records are still parsed.
 - **AC-7 (error)** — A Gamma feed whose header is not exactly `REF,PRICE,CURRENCY,SEGMENTS` (including the old
   `REF,PRICE_EUR,SEGMENTS`) fails as `MALFORMED_DOCUMENT`; a line without 4 fields is `INVALID_RECORD`.
-- **AC-8** — A non-positive price is `NON_POSITIVE_PRICE` whatever the currency. The `Money` bounds (below
-  1,000,000,000, at most 10 decimals) apply to the provider amount and to the EUR result; outside them the record is
-  `INVALID_RECORD`.
+- **AC-8** — A non-positive price is `NON_POSITIVE_PRICE` whatever the currency, unless an earlier field in document
+  order already failed (Beta's `currency` attribute and an Alpha `cur` written before `totFare` come first). The
+  `Money` bounds (below
+  1,000,000,000, at most 10 decimals) apply to the provider amount, to the EUR result and to every exchange rate;
+  outside them the record is `INVALID_RECORD` (an out-of-bounds rate makes the FX answer invalid, AC-10).
 
 **Live exchange rates (aggregator)**
 - **AC-9** — When an ingestion run starts, then the rates are requested once (`GET {base-url}/latest?base=EUR`) and
@@ -129,26 +131,26 @@ Feeds: Alpha `"cur":"USD"`, Beta `<totalAmount currency="USD">`, Gamma `REF,PRIC
 
 ## Non-functional requirements
 
-- One FX request per run (plus retries), short timeouts (connect 1 s, read 5 s, 3 attempts): a slow FX API delays a run
-  by seconds, never blocks it.
+- One FX request per run (plus retries), short timeouts (connect 1 s, read 5 s, 10 s per attempt including the body,
+  3 attempts, a body of at most 64 KiB): a slow FX API delays a run by about 30 s at worst, never blocks it.
 - One `BigDecimal` division per non-EUR record; no rate lookup for EUR records. The mock's extra draw is one small
   `SplittableRandom` per record only when the provider has more than one currency.
 - The only new aggregator setting is the FX API location, `aggregator.exchange-rates.base-url` (default
   `https://api.frankfurter.dev/v1`); rates and their date are logged once per run.
 
-## Open questions (proposed answers)
+## Open questions (resolved: every proposed answer accepted on 2026-11-10)
 
-- [ ] **Gamma format.** Proposed: a 4th column, `REF,PRICE,CURRENCY,SEGMENTS`, replacing `PRICE_EUR` (no dual support:
+- [x] **Gamma format.** Proposed: a 4th column, `REF,PRICE,CURRENCY,SEGMENTS`, replacing `PRICE_EUR` (no dual support:
       gds-mock is the only Gamma producer). The recorded Gamma fixtures of the aggregator tests are re-recorded.
-- [ ] **How the mock picks the currency.** Proposed: uniform over `gds.providers.<id>.currencies`, from a random seeded
+- [x] **How the mock picks the currency.** Proposed: uniform over `gds.providers.<id>.currencies`, from a random seeded
       by (world seed, day, index, provider, copy), independent of the generation stream, so the world and its stats
       don't change (AC-13). A duplicate copy of a record may get a different currency.
-- [ ] **Default currencies.** Proposed: `[EUR]` in `application.yml` (tests and recordings stay stable), and
+- [x] **Default currencies.** Proposed: `[EUR]` in `application.yml` (tests and recordings stay stable), and
       `[EUR, USD, GBP]` for every provider in `docker-compose.yml` and the CI smoke override.
-- [ ] **Mock rates.** Proposed defaults in gds-mock's `application.yml`: `USD: 1.10`, `GBP: 0.85` (close to today's ECB
+- [x] **Mock rates.** Proposed defaults in gds-mock's `application.yml`: `USD: 1.10`, `GBP: 0.85` (close to today's ECB
       rates); served by `/fx/latest` with the world's reference date.
-- [ ] **FX failure.** Proposed as in AC-10: per-partition `EXCHANGE_RATES_UNAVAILABLE`, stale-day policy. With mixed
+- [x] **FX failure.** Proposed as in AC-10: per-partition `EXCHANGE_RATES_UNAVAILABLE`, stale-day policy. With mixed
       currencies almost every partition holds a non-EUR price, so an FX outage behaves like a provider outage for the
       run; previous snapshots keep serving search for up to `max-stale-age` (2 h).
-- [ ] **FX base URL.** The single new aggregator setting (needed to target gds-mock in tests/CI and offline).
-- [ ] **Unknown currency.** `INVALID_RECORD`, no new malformed reason, so counts keep reconciling with gds-mock.
+- [x] **FX base URL.** The single new aggregator setting (needed to target gds-mock in tests/CI and offline).
+- [x] **Unknown currency.** `INVALID_RECORD`, no new malformed reason, so counts keep reconciling with gds-mock.
