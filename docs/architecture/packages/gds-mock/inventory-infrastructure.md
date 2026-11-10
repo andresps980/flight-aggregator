@@ -6,7 +6,8 @@ The HTTP face of the mock providers (spec 002, [ADR-0012](../../../adr/0012-sing
 `GET /{provider}/flights?date=` resolves the provider and day, then streams the generator's records straight into the
 response through that provider's `ProviderFormat` — Mock-Alpha a JSON list, Mock-Beta nested XML, Mock-Gamma CSV — so
 a 1M feed never sits in memory. `GET /admin/world/stats` reports the reconciliation figures, cached per horizon and
-day. A new provider is a new `ProviderFormat` bean (ArchUnit checks every `*Format` implements it). Formats:
+day. `GET /fx/latest` serves the mock's exchange rates in the Frankfurter shape the aggregator consumes (spec 008;
+outside the chaos interceptor). A new provider is a new `ProviderFormat` bean (ArchUnit checks every `*Format` implements it). Formats:
 [docs/providers.md](../../../providers.md).
 
 ## web
@@ -48,6 +49,11 @@ classDiagram
         +from(Horizon horizon, LocalDate date, WorldStatistics stats)$ WorldStatsResponse
     }
     class InvalidDateException
+    class FxRatesController {
+        +latest(String base) Map
+    }
+    class UnsupportedBaseCurrencyException
+    FxRatesController ..> UnsupportedBaseCurrencyException : throws
 
     ProviderFeedController --> ProviderFormats
     ProviderFeedController --> FeedRequestResolver
@@ -87,7 +93,15 @@ classDiagram
         +int horizonDays
         +LocalDate referenceDate
     }
+    class CurrencyProperties {
+        <<record>>
+        +Map providers
+        +FxProperties fx
+        +rates() Map
+        +providerCurrencies(Collection known) ProviderCurrencies
+    }
     InventoryConfig ..> WorldProperties : binds gds.world.*
+    InventoryConfig ..> CurrencyProperties : binds gds.providers.*, gds.fx.*
     InventoryConfig ..> AlphaJsonFormat : creates
     InventoryConfig ..> BetaXmlFormat : creates
     InventoryConfig ..> GammaCsvFormat : creates

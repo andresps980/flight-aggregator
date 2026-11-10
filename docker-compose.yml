@@ -50,6 +50,11 @@ services:
       GDS_CHAOS_DEFAULT_ERROR_RATE: ${GDS_CHAOS_DEFAULT_ERROR_RATE:-0.10}
       # "deterministic" turns latency off; with GDS_CHAOS_DEFAULT_ERROR_RATE=0 errors too (this variable beats the profile)
       SPRING_PROFILES_ACTIVE: ${GDS_MOCK_PROFILE:-default}
+      # Spec 008: every provider prices each itinerary in EUR, USD or GBP (drawn from the seed), at gds.fx.rates. JSON
+      # because environment variables can't spell the dashed provider ids.
+      SPRING_APPLICATION_JSON: >-
+        {"gds":{"providers":{"mock-alpha":{"currencies":["EUR","USD","GBP"]},
+        "mock-beta":{"currencies":["EUR","USD","GBP"]},"mock-gamma":{"currencies":["EUR","USD","GBP"]}}}}
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8081/actuator/health/readiness"]
       interval: 10s
@@ -82,6 +87,9 @@ services:
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-flights}
       REDIS_HOST: redis
       GDS_MOCK_URL: http://gds-mock:8081
+      # Spec 008: live ECB rates from the Frankfurter API by default (needs internet); FX_API_URL=http://gds-mock:8081/fx
+      # uses gds-mock's double instead (offline, deterministic).
+      FX_API_URL: ${FX_API_URL:-https://api.frankfurter.dev/v1}
       AGGREGATOR_INGESTION_SCHEDULE_INITIAL_DELAY: ${INGESTION_INITIAL_DELAY:-10s}
       AGGREGATOR_INGESTION_SCHEDULE_FIXED_DELAY: ${INGESTION_FIXED_DELAY:-15m}
       # Heap: see flight-aggregator/Dockerfile and SOLUTION.md; override to experiment, e.g. "-Xmx512m ..."

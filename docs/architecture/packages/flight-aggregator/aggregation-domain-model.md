@@ -3,8 +3,10 @@
 `com.andresps.flights.aggregation.domain.model`
 
 The value objects of the core domain (spec 001, [ADR-0010](../../../adr/0010-domain-assumptions.md)). Each record
-validates its invariants in its constructor, so a malformed provider value (a 2-letter airport, a non-positive or
-non-EUR price) fails here, before it can reach the aggregator. `Itinerary` derives the deduplication identity
+validates its invariants in its constructor, so a malformed provider value (a 2-letter airport, a non-positive price,
+an amount out of bounds) fails here, before it can reach the aggregator. `Money` is EUR only: `ExchangeRates` (spec 008,
+[ADR-0025](../../../adr/0025-currency-normalisation-live-rates.md)) converts a provider amount in any currency to EUR
+with the run's rates, before the offer is built. `Itinerary` derives the deduplication identity
 (`ItineraryKey`: flight numbers, airports and departure instants) and the facts the validation rules need. Plain Java.
 
 ```mermaid
@@ -61,8 +63,17 @@ classDiagram
         +BigDecimal amount
         +Currency currency
         +eur(BigDecimal amount)$ Money
+        +requireBounded(BigDecimal amount)$
         +isPositive() boolean
     }
+    class ExchangeRates {
+        +of(LocalDate date, Map rates)$ ExchangeRates
+        +unavailable()$ ExchangeRates
+        +available() boolean
+        +date() Optional~LocalDate~
+        +toEur(BigDecimal amount, Currency currency) Money
+    }
+    class ExchangeRatesUnavailableException
     class InvalidFlightDataException {
         +requireField(T value, String field)$ T
         +normaliseCode(String raw, String field)$ String
@@ -78,13 +89,18 @@ classDiagram
     FlightNumber *-- AirlineCode
     AirportCode ..> InvalidFlightDataException : throws
     Money ..> InvalidFlightDataException : throws
+    ExchangeRates ..> Money : converts to
+    ExchangeRates ..> InvalidFlightDataException : unknown currency
+    ExchangeRates ..> ExchangeRatesUnavailableException : no rates
 ```
 
 **Interactions with other packages**
 
 - `InvalidFlightDataException` extends `DomainValidationException` (`shared.domain`), which the REST layer maps to
   `400`; during ingestion the provider adapters catch it and count the record as malformed.
-- ← built by the provider parsers (`ingestion.infrastructure.adapter.out.provider`, through `RecordValues`).
+- ← built by the provider parsers (`ingestion.infrastructure.adapter.out.provider`, through `RecordValues`), which
+  convert every price with `ExchangeRates`; the rates come from the `ExchangeRateSource` port
+  ([ingestion · application](ingestion-application.md)), once per run.
 - ← consumed by [validation](aggregation-domain-validation.md) (`Itinerary`), [pricing](aggregation-domain-pricing-and-deduplication.md)
   (`Money`) and deduplication (`FlightOffer`, `ItineraryKey`, `ProviderId`).
 - ← `search.domain` reuses `AirportCode` and `AirlineCode` to validate filters.

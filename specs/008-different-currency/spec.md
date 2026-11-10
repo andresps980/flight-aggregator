@@ -1,6 +1,6 @@
 # Spec 008: Per-itinerary provider currencies, normalised to EUR with live exchange rates
 
-- **Status:** Approved (2026-11-10)
+- **Status:** Implemented
 - **Branch:** feat/008-different-currency
 - **Related ADRs:** [ADR-0025](../../docs/adr/0025-currency-normalisation-live-rates.md) (currency normalisation with
   live rates), [ADR-0010](../../docs/adr/0010-domain-assumptions.md) (item 3 amended),

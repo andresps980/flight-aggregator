@@ -68,21 +68,22 @@ sequenceDiagram
 
     Run->>Store: deleteDaysBefore(today) (retention, runs older than 7 days go through the run repository)
     Run->>Ing: ingest(runId, guard = lease::isHeld)
+    Ing->>Ing: ExchangeRateSource.latest() once (spec 008: Frankfurter GET /latest?base=EUR,<br/>on failure ExchangeRates.unavailable())
     Note over Ing: reads "now" once, builds the horizon (7 UTC days after today)<br/>and one ItineraryValidator, run deadline 10 min
     loop each horizon day, at most max-concurrent-days (2) at a time
         Ing->>Day: runDay(day)
         par each provider, at most max-concurrent-partitions (2) per provider
-            Day->>Feed: fetch(day)
+            Day->>Feed: fetch(day, rates)
             loop Retry: up to 3 attempts, backoff 500 ms → 1 s ± 50 %, provider failures only
                 Feed->>Feed: CircuitBreaker permits? (OPEN → CIRCUIT_OPEN, no request)
                 Feed->>Mock: GET /{provider}/flights?date=day (attempt on its own virtual thread,<br/>read timeout 6 s, attempt deadline 60 s)
                 Mock-->>Feed: body streamed: JSON · XML · CSV (or 500 / 503 / slow)
-                Feed->>Feed: FeedParser → fresh PartitionBuffer (malformed records counted, skipped)
+                Feed->>Feed: FeedParser → fresh PartitionBuffer (prices → EUR with the rates,<br/>malformed records counted, skipped)
             end
             alt attempt completed
                 Feed-->>Day: ProviderPartition (complete buffer only)
                 Day->>Agg: accept(offer) for each offer, then the partition is dropped
-            else every attempt failed / breaker open / run deadline
+            else every attempt failed / breaker open / run deadline / no rates for a non-EUR price
                 Feed-->>Day: PartitionFetchException(kind, attempts) → provider missing for this day
             end
         end

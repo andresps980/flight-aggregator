@@ -7,7 +7,10 @@ produces itinerary *i* of day *d* from its own seeded `SplittableRandom`, lazily
 is generated on its own, every provider sees the same itinerary, and nothing is ever materialised. Each world
 itinerary carries the provider records that offer it — cross- and same-provider duplicates at different prices, one
 invalid kind per spec 001 discard reason, malformed records. `WorldStatisticsCalculator` reports what the world
-contains and what the aggregator should produce from it, for exact reconciliation. Plain Java.
+contains and what the aggregator should produce from it, for exact reconciliation. Spec 008: `ProviderCurrencies`
+prices each record in a currency drawn from its provider's list (`FeedCurrency`: code + units per EUR) with a seed of
+its own, derived from the itinerary's seed, the provider and the copy, so the world never changes with the currencies.
+Plain Java.
 
 ## generator and model
 
@@ -20,6 +23,22 @@ classDiagram
         +itineraries(LocalDate day) Stream~WorldItinerary~
         +records(ProviderId provider, LocalDate day) Stream~ProviderRecord~
         +providers() List~ProviderId~
+    }
+    class ProviderCurrencies {
+        +of(Map byProvider)$ ProviderCurrencies
+        +eurOnly()$ ProviderCurrencies
+        +currencies(ProviderId provider) List~FeedCurrency~
+    }
+    class FeedCurrency {
+        <<record>>
+        +Currency currency
+        +BigDecimal unitsPerEur
+        +fromEur(BigDecimal eur) BigDecimal
+    }
+    class FxRates {
+        <<record>>
+        +Map unitsPerEur
+        +byCode() Map
     }
     class WorldSettings {
         <<record>>
@@ -61,7 +80,9 @@ classDiagram
         +int copy
         +List~ScheduledSegment~ segments
         +BigDecimal price
+        +Currency currency
         +Optional~Malformation~ malformation
+        +pricedIn(FeedCurrency target) ProviderRecord
     }
     class ScheduledSegment {
         <<record>>
@@ -94,6 +115,8 @@ classDiagram
     }
 
     WorldGenerator --> WorldSettings
+    WorldGenerator --> ProviderCurrencies
+    ProviderCurrencies *-- "1..*" FeedCurrency
     WorldGenerator *-- ScheduleFactory
     WorldGenerator *-- OfferFactory
     ScheduleFactory ..> Catalog

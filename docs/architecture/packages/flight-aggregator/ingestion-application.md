@@ -54,7 +54,7 @@ classDiagram
     class ProviderFeed {
         <<interface>>
         +provider() ProviderId
-        +fetch(LocalDate day) ProviderPartition
+        +fetch(LocalDate day, ExchangeRates rates) ProviderPartition
         +circuitState() CircuitState
     }
     class PartitionFetchException {
@@ -107,6 +107,11 @@ classDiagram
         +deleteStartedBefore(Instant instant) int
     }
 
+    class ExchangeRateSource {
+        <<interface>>
+        +latest() ExchangeRates
+    }
+
     ProviderFeed ..> PartitionFetchException : throws
     DaySnapshotStore ..> DaySnapshotWrite
     IngestionRunLock ..> RunLease : returns
@@ -147,7 +152,7 @@ What each service implements and uses (ports from the diagrams above, not redraw
 | Service | Implements | Uses |
 |---|---|---|
 | `IngestionRunService` | `StartIngestionUseCase` | `IngestFlightsUseCase` (on an injected `Executor`), `IngestionRunLock`, `IngestionRunRepository`, `SnapshotMaintenance`, `Clock` |
-| `IngestionService` | `IngestFlightsUseCase` | `ProviderFeed` × 3, `DayAggregationSink`, `MarkupPolicy`, `Clock`, `IngestionSettings`; builds an `ItineraryValidator` and one `OfferAggregator` per day |
+| `IngestionService` | `IngestFlightsUseCase` | `ExchangeRateSource` (once per run; on failure `ExchangeRates.unavailable()`, spec 008), `ProviderFeed` × 3 (each fetch gets the run's rates), `DayAggregationSink`, `MarkupPolicy`, `Clock`, `IngestionSettings`; builds an `ItineraryValidator` and one `OfferAggregator` per day |
 | `DaySnapshotPublisher` | `DayAggregationSink` | `DaySnapshotStore`, `SnapshotPolicy`, `Clock` |
 | `IngestionRunQueryService` | `GetIngestionRunUseCase` | `IngestionRunRepository` |
 
@@ -155,7 +160,8 @@ What each service implements and uses (ports from the diagrams above, not redraw
 
 - ← `IngestionScheduler` and `IngestionController` ([adapters in](ingestion-infrastructure-in.md)) call
   `StartIngestionUseCase`; the controller also calls `GetIngestionRunUseCase`.
-- → `ProviderFeed` is implemented by `HttpProviderFeed` ([provider adapters](ingestion-infrastructure-out-provider.md));
+- → `ProviderFeed` is implemented by `HttpProviderFeed` and `ExchangeRateSource` by `FrankfurterExchangeRateSource`
+  ([provider and FX adapters](ingestion-infrastructure-out-provider.md));
   `IngestionRunLock`, `IngestionRunRepository`, `DaySnapshotStore` and `SnapshotMaintenance` by the
   [PostgreSQL adapters](ingestion-infrastructure-out-persistence.md).
 - → `aggregation.domain` (`OfferAggregator`, `ItineraryValidator`, `MarkupPolicy`) does the deduplication;

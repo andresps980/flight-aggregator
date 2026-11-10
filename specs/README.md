@@ -17,4 +17,4 @@ starts here.
 | [005](005-search-api/spec.md) | Search API: filters, keyset pagination, indexes, Redis cache, catalog, OpenAPI | Implemented |
 | [006](006-dashboard/spec.md) | Dashboard: search panel, results with keyset paging, live ingestion status and refresh, visualisation; nginx, compose, frontend CI | Implemented |
 | [007](007-stack-smoke/spec.md) | Full-stack smoke test: `docker compose up --build` booted, ingested, searched, reconciled and a provider outage survived, in CI | Implemented |
-| [008](008-different-currency/spec.md) | Per-itinerary provider currencies (seeded in gds-mock), normalised to EUR with live exchange rates (Frankfurter), gds-mock FX double | Approved |
+| [008](008-different-currency/spec.md) | Per-itinerary provider currencies (seeded in gds-mock), normalised to EUR with live exchange rates (Frankfurter), gds-mock FX double | Implemented |

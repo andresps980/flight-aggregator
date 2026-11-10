@@ -18,7 +18,7 @@ checks that every diagram renders.
 | ingestion (specs 003, 004) | domain | [ingestion-domain](flight-aggregator/ingestion-domain.md) |
 | | application: ports and use cases — **start here** | [ingestion-application](flight-aggregator/ingestion-application.md) |
 | | infrastructure: scheduler and REST | [ingestion-infrastructure-in](flight-aggregator/ingestion-infrastructure-in.md) |
-| | infrastructure: provider feeds, parsers, resilience | [ingestion-infrastructure-out-provider](flight-aggregator/ingestion-infrastructure-out-provider.md) |
+| | infrastructure: provider feeds, parsers, resilience, FX rates (spec 008) | [ingestion-infrastructure-out-provider](flight-aggregator/ingestion-infrastructure-out-provider.md) |
 | | infrastructure: PostgreSQL, report JSON, wiring | [ingestion-infrastructure-out-persistence](flight-aggregator/ingestion-infrastructure-out-persistence.md) |
 | search (spec 005) | domain | [search-domain](flight-aggregator/search-domain.md) |
 | | application | [search-application](flight-aggregator/search-application.md) |
