@@ -33,6 +33,15 @@ gds:
     invalid-fraction: 0.05                  # business-invalid itineraries
     malformed-fraction: 0.01                # malformed provider records
     same-provider-duplicate-fraction: 0.005 # records repeated by the same provider
+  # Spec 008: what each provider prices in, one currency drawn per record from the world seed (default [EUR]), e.g.
+  #   providers:
+  #     mock-beta:
+  #       currencies: [EUR, USD, GBP]
+  # and the rates (units per 1 EUR) used to price them, also served by GET /fx/latest (Frankfurter-compatible).
+  fx:
+    rates:
+      USD: 1.10
+      GBP: 0.85
   chaos:
     default:
       latency-min: 100ms

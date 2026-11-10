@@ -38,15 +38,16 @@ class GammaCsvFormatTest extends ProviderFormatContractTest {
     }
 
     @Test
-    @DisplayName("AC-10: header, then one line per itinerary; local times with IANA zones; zero-padded flights")
+    @DisplayName(
+            "AC-10: header, then one line per itinerary with its currency; local times with IANA zones; zero-padded flights")
     void lines() {
         String[] lines = text(List.of(direct(), connection())).split("\n");
 
         assertThat(lines)
                 .containsExactly(
-                        "REF,PRICE_EUR,SEGMENTS",
-                        "GAM-20261110-000017-0,129.90,IB0345~MAD~2026-11-10T09:00~Europe/Madrid~BCN~2026-11-10T10:25~Europe/Madrid",
-                        "GAM-20261110-000018-0,450.00,"
+                        "REF,PRICE,CURRENCY,SEGMENTS",
+                        "GAM-20261110-000017-0,129.90,EUR,IB0345~MAD~2026-11-10T09:00~Europe/Madrid~BCN~2026-11-10T10:25~Europe/Madrid",
+                        "GAM-20261110-000018-0,450.00,EUR,"
                                 + "BA0007~LHR~2026-11-10T10:00~Europe/London~JFK~2026-11-10T13:00~America/New_York"
                                 + "|BA1203~JFK~2026-11-10T15:00~America/New_York~MIA~2026-11-10T18:10~America/New_York");
     }
@@ -54,7 +55,7 @@ class GammaCsvFormatTest extends ProviderFormatContractTest {
     @Test
     @DisplayName("AC-10: an empty feed is only the header line")
     void emptyFeedIsHeader() {
-        assertThat(text(List.of())).isEqualTo("REF,PRICE_EUR,SEGMENTS\n");
+        assertThat(text(List.of())).isEqualTo("REF,PRICE,CURRENCY,SEGMENTS\n");
     }
 
     @Test

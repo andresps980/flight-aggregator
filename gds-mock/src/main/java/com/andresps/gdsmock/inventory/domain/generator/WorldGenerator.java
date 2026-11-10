@@ -37,6 +37,7 @@ public final class WorldGenerator {
 
     private final WorldSettings settings;
     private final List<ProviderId> providers;
+    private final ProviderCurrencies currencies;
     private final Clock clock;
     private final ScheduleFactory schedules = new ScheduleFactory();
     private final OfferFactory offers;
@@ -46,7 +47,17 @@ public final class WorldGenerator {
      * @param clock gives today's date (UTC) when the settings have no reference date
      */
     public WorldGenerator(WorldSettings settings, List<ProviderId> providers, Clock clock) {
+        this(settings, providers, ProviderCurrencies.eurOnly(), clock);
+    }
+
+    /**
+     * @param currencies what each provider prices in (spec 008); the draw doesn't change the world, only how its
+     *     records are priced
+     */
+    public WorldGenerator(
+            WorldSettings settings, List<ProviderId> providers, ProviderCurrencies currencies, Clock clock) {
         this.settings = Objects.requireNonNull(settings, "settings");
+        this.currencies = Objects.requireNonNull(currencies, "currencies");
         this.providers = List.copyOf(providers);
         this.clock = Objects.requireNonNull(clock, "clock");
         if (this.providers.isEmpty()) {
@@ -122,7 +133,8 @@ public final class WorldGenerator {
     }
 
     private WorldItinerary itinerary(LocalDate referenceDate, LocalDate day, int dayIndex, int index) {
-        SplittableRandom random = new SplittableRandom(seed(day, index));
+        long seed = seed(day, index);
+        SplittableRandom random = new SplittableRandom(seed);
         String airline = Catalog.AIRLINES.get(index % Catalog.AIRLINES.size());
         int flightNumber = index / Catalog.AIRLINES.size() + 1;
         Optional<InvalidKind> kind = random.nextDouble() < settings.invalidFraction()
@@ -132,8 +144,20 @@ public final class WorldGenerator {
                 random, day, dayIndex, settings.horizonDays(), referenceDate, airline, flightNumber, kind);
         BigDecimal baseFare = BigDecimal.valueOf(3_000L + random.nextInt(40_000) + 6_000L * (segments.size() - 1), 2);
         String ref = "%s-%06d".formatted(DAY.format(day), index);
-        return new WorldItinerary(
-                day, index, segments, baseFare, kind, offers.records(random, ref, segments, baseFare));
+        List<ProviderRecord> records = offers.records(random, ref, segments, baseFare).stream()
+                .map(record -> currencies.price(record, currencySeed(seed, record)))
+                .toList();
+        return new WorldItinerary(day, index, segments, baseFare, kind, records);
+    }
+
+    /**
+     * Spec 008: a seed of its own for each record's currency draw, from the itinerary's seed, the provider and the copy,
+     * so the generation stream (and with it the world) is the same whatever the currencies.
+     */
+    private static long currencySeed(long itinerarySeed, ProviderRecord record) {
+        long h = mix(itinerarySeed ^ 0xC2B2AE3D27D4EB4FL);
+        h = mix(h ^ record.provider().value().hashCode());
+        return mix(h ^ record.copy());
     }
 
     private long seed(LocalDate day, int index) {

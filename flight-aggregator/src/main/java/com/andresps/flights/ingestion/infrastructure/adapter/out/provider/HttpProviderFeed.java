@@ -1,5 +1,7 @@
 package com.andresps.flights.ingestion.infrastructure.adapter.out.provider;
 
+import com.andresps.flights.aggregation.domain.model.ExchangeRates;
+import com.andresps.flights.aggregation.domain.model.ExchangeRatesUnavailableException;
 import com.andresps.flights.aggregation.domain.model.ProviderId;
 import com.andresps.flights.ingestion.application.port.out.PartitionFetchException;
 import com.andresps.flights.ingestion.application.port.out.ProviderFeed;
@@ -82,7 +84,8 @@ public final class HttpProviderFeed implements ProviderFeed {
     }
 
     @Override
-    public ProviderPartition fetch(LocalDate day) {
+    public ProviderPartition fetch(LocalDate day, ExchangeRates rates) {
+        Objects.requireNonNull(rates, "rates");
         AtomicInteger attempts = new AtomicInteger();
         try {
             PartitionBuffer buffer = retry.executeSupplier(() -> {
@@ -92,7 +95,7 @@ public final class HttpProviderFeed implements ProviderFeed {
                 return circuitBreaker.executeSupplier(() -> {
                     int attempt = attempts.incrementAndGet();
                     try {
-                        return attempt(day);
+                        return attempt(day, rates);
                     } catch (AttemptFailedException failure) {
                         // Each failed attempt, retried or not, so a run's (or a test's) extra attempts are explained.
                         LOG.info(
@@ -129,8 +132,8 @@ public final class HttpProviderFeed implements ProviderFeed {
     }
 
     /** One request + whole body on a virtual worker thread, aborted if it outlives the attempt deadline. */
-    private PartitionBuffer attempt(LocalDate day) {
-        FutureTask<PartitionBuffer> exchange = new FutureTask<>(() -> exchange(day));
+    private PartitionBuffer attempt(LocalDate day, ExchangeRates rates) {
+        FutureTask<PartitionBuffer> exchange = new FutureTask<>(() -> exchange(day, rates));
         Thread worker =
                 Thread.ofVirtual().name("feed-" + provider() + "-" + day).start(exchange);
         try {
@@ -168,7 +171,7 @@ public final class HttpProviderFeed implements ProviderFeed {
         }
     }
 
-    private PartitionBuffer exchange(LocalDate day) {
+    private PartitionBuffer exchange(LocalDate day, ExchangeRates rates) {
         return client.get()
                 .uri("/{provider}/flights?date={day}", provider().value(), day)
                 .exchange((request, response) -> {
@@ -176,15 +179,15 @@ public final class HttpProviderFeed implements ProviderFeed {
                     if (!status.is2xxSuccessful()) {
                         throw statusFailure(status);
                     }
-                    return read(response.getBody());
+                    return read(response.getBody(), rates);
                 });
     }
 
     /** Parses the body into a fresh buffer and closes it, whatever the outcome (spec 003, AC-5). */
-    PartitionBuffer read(InputStream body) throws IOException {
+    PartitionBuffer read(InputStream body, ExchangeRates rates) throws IOException {
         try (body) {
             PartitionBuffer buffer = new PartitionBuffer(settings.maxRecordsPerPartition());
-            parser.parse(body, buffer);
+            parser.parse(body, rates, buffer);
             return buffer;
         }
     }
@@ -206,6 +209,11 @@ public final class HttpProviderFeed implements ProviderFeed {
     private AttemptFailedException classify(Throwable e) {
         if (e instanceof AttemptFailedException failure) {
             return failure;
+        }
+        ExchangeRatesUnavailableException noRates = cause(e, ExchangeRatesUnavailableException.class);
+        if (noRates != null) {
+            // spec 008: not the provider's fault, so neither retried nor recorded by the breaker
+            return new AttemptFailedException(FailureKind.EXCHANGE_RATES_UNAVAILABLE, noRates.getMessage(), e);
         }
         MalformedDocumentException malformed = cause(e, MalformedDocumentException.class);
         if (malformed != null) {

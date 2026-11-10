@@ -9,6 +9,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.catchThrowableOfType;
 
+import com.andresps.flights.aggregation.domain.model.ExchangeRates;
+import com.andresps.flights.aggregation.domain.model.Money;
 import com.andresps.flights.aggregation.domain.model.ProviderId;
 import com.andresps.flights.ingestion.application.port.out.PartitionFetchException;
 import com.andresps.flights.ingestion.domain.CircuitState;
@@ -43,9 +45,14 @@ class HttpProviderFeedIT {
     private static final LocalDate DAY = LocalDate.parse("2026-11-06");
     private static final String PATH = "/mock-gamma/flights";
     private static final String LINE =
-            "GAM-%d,100.00,IB0345~MAD~2026-11-06T09:00~Europe/Madrid~BCN~2026-11-06T10:25~Europe/Madrid\n";
-    private static final String HEADER = "REF,PRICE_EUR,SEGMENTS\n";
+            "GAM-%d,100.00,EUR,IB0345~MAD~2026-11-06T09:00~Europe/Madrid~BCN~2026-11-06T10:25~Europe/Madrid\n";
+    private static final String HEADER = "REF,PRICE,CURRENCY,SEGMENTS\n";
     private static final String BODY = HEADER + LINE.formatted(1) + LINE.formatted(2) + LINE.formatted(3);
+    /** The same lines priced in USD (spec 008). */
+    private static final String USD_BODY = BODY.replace(",EUR,", ",USD,");
+
+    /** EUR prices need no rates; every test not about currencies runs without them. */
+    private static final ExchangeRates NO_RATES = ExchangeRates.unavailable();
 
     /** read 300 ms, attempt 1.5 s, 3 attempts with 10 ms backoff, breaker 10/10/80 % with 400 ms open wait. */
     static final ResilienceSettings SCALED = new ResilienceSettings(
@@ -88,7 +95,7 @@ class HttpProviderFeedIT {
                         URI.create(server.baseUrl()),
                         NOT_ABOUT_TIMEOUTS,
                         ResiliencePolicies.circuitBreaker("mock-gamma-warm-up", NOT_ABOUT_TIMEOUTS.circuitBreaker()))
-                .fetch(DAY);
+                .fetch(DAY, NO_RATES);
         server.resetAll();
     }
 
@@ -147,16 +154,16 @@ class HttpProviderFeedIT {
     }
 
     private static PartitionFetchException failure(HttpProviderFeed feed) {
-        return catchThrowableOfType(PartitionFetchException.class, () -> feed.fetch(DAY));
+        return catchThrowableOfType(PartitionFetchException.class, () -> feed.fetch(DAY, NO_RATES));
     }
 
     @Test
     @DisplayName("AC-1/AC-9: requests {base}/{provider}/flights?date=day and returns the parsed partition")
     void fetchesPartition() {
-        always(csv(
-                BODY + "GAM-4,-1.00,IB0345~MAD~2026-11-06T09:00~Europe/Madrid~BCN~2026-11-06T10:25~Europe/Madrid\n"));
+        always(csv(BODY
+                + "GAM-4,-1.00,EUR,IB0345~MAD~2026-11-06T09:00~Europe/Madrid~BCN~2026-11-06T10:25~Europe/Madrid\n"));
 
-        ProviderPartition partition = feed(NOT_ABOUT_TIMEOUTS).fetch(DAY);
+        ProviderPartition partition = feed(NOT_ABOUT_TIMEOUTS).fetch(DAY, NO_RATES);
 
         assertThat(partition.provider()).isEqualTo(new ProviderId("mock-gamma"));
         assertThat(partition.day()).isEqualTo(DAY);
@@ -176,7 +183,7 @@ class HttpProviderFeedIT {
         // 400 ms: more than SCALED's 300 ms read timeout, what the first request of the class took on a CI runner.
         firstThen(csv(BODY).withFixedDelay(400), csv(BODY));
 
-        ProviderPartition partition = feed(NOT_ABOUT_TIMEOUTS).fetch(DAY);
+        ProviderPartition partition = feed(NOT_ABOUT_TIMEOUTS).fetch(DAY, NO_RATES);
 
         assertThat(partition.attempts()).isEqualTo(1);
         assertThat(requests()).isEqualTo(1);
@@ -187,7 +194,7 @@ class HttpProviderFeedIT {
     void slowFirstByteThenSuccess() {
         firstThen(csv(BODY).withFixedDelay(800), csv(BODY));
 
-        ProviderPartition partition = feed(SCALED).fetch(DAY);
+        ProviderPartition partition = feed(SCALED).fetch(DAY, NO_RATES);
 
         assertThat(partition.attempts()).isEqualTo(2);
         assertThat(partition.offers()).hasSize(3);
@@ -198,7 +205,7 @@ class HttpProviderFeedIT {
     void stalledBodyThenSuccess() {
         firstThen(csv(BODY).withChunkedDribbleDelay(2, 1200), csv(BODY));
 
-        ProviderPartition partition = feed(SCALED).fetch(DAY);
+        ProviderPartition partition = feed(SCALED).fetch(DAY, NO_RATES);
 
         assertThat(partition.attempts()).isEqualTo(2);
         assertThat(partition.offers()).hasSize(3);
@@ -228,7 +235,7 @@ class HttpProviderFeedIT {
     void tricklingThenSuccess() {
         firstThen(csv(BODY).withChunkedDribbleDelay(40, 4000), csv(BODY));
 
-        ProviderPartition partition = feed(SCALED).fetch(DAY);
+        ProviderPartition partition = feed(SCALED).fetch(DAY, NO_RATES);
 
         assertThat(partition.attempts()).isEqualTo(2);
         assertThat(partition.offers()).hasSize(3);
@@ -239,7 +246,7 @@ class HttpProviderFeedIT {
     void serverErrorThenSuccess() {
         firstThen(aResponse().withStatus(500), csv(BODY));
 
-        ProviderPartition partition = feed(NOT_ABOUT_TIMEOUTS).fetch(DAY);
+        ProviderPartition partition = feed(NOT_ABOUT_TIMEOUTS).fetch(DAY, NO_RATES);
 
         assertThat(partition.attempts()).isEqualTo(2);
         assertThat(requests()).isEqualTo(2);
@@ -277,10 +284,10 @@ class HttpProviderFeedIT {
     @DisplayName(
             "AC-14/AC-18: a truncated attempt is retried and its offers are not kept: the retry's are counted once")
     void truncatedAttemptLeavesNothingBehind() {
-        String truncated = HEADER + LINE.formatted(1) + LINE.formatted(2) + "GAM-3,100.00,IB0345~MAD~2026";
+        String truncated = HEADER + LINE.formatted(1) + LINE.formatted(2) + "GAM-3,100.00,EUR,IB0345~MAD~2026";
         firstThen(csv(truncated), csv(BODY));
 
-        ProviderPartition partition = feed(NOT_ABOUT_TIMEOUTS).fetch(DAY);
+        ProviderPartition partition = feed(NOT_ABOUT_TIMEOUTS).fetch(DAY, NO_RATES);
 
         assertThat(partition.attempts()).isEqualTo(2);
         assertThat(partition.offers()).hasSize(3);
@@ -360,9 +367,9 @@ class HttpProviderFeedIT {
         always(csv(BODY));
         clock.advance(NOT_ABOUT_TIMEOUTS.circuitBreaker().openWait().plusMillis(1));
 
-        feed.fetch(DAY);
+        feed.fetch(DAY, NO_RATES);
         assertThat(feed.circuitState()).isEqualTo(CircuitState.HALF_OPEN);
-        feed.fetch(DAY);
+        feed.fetch(DAY, NO_RATES);
         assertThat(feed.circuitState()).isEqualTo(CircuitState.CLOSED);
     }
 
@@ -453,7 +460,7 @@ class HttpProviderFeedIT {
     private static Thread startFetching(HttpProviderFeed feed, AtomicReference<Throwable> outcome) {
         return Thread.ofVirtual().start(() -> {
             try {
-                feed.fetch(DAY);
+                feed.fetch(DAY, NO_RATES);
             } catch (RuntimeException e) {
                 outcome.set(e);
             }
@@ -477,5 +484,36 @@ class HttpProviderFeedIT {
         assertThat(feed(NOT_ABOUT_TIMEOUTS).provider()).isEqualTo(new ProviderId("mock-gamma"));
         assertThatThrownBy(() -> new HttpProviderFeed(new GammaCsvParser(), null, NOT_ABOUT_TIMEOUTS, null))
                 .isInstanceOf(NullPointerException.class);
+    }
+
+    @Test
+    @DisplayName("AC-1/AC-9: the partition is converted with the rates passed to fetch")
+    void convertsWithTheRunRates() {
+        always(csv(USD_BODY));
+        ExchangeRates rates = ExchangeRates.of(
+                DAY, java.util.Map.of(java.util.Currency.getInstance("USD"), new java.math.BigDecimal("1.25")));
+
+        ProviderPartition partition = feed(NOT_ABOUT_TIMEOUTS).fetch(DAY, rates);
+
+        assertThat(partition.offers())
+                .hasSize(3)
+                .allSatisfy(offer -> assertThat(offer.basePrice()).isEqualTo(Money.eur("80.00")));
+    }
+
+    @Test
+    @DisplayName("AC-10: a non-EUR feed without rates fails as EXCHANGE_RATES_UNAVAILABLE after one attempt, "
+            + "never opening the breaker")
+    void ratesUnavailable() {
+        always(csv(USD_BODY));
+        HttpProviderFeed feed = feed(NOT_ABOUT_TIMEOUTS);
+
+        for (int i = 0; i < 12; i++) {
+            PartitionFetchException failure = failure(feed);
+            assertThat(failure.kind()).isEqualTo(FailureKind.EXCHANGE_RATES_UNAVAILABLE);
+            assertThat(failure.attempts()).isEqualTo(1);
+        }
+
+        assertThat(requests()).isEqualTo(12);
+        assertThat(feed.circuitState()).isEqualTo(CircuitState.CLOSED);
     }
 }

@@ -17,7 +17,8 @@ Full statement: [docs/exercise.md](docs/exercise.md). Design write-up: **[SOLUTI
 > ingestion ([003](specs/003-provider-ingestion/spec.md)), PostgreSQL persistence with scheduled and on-demand runs
 > ([004](specs/004-persistence-and-pipeline/spec.md)), the search API with keyset pagination and a Redis cache
 > ([005](specs/005-search-api/spec.md)), the dashboard ([006](specs/006-dashboard/spec.md)) and the full-stack smoke
-> test in CI ([007](specs/007-stack-smoke/spec.md)).
+> test in CI ([007](specs/007-stack-smoke/spec.md)), and per-itinerary provider currencies converted to EUR with live
+> exchange rates ([008](specs/008-different-currency/spec.md)).
 
 ## Quick start
 
@@ -66,8 +67,8 @@ Endpoints, configuration (volume, chaos, schedule, heap) and the 1M setup: [docs
 | Component | Role | Decision |
 |---|---|---|
 | `frontend` | React + TypeScript dashboard served by nginx, which also proxies `/api` (same origin): search with URL state, keyset "Load more", live ingestion status with refresh, charts, demo outage controls | [ADR-0009](docs/adr/0009-react-frontend.md), [ADR-0023](docs/adr/0023-real-time-by-polling.md), [ADR-0024](docs/adr/0024-contract-generated-client-and-frontend-toolchain.md) |
-| `flight-aggregator` | Scheduled + on-demand **ingestion** from the 3 providers in parallel with retries and circuit breakers, **deduplication** and pricing in a framework-free domain, day snapshots in PostgreSQL, **search API** with filters, keyset pagination and a catalog | [ADR-0006](docs/adr/0006-scheduled-pre-ingestion.md), [ADR-0010](docs/adr/0010-domain-assumptions.md), [ADR-0014](docs/adr/0014-provider-resilience.md) |
-| `gds-mock` | Mock-Alpha (JSON), Mock-Beta (XML) and Mock-Gamma (CSV) over a seeded, streamed world of up to 1M itineraries, with latency, random errors and an outage switch | [ADR-0012](docs/adr/0012-single-gds-mock-application.md), [ADR-0013](docs/adr/0013-stateless-seeded-streamed-generation.md) |
+| `flight-aggregator` | Scheduled + on-demand **ingestion** from the 3 providers in parallel with retries and circuit breakers, every price **converted to EUR** with live ECB rates (Frankfurter, once per run), **deduplication** and pricing in a framework-free domain, day snapshots in PostgreSQL, **search API** with filters, keyset pagination and a catalog | [ADR-0006](docs/adr/0006-scheduled-pre-ingestion.md), [ADR-0010](docs/adr/0010-domain-assumptions.md), [ADR-0014](docs/adr/0014-provider-resilience.md), [ADR-0025](docs/adr/0025-currency-normalisation-live-rates.md) |
+| `gds-mock` | Mock-Alpha (JSON), Mock-Beta (XML) and Mock-Gamma (CSV) over a seeded, streamed world of up to 1M itineraries, each record priced in EUR, USD or GBP, with latency, random errors and an outage switch; also a Frankfurter-compatible `/fx/latest` | [ADR-0012](docs/adr/0012-single-gds-mock-application.md), [ADR-0013](docs/adr/0013-stateless-seeded-streamed-generation.md) |
 | PostgreSQL | Source of truth: one row per itinerary, day snapshots, runs with their reports (Flyway, `COPY` bulk load, advisory run lock, search indexes) | [ADR-0007](docs/adr/0007-postgresql-and-redis.md), [ADR-0020](docs/adr/0020-search-indexes.md) |
 | Redis | Search and catalog cache keyed by a data version that every ingestion write bumps; optional at runtime | [ADR-0022](docs/adr/0022-search-cache.md) |
 

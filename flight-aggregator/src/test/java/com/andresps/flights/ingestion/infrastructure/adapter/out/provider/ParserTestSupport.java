@@ -1,5 +1,6 @@
 package com.andresps.flights.ingestion.infrastructure.adapter.out.provider;
 
+import com.andresps.flights.aggregation.domain.model.ExchangeRates;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -12,10 +13,15 @@ public final class ParserTestSupport {
 
     private ParserTestSupport() {}
 
+    /** Without exchange rates: EUR prices only, as every provider priced before spec 008. */
     public static PartitionBuffer parse(FeedParser parser, String body) {
+        return parse(parser, body, ExchangeRates.unavailable());
+    }
+
+    public static PartitionBuffer parse(FeedParser parser, String body, ExchangeRates rates) {
         PartitionBuffer buffer = new PartitionBuffer();
         try {
-            parser.parse(stream(body), buffer);
+            parser.parse(stream(body), rates, buffer);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }

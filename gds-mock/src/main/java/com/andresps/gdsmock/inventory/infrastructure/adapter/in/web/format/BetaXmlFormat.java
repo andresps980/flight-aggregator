@@ -77,7 +77,7 @@ public final class BetaXmlFormat implements ProviderFormat {
         xml.writeAttribute("id", "BET-" + record.recordId());
         xml.writeStartElement("pricing");
         xml.writeStartElement("totalAmount");
-        xml.writeAttribute("currency", "EUR");
+        xml.writeAttribute("currency", record.currency().getCurrencyCode()); // spec 008: per record
         xml.writeCharacters(record.price().toPlainString());
         xml.writeEndElement();
         xml.writeEndElement();

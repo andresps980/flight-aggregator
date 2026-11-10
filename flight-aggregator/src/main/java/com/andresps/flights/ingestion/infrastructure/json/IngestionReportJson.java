@@ -159,6 +159,7 @@ public final class IngestionReportJson {
                         "MALFORMED_DOCUMENT",
                         "CIRCUIT_OPEN",
                         "RUN_TIMEOUT",
+                        "EXCHANGE_RATES_UNAVAILABLE",
                         "UNEXPECTED_ERROR"
                     })
             String kind,

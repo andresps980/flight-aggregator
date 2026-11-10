@@ -1,5 +1,6 @@
 package com.andresps.flights.ingestion.application.port.out;
 
+import com.andresps.flights.aggregation.domain.model.ExchangeRates;
 import com.andresps.flights.aggregation.domain.model.ProviderId;
 import com.andresps.flights.ingestion.domain.CircuitState;
 import com.andresps.flights.ingestion.domain.ProviderPartition;
@@ -17,7 +18,11 @@ public interface ProviderFeed {
 
     ProviderId provider();
 
-    ProviderPartition fetch(LocalDate day);
+    /**
+     * @param rates the run's exchange rates (spec 008): every price is converted to EUR with them; a partition holding
+     *     a non-EUR price while the rates are unavailable fails with {@code EXCHANGE_RATES_UNAVAILABLE}
+     */
+    ProviderPartition fetch(LocalDate day, ExchangeRates rates);
 
     /** Current breaker state; {@link CircuitState#CLOSED} for feeds without a breaker. */
     CircuitState circuitState();

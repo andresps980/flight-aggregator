@@ -19,6 +19,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.andresps.flights.aggregation.domain.deduplication.AggregatedItinerary;
 import com.andresps.flights.aggregation.domain.deduplication.AggregationStatistics;
 import com.andresps.flights.aggregation.domain.deduplication.OfferAggregator;
+import com.andresps.flights.aggregation.domain.model.ExchangeRates;
+import com.andresps.flights.aggregation.domain.model.ExchangeRatesUnavailableException;
 import com.andresps.flights.aggregation.domain.model.FlightOffer;
 import com.andresps.flights.aggregation.domain.model.Itinerary;
 import com.andresps.flights.aggregation.domain.model.ProviderId;
@@ -28,6 +30,7 @@ import com.andresps.flights.aggregation.domain.validation.ItineraryValidator;
 import com.andresps.flights.ingestion.application.port.in.PublicationGuard;
 import com.andresps.flights.ingestion.application.port.in.RunLockLostException;
 import com.andresps.flights.ingestion.application.port.out.DayAggregationSink;
+import com.andresps.flights.ingestion.application.port.out.ExchangeRateSource;
 import com.andresps.flights.ingestion.application.port.out.ProviderFeed;
 import com.andresps.flights.ingestion.domain.CircuitState;
 import com.andresps.flights.ingestion.domain.DayAggregation;
@@ -40,14 +43,17 @@ import com.andresps.flights.ingestion.domain.IngestionStatus;
 import com.andresps.flights.ingestion.domain.MalformedReason;
 import com.andresps.flights.ingestion.domain.PartitionFailure;
 import com.andresps.flights.ingestion.domain.ProviderReport;
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.LocalDate;
+import java.util.Currency;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -70,8 +76,19 @@ class IngestionServiceTest {
     private final FakeProviderFeed gamma = new FakeProviderFeed(GAMMA);
     private final RecordingSink sink = new RecordingSink();
 
+    /** Spec 008: the FX API double; counts its calls. */
+    private final AtomicInteger rateRequests = new AtomicInteger();
+
+    private volatile ExchangeRates currentRates = ExchangeRates.of(
+            LocalDate.parse("2026-11-04"), Map.of(Currency.getInstance("USD"), new BigDecimal("1.25")));
+    private final ExchangeRateSource rateSource = () -> {
+        rateRequests.incrementAndGet();
+        return currentRates;
+    };
+
     private IngestionReport ingest(IngestionSettings settings, ProviderFeed... feeds) {
-        return new IngestionService(List.of(feeds), sink, PercentageMarkupPolicy.defaultPolicy(), CLOCK, settings)
+        return new IngestionService(
+                        rateSource, List.of(feeds), sink, PercentageMarkupPolicy.defaultPolicy(), CLOCK, settings)
                 .ingest(RUN_ID, PublicationGuard.ALWAYS);
     }
 
@@ -551,6 +568,7 @@ class IngestionServiceTest {
             var checks = new java.util.concurrent.atomic.AtomicInteger();
             PublicationGuard lostAfterFirstDay = () -> checks.incrementAndGet() == 1;
             IngestionService service = new IngestionService(
+                    rateSource,
                     List.of(alpha, beta, gamma),
                     sink,
                     PercentageMarkupPolicy.defaultPolicy(),
@@ -570,7 +588,12 @@ class IngestionServiceTest {
                 throw new IllegalStateException("connection used concurrently (test)");
             };
             IngestionService service = new IngestionService(
-                    List.of(alpha, beta, gamma), sink, PercentageMarkupPolicy.defaultPolicy(), CLOCK, SETTINGS);
+                    rateSource,
+                    List.of(alpha, beta, gamma),
+                    sink,
+                    PercentageMarkupPolicy.defaultPolicy(),
+                    CLOCK,
+                    SETTINGS);
 
             assertThatThrownBy(() -> service.ingest(RUN_ID, broken)).isInstanceOf(RunLockLostException.class);
             assertThat(sink.published()).isEmpty();
@@ -585,10 +608,10 @@ class IngestionServiceTest {
         void validatesFeeds() {
             var markup = PercentageMarkupPolicy.defaultPolicy();
 
-            assertThatThrownBy(() -> new IngestionService(List.of(), sink, markup, CLOCK, SETTINGS))
+            assertThatThrownBy(() -> new IngestionService(rateSource, List.of(), sink, markup, CLOCK, SETTINGS))
                     .isInstanceOf(IllegalArgumentException.class);
             assertThatThrownBy(() -> new IngestionService(
-                            List.of(alpha, new FakeProviderFeed(ALPHA)), sink, markup, CLOCK, SETTINGS))
+                            rateSource, List.of(alpha, new FakeProviderFeed(ALPHA)), sink, markup, CLOCK, SETTINGS))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("mock-alpha");
         }
@@ -662,6 +685,83 @@ class IngestionServiceTest {
 
         Set<LocalDate> unavailable() {
             return unavailable;
+        }
+    }
+
+    @Nested
+    class ExchangeRatesOfTheRun {
+
+        @Test
+        @DisplayName("AC-9: the rates are requested once per run and every partition gets that same snapshot")
+        void oncePerRun() {
+            ingest();
+
+            assertThat(rateRequests).hasValue(1);
+            for (FakeProviderFeed feed : List.of(alpha, beta, gamma)) {
+                assertThat(feed.ratesReceived())
+                        .hasSize(HORIZON.size())
+                        .allSatisfy(rates -> assertThat(rates).isSameAs(currentRates));
+            }
+        }
+
+        @Test
+        @DisplayName("AC-9: a second run requests the rates again")
+        void againOnTheNextRun() {
+            ingest();
+            ingest();
+
+            assertThat(rateRequests).hasValue(2);
+        }
+
+        @Test
+        @DisplayName("AC-10: when the FX API fails, the run continues and every partition gets no rates")
+        void fxDownRunContinues() {
+            ExchangeRateSource down = () -> {
+                throw new ExchangeRatesUnavailableException("FX API answered 503 (test)");
+            };
+            alpha.on(DAY1, returns(List.of(offer(ALPHA, "100.00", direct(DAY1, "IB1", "MAD", "BCN")))));
+
+            IngestionReport report = new IngestionService(
+                            down, List.of(alpha, beta), sink, PercentageMarkupPolicy.defaultPolicy(), CLOCK, SETTINGS)
+                    .ingest(RUN_ID, PublicationGuard.ALWAYS);
+
+            assertThat(report.status()).isEqualTo(IngestionStatus.COMPLETED);
+            assertThat(alpha.ratesReceived())
+                    .hasSize(3)
+                    .allSatisfy(rates -> assertThat(rates.available()).isFalse());
+            assertThat(sink.published()).containsExactlyInAnyOrder(DAY1, DAY2, DAY3);
+        }
+
+        @Test
+        @DisplayName("AC-10: a rate source breaking its contract (any other exception) still lets the run continue")
+        void unexpectedSourceFailure() {
+            ExchangeRateSource broken = () -> {
+                throw new IllegalStateException("adapter bug (test)");
+            };
+
+            IngestionReport report = new IngestionService(
+                            broken, List.of(alpha), sink, PercentageMarkupPolicy.defaultPolicy(), CLOCK, SETTINGS)
+                    .ingest(RUN_ID, PublicationGuard.ALWAYS);
+
+            assertThat(report.status()).isEqualTo(IngestionStatus.COMPLETED);
+            assertThat(alpha.ratesReceived())
+                    .allSatisfy(rates -> assertThat(rates.available()).isFalse());
+        }
+
+        @Test
+        @DisplayName(
+                "AC-10: partitions failing with EXCHANGE_RATES_UNAVAILABLE fail their provider; the run is PARTIAL")
+        void unavailableRatesFailOnlyThosePartitions() {
+            beta.byDefault(fails(FailureKind.EXCHANGE_RATES_UNAVAILABLE, 1));
+
+            IngestionReport report = ingest();
+
+            assertThat(report.status()).isEqualTo(IngestionStatus.PARTIAL);
+            assertThat(report.provider(BETA).status()).isEqualTo(IngestionStatus.FAILED);
+            assertThat(report.provider(ALPHA).status()).isEqualTo(IngestionStatus.COMPLETED);
+            assertThat(report.provider(BETA).failures())
+                    .extracting(PartitionFailure::kind)
+                    .containsOnly(FailureKind.EXCHANGE_RATES_UNAVAILABLE);
         }
     }
 }

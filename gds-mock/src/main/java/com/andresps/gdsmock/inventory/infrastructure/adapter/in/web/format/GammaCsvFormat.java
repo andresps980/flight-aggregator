@@ -21,12 +21,14 @@ import org.springframework.http.MediaType;
  * {@code |}, each with 7 {@code ~}-separated sub-fields: flight (zero-padded to 4 digits), origin, local departure,
  * origin zone, destination, local arrival, destination zone.
  *
- * <pre>{@code REF,PRICE_EUR,SEGMENTS
- * GAM-20261110-000017-0,127.15,IB0345~MAD~2026-11-10T09:00~Europe/Madrid~BCN~2026-11-10T10:25~Europe/Madrid}</pre>
+ * <p>Spec 008: each line declares the currency of its price.
+ *
+ * <pre>{@code REF,PRICE,CURRENCY,SEGMENTS
+ * GAM-20261110-000017-0,127.15,EUR,IB0345~MAD~2026-11-10T09:00~Europe/Madrid~BCN~2026-11-10T10:25~Europe/Madrid}</pre>
  */
 public final class GammaCsvFormat implements ProviderFormat {
 
-    static final String HEADER = "REF,PRICE_EUR,SEGMENTS";
+    static final String HEADER = "REF,PRICE,CURRENCY,SEGMENTS";
 
     private static final ProviderId PROVIDER = new ProviderId("mock-gamma");
     private static final MediaType TEXT_CSV = new MediaType("text", "csv", StandardCharsets.UTF_8);
@@ -62,6 +64,8 @@ public final class GammaCsvFormat implements ProviderFormat {
                 .append(record.recordId())
                 .append(',')
                 .append(record.price().toPlainString())
+                .append(',')
+                .append(record.currency().getCurrencyCode())
                 .append(',');
         int unparseable = record.unparseableTimeIndex();
         for (int i = 0; i < record.segments().size(); i++) {

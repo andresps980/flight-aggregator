@@ -47,11 +47,12 @@ docker compose up --build        # postgres + redis + gds-mock + flight-aggregat
 |---|---|---|
 | `postgres` | `5432` (`POSTGRES_PORT`) | `postgres:17`, database/user `flights`, password `flights` (`POSTGRES_PASSWORD`); data in the named volume `postgres-data` (`docker compose down -v` deletes it) |
 | `redis` | `6379` (`REDIS_PORT`) | `redis:8`, search cache only: no persistence, `maxmemory 256mb`, `allkeys-lru` |
-| `gds-mock` | `8081` | Chaos on by default; `GDS_MOCK_PROFILE=deterministic GDS_CHAOS_DEFAULT_ERROR_RATE=0` turns it off (the profile alone keeps the compose file's 10 % errors), `GDS_WORLD_VOLUME=1000000` for the full volume |
-| `flight-aggregator` | `8080` | Starts when the other three are healthy; healthy on `/actuator/health/readiness`; restarts if the JVM exits on `OutOfMemoryError` |
+| `gds-mock` | `8081` | Every provider prices each itinerary in EUR, USD or GBP (spec 008, `SPRING_APPLICATION_JSON`); chaos on by default; `GDS_MOCK_PROFILE=deterministic GDS_CHAOS_DEFAULT_ERROR_RATE=0` turns it off (the profile alone keeps the compose file's 10 % errors), `GDS_WORLD_VOLUME=1000000` for the full volume |
+| `flight-aggregator` | `8080` | Starts when the other three are healthy; healthy on `/actuator/health/readiness`; restarts if the JVM exits on `OutOfMemoryError`; converts prices with the live Frankfurter rates (needs internet; `FX_API_URL=http://gds-mock:8081/fx` uses the mock's rates instead) |
 | `frontend` | `3000` (`FRONTEND_PORT`) | nginx serving the dashboard and proxying `/api`; starts when the aggregator is healthy; healthy on `/healthz`; `DEMO_CONTROLS` (default `true`) shows the demo panel and proxies `/gds-admin` |
 
 Variables for the aggregator: `INGESTION_INITIAL_DELAY` (default `10s`), `INGESTION_FIXED_DELAY` (`15m`),
+`FX_API_URL` (default `https://api.frankfurter.dev/v1`),
 `AGGREGATOR_JAVA_TOOL_OPTIONS` (default `-Xmx768m -XX:+ExitOnOutOfMemoryError`, see SOLUTION.md). The compose file
 maps them to `aggregator.*` properties, the datasource and `GDS_MOCK_URL`. For example, a 1M run without chaos:
 
@@ -228,7 +229,8 @@ How offers become sellable itineraries; every count below appears in the ingesti
 
 | Step | Rule |
 |---|---|
-| Malformed data | Rejected when the value objects are built (e.g. airport not 3 letters, base price ≤ 0, non-EUR, amount ≥ 1,000,000,000 or more than 10 decimals). Never reaches the aggregation; the ingestion report counts it per provider and reason. |
+| Currency (spec 008) | Each record declares its currency; ingestion converts the price to EUR with the run's exchange rates (`amount / rate`, rounded once, `HALF_EVEN`) before anything else, so every rule below works in EUR. |
+| Malformed data | Rejected when the value objects are built (e.g. airport not 3 letters, base price ≤ 0, a currency that is not ISO 4217 or has no rate, amount ≥ 1,000,000,000 or more than 10 decimals, before or after conversion). Never reaches the aggregation; the ingestion report counts it per provider and reason. |
 | Validation | Discarded with one reason, first match in this order: `MIXED_AIRLINES`, `ARRIVAL_NOT_AFTER_DEPARTURE`, `SEGMENTS_NOT_CHAINED`, `REVISITED_AIRPORT`, `CONNECTION_TOO_SHORT` (< 45 min), `LAYOVER_TOO_LONG` (> 24 h), `ALREADY_DEPARTED`. |
 | Identity | Same flight numbers (with airline), segment airports and departure instants ⇒ same itinerary, whatever the provider. |
 | Selection | Lowest base price → provider id → earliest arrivals → canonical representation. Independent of input order. |
@@ -243,7 +245,9 @@ providers, aggregates each day with the rules above and stores it in PostgreSQL 
 
 | Behaviour | Rule |
 |---|---|
-| Parsing | Streamed (Jackson 3 parser, StAX, line reader). Times become UTC instants; flight numbers lose leading zeros (`VY0001` = `VY1`). |
+| Parsing | Streamed (Jackson 3 parser, StAX, line reader). Times become UTC instants; flight numbers lose leading zeros (`VY0001` = `VY1`); prices become EUR with the run's rates (spec 008). |
+| Exchange rates (spec 008) | Requested once at the start of each run from `aggregator.exchange-rates.base-url` (`GET /latest?base=EUR`, the [Frankfurter](https://frankfurter.dev) API by default: ECB reference rates); every partition of the run converts with that response. 1 s connect / 5 s read timeouts, 10 s per attempt (body included), 3 attempts (5xx, timeouts and I/O errors retried; 4xx and invalid bodies not); a body over 64 KiB or a rate outside the `Money` bounds makes the answer invalid. |
+| FX API down (spec 008) | The run continues without rates: EUR prices are ingested; a partition holding any other currency fails as `EXCHANGE_RATES_UNAVAILABLE` after one attempt, without counting against the provider's breaker, so its day keeps its previous snapshot within `max-stale-age`. With mixed currencies this behaves like a provider outage for the run. |
 | Malformed record | Skipped and counted per provider under one reason (first failing field): `BAD_AIRPORT_CODE`, `BAD_FLIGHT_NUMBER`, `NON_POSITIVE_PRICE`, `UNPARSEABLE_TIME`, `INVALID_RECORD`. Never stops the feed. |
 | Broken document | Invalid or truncated JSON/XML/CSV, a wrong root or header, any XML `DOCTYPE` (XXE-safe): the attempt fails as `MALFORMED_DOCUMENT` and leaves nothing behind. |
 | Retries | `5xx`, timeouts, I/O errors and broken documents: up to 3 attempts, 500 ms then 1 s (±50 % jitter). `4xx` (and any other non-2xx status): no retry. |
@@ -290,6 +294,7 @@ As in gds-mock, per-provider keys contain a dash, so override them with command-
 | `spring.data.redis.timeout` / `connect-timeout` | `100ms` / `100ms` | Beyond this a Redis call counts as failed and the search reads PostgreSQL |
 | `spring.datasource.url` / `username` / `password` | `jdbc:postgresql://localhost:5432/flights` / `flights` / `flights` | PostgreSQL (`SPRING_DATASOURCE_*` in compose) |
 | `GDS_MOCK_URL` (environment) | `http://localhost:8081` | Base URL of all three providers at once (compose: `http://gds-mock:8081`) |
+| `aggregator.exchange-rates.base-url` | `https://api.frankfurter.dev/v1` (`FX_API_URL`) | Frankfurter-compatible FX API read once per run (spec 008); gds-mock's double is `http://localhost:8081/fx`. The only currency setting: the currency of each price comes from the feed |
 | `aggregator.resilience.default.connect-timeout` | `1s` | TCP connect timeout |
 | `aggregator.resilience.default.read-timeout` | `6s` | Max wait for the first byte and between body bytes (above the 5 s max latency) |
 | `aggregator.resilience.default.attempt-timeout` | `60s` | Total time per attempt; must be greater than `read-timeout` |
@@ -367,6 +372,7 @@ switch still works). The seed is fixed (42) in both, so the data is the same for
 | `POST /admin/providers/{id}/outage` | Force an outage: the provider answers `503` until recovered (`204`) |
 | `DELETE /admin/providers/{id}/outage` | Recover the provider (`204`) |
 | `GET /admin/world/stats[?date=]` | Expected figures for the current settings (see below) |
+| `GET /fx/latest[?base=EUR]` | The mock's exchange rates in the Frankfurter shape (spec 008); never affected by chaos |
 | `GET /actuator/health` | Health (never affected by chaos or outages) |
 
 - Without `date` a feed covers the whole horizon: the 7 UTC days after the reference date (today by default). With
@@ -434,9 +440,13 @@ unknown provider ids stop the startup with a message naming the property.
 | `gds.chaos.default.latency-min` / `latency-max` | `100ms` / `5000ms` | Random latency range per request |
 | `gds.chaos.default.error-rate` | `0.10` | Probability of an injected `500` |
 | `gds.chaos.providers.<id>.*` | — | Per-provider override of any chaos value, e.g. `gds.chaos.providers.mock-beta.error-rate=0.5` |
+| `gds.providers.<id>.currencies` | `[EUR]` | Spec 008: currencies the provider prices in; each record's currency is drawn uniformly from the list with the seed (the world doesn't change). Each non-EUR code needs a rate |
+| `gds.fx.rates.<code>` | `USD: 1.10`, `GBP: 0.85` | Units of `<code>` per 1 EUR: prices the provider records and is served by `GET /fx/latest` |
 
 ```bash
 GDS_WORLD_VOLUME=1000000 docker compose up --build    # full volume
+./mvnw -pl gds-mock spring-boot:run -Dspring-boot.run.arguments="--gds.providers.mock-beta.currencies=EUR,USD,GBP"
+curl -s "localhost:8081/mock-beta/flights" | grep -o 'currency="[A-Z]*"' | sort | uniq -c   # spec 008: the mix
 ```
 
 At 1,000,000 itineraries the feeds are about 144 MB (Alpha), 332 MB (Beta) and 100 MB (Gamma), and the mock serves

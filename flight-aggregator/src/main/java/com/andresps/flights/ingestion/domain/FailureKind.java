@@ -16,6 +16,11 @@ public enum FailureKind {
     CIRCUIT_OPEN,
     /** The run deadline expired before the partition finished. */
     RUN_TIMEOUT,
+    /**
+     * The partition holds a price in a currency other than EUR and the run has no exchange rates (the FX API failed,
+     * spec 008). Not the provider's fault: never retried, ignored by its circuit breaker.
+     */
+    EXCHANGE_RATES_UNAVAILABLE,
     /** A bug in an adapter (an exception it should never throw). */
     UNEXPECTED_ERROR
 }

@@ -1,5 +1,6 @@
 package com.andresps.flights.ingestion.application.service;
 
+import com.andresps.flights.aggregation.domain.model.ExchangeRates;
 import com.andresps.flights.aggregation.domain.model.FlightOffer;
 import com.andresps.flights.aggregation.domain.model.ProviderId;
 import com.andresps.flights.ingestion.application.port.out.PartitionFetchException;
@@ -13,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.BrokenBarrierException;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.TimeUnit;
@@ -33,6 +35,7 @@ final class FakeProviderFeed implements ProviderFeed {
     private final AtomicInteger inFlight = new AtomicInteger();
     private final AtomicInteger maxInFlight = new AtomicInteger();
     private final AtomicInteger interruptions = new AtomicInteger();
+    private final List<ExchangeRates> ratesReceived = new CopyOnWriteArrayList<>();
     private volatile Behaviour defaultBehaviour = (provider, day) -> partition(provider, day, List.of());
     private volatile CircuitState circuitState = CircuitState.CLOSED;
 
@@ -61,7 +64,8 @@ final class FakeProviderFeed implements ProviderFeed {
     }
 
     @Override
-    public ProviderPartition fetch(LocalDate day) {
+    public ProviderPartition fetch(LocalDate day, ExchangeRates rates) {
+        ratesReceived.add(rates);
         calls.computeIfAbsent(day, d -> new AtomicInteger()).incrementAndGet();
         maxInFlight.accumulateAndGet(inFlight.incrementAndGet(), Math::max);
         try {
@@ -87,6 +91,11 @@ final class FakeProviderFeed implements ProviderFeed {
 
     int totalCalls() {
         return calls.values().stream().mapToInt(AtomicInteger::get).sum();
+    }
+
+    /** The rates passed to every fetch, in call order (spec 008). */
+    List<ExchangeRates> ratesReceived() {
+        return List.copyOf(ratesReceived);
     }
 
     int maxInFlight() {

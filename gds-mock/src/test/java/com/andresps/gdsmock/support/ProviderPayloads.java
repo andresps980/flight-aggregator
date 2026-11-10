@@ -33,7 +33,7 @@ public final class ProviderPayloads {
     public static final String ALPHA_PREFIX = "ALP-";
     public static final String BETA_PREFIX = "BET-";
     public static final String GAMMA_PREFIX = "GAM-";
-    public static final String GAMMA_HEADER = "REF,PRICE_EUR,SEGMENTS";
+    public static final String GAMMA_HEADER = "REF,PRICE,CURRENCY,SEGMENTS";
 
     private static final JsonMapper JSON = JsonMapper.builder()
             .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
@@ -62,7 +62,10 @@ public final class ProviderPayloads {
             }
             JsonNode fare = node.get("totFare");
             records.add(new ParsedRecord(
-                    node.get("offerRef").asString(), fare.decimalValue().toPlainString(), segments));
+                    node.get("offerRef").asString(),
+                    fare.decimalValue().toPlainString(),
+                    node.get("cur").asString(),
+                    segments));
         }
         return records;
     }
@@ -92,12 +95,13 @@ public final class ProviderPayloads {
                         offsetDateTime(departure.getAttribute("dateTime")),
                         offsetDateTime(arrival.getAttribute("dateTime"))));
             }
-            records.add(new ParsedRecord(itinerary.getAttribute("id"), amount.getTextContent(), segments));
+            records.add(new ParsedRecord(
+                    itinerary.getAttribute("id"), amount.getTextContent(), amount.getAttribute("currency"), segments));
         }
         return records;
     }
 
-    /** Mock-Gamma: header + one line per itinerary, segments {@code |}-separated, sub-fields {@code ~}-separated. */
+    /** Mock-Gamma: header + one line per itinerary (spec 008: with its currency), segments {@code |}-separated, sub-fields {@code ~}-separated. */
     public static List<ParsedRecord> parseGamma(byte[] body) {
         String[] lines = new String(body, StandardCharsets.UTF_8).split("\n");
         if (!lines[0].equals(GAMMA_HEADER)) {
@@ -105,9 +109,9 @@ public final class ProviderPayloads {
         }
         List<ParsedRecord> records = new ArrayList<>();
         for (int i = 1; i < lines.length; i++) {
-            String[] fields = lines[i].split(",", 3);
+            String[] fields = lines[i].split(",", 4);
             List<TestSegment> segments = new ArrayList<>();
-            for (String segment : fields[2].split("\\|")) {
+            for (String segment : fields[3].split("\\|")) {
                 String[] parts = segment.split("~", -1);
                 if (parts.length != 7) {
                     throw new AssertionError("Mock-Gamma segment must have 7 sub-fields: " + segment);
@@ -121,7 +125,7 @@ public final class ProviderPayloads {
                         localDateTime(parts[2], parts[3]),
                         localDateTime(parts[5], parts[6])));
             }
-            records.add(new ParsedRecord(fields[0], fields[1], segments));
+            records.add(new ParsedRecord(fields[0], fields[1], fields[2], segments));
         }
         return records;
     }
@@ -140,7 +144,11 @@ public final class ProviderPayloads {
                     i == unparseableIndex ? null : s.departure(),
                     s.arrival()));
         }
-        return new ParsedRecord(prefix + record.recordId(), record.price().toPlainString(), segments);
+        return new ParsedRecord(
+                prefix + record.recordId(),
+                record.price().toPlainString(),
+                record.currency().getCurrencyCode(),
+                segments);
     }
 
     /** Converts a generated segment list to the neutral test view. */

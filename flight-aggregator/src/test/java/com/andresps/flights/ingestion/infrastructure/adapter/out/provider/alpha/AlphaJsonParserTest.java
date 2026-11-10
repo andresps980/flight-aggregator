@@ -7,6 +7,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.andresps.flights.aggregation.domain.model.AirportCode;
+import com.andresps.flights.aggregation.domain.model.ExchangeRates;
 import com.andresps.flights.aggregation.domain.model.FlightNumber;
 import com.andresps.flights.aggregation.domain.model.FlightOffer;
 import com.andresps.flights.aggregation.domain.model.Money;
@@ -99,7 +100,8 @@ class AlphaJsonParserTest {
     void streamsRecords() {
         PartitionBuffer buffer = new PartitionBuffer();
 
-        assertThatThrownBy(() -> parser.parse(failingAfter("[" + valid() + "," + valid() + ","), buffer))
+        assertThatThrownBy(() -> parser.parse(
+                        failingAfter("[" + valid() + "," + valid() + ","), ExchangeRates.unavailable(), buffer))
                 .isInstanceOf(IOException.class);
         assertThat(buffer.offers()).hasSize(2);
     }
@@ -134,7 +136,7 @@ class AlphaJsonParserTest {
     @CsvSource(
             delimiter = '|',
             value = {
-                "non-EUR currency  | \"cur\":\"EUR\"            | \"cur\":\"USD\"",
+                "not an ISO currency | \"cur\":\"EUR\"          | \"cur\":\"XYZ\"",
                 "missing currency  | ,\"cur\":\"EUR\"           | ''",
                 "missing legs      | '\"legs\":[{'             | '\"nolegs\":[{'",
                 "empty legs        | '\"legs\":[{\"fltNum\":\"IB345\",\"org\":\"MAD\",\"dst\":\"BCN\",\"depTs\":1794297600000,\"arrTs\":1794302700000}]' | '\"legs\":[]'",

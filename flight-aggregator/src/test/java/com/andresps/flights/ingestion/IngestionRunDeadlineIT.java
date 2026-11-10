@@ -70,6 +70,7 @@ class IngestionRunDeadlineIT {
     private static WireMockServer startServer() {
         WireMockServer server = new WireMockServer(options().dynamicPort());
         server.start();
+        RecordedGdsMock.stubExchangeRates(server); // spec 008: a run reads the rates first; no retries on a dead URL
         RecordedGdsMock.stubAll(server);
         DAYS.forEach(day -> server.stubFor(request(BETA, day)
                 .atPriority(1)
@@ -80,6 +81,7 @@ class IngestionRunDeadlineIT {
     @DynamicPropertySource
     static void providers(DynamicPropertyRegistry registry) {
         PROVIDERS.forEach(p -> registry.add("aggregator.providers." + p + ".base-url", SERVER::baseUrl));
+        registry.add("aggregator.exchange-rates.base-url", () -> SERVER.baseUrl() + RecordedGdsMock.FX_BASE_PATH);
     }
 
     @TestConfiguration

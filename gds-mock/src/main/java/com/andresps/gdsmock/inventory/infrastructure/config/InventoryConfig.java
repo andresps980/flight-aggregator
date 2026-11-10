@@ -1,6 +1,7 @@
 package com.andresps.gdsmock.inventory.infrastructure.config;
 
 import com.andresps.gdsmock.inventory.domain.generator.WorldGenerator;
+import com.andresps.gdsmock.inventory.domain.model.FxRates;
 import com.andresps.gdsmock.inventory.domain.stats.WorldStatisticsCalculator;
 import com.andresps.gdsmock.inventory.infrastructure.adapter.in.web.FeedRequestResolver;
 import com.andresps.gdsmock.inventory.infrastructure.adapter.in.web.ProviderFormat;
@@ -44,9 +45,17 @@ public class InventoryConfig {
         return new ProviderFormats(formats);
     }
 
+    /** Spec 008: the configured rates, served by {@code /fx/latest} and used to price non-EUR records. */
     @Bean
-    WorldGenerator worldGenerator(WorldProperties properties, ProviderFormats formats, Clock clock) {
-        return new WorldGenerator(properties.toSettings(), formats.ids(), clock);
+    FxRates fxRates(CurrencyProperties currencies) {
+        return new FxRates(currencies.rates());
+    }
+
+    @Bean
+    WorldGenerator worldGenerator(
+            WorldProperties properties, CurrencyProperties currencies, ProviderFormats formats, Clock clock) {
+        return new WorldGenerator(
+                properties.toSettings(), formats.ids(), currencies.providerCurrencies(formats.ids()), clock);
     }
 
     @Bean

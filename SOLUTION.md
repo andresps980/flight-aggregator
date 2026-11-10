@@ -13,7 +13,8 @@ sessions instead of repeating them.
 ([system view](docs/architecture/overview.md#system-view)).
 
 **How it works.** Ingestion is **decoupled from search**: a scheduled (every 15 min) or on-demand run fetches the
-three providers in parallel through streaming parsers, with retries and a circuit breaker per provider. It
+three providers in parallel through streaming parsers, with retries and a circuit breaker per provider, converting
+every price to EUR in the currency each record declares, with live ECB rates fetched once per run. It
 deduplicates in the framework-free domain (cheapest offer, 5 % markup, dead legs and invalid connections dropped),
 one horizon day at a time, and replaces each day atomically in PostgreSQL with `COPY`. Search never calls a
 provider: it pages the stored itineraries with a **keyset cursor** on `(final_price, id)`, served by two composite
@@ -30,7 +31,7 @@ indexes, through a Redis cache that is optional at runtime ([flows](docs/archite
 | `docker compose up --build`, clean clone | build ≈ 22 s, healthy 18 s later, first ingestion `COMPLETED` 21 s after that: **≈ 1 min** on a laptop, base image pulls aside |
 
 **How it was built.** Spec-driven, test-first, with Claude Code under versioned guardrails (rules, skills, review
-agents, hooks), every prompt and review finding logged; 7 specs, 24 ADRs, 13 merged PRs (two Dependabot
+agents, hooks), every prompt and review finding logged; 8 specs, 25 ADRs, 13 merged PRs (two Dependabot
 major bumps declined), each merged only with green quality gates ([1.5](#15-ai-tools-and-the-agent-system)).
 
 **Where to look.** [Architecture](docs/architecture/overview.md) · [ADRs](docs/adr/README.md) ·
@@ -61,7 +62,7 @@ type in the class diagrams exists in the package it names): [overview](docs/arch
 | PostgreSQL (Flyway, `JdbcClient`, no JPA) as source of truth, Redis as a disposable search cache | [0007](docs/adr/0007-postgresql-and-redis.md) |
 | Keyset pagination ordered by `(final_price, id)` | [0008](docs/adr/0008-keyset-pagination.md) |
 | Minimal React + TypeScript + Vite frontend served by nginx | [0009](docs/adr/0009-react-frontend.md) |
-| Domain assumptions: what is an invalid connection, EUR only, single airline, 5 % `HALF_EVEN` markup, UTC date filter | [0010](docs/adr/0010-domain-assumptions.md) |
+| Domain assumptions: what is an invalid connection, EUR only (amended by 0025), single airline, 5 % `HALF_EVEN` markup, UTC date filter | [0010](docs/adr/0010-domain-assumptions.md) |
 | Incremental deduplication keyed by a deterministic itinerary key, total-order tie-break | [0011](docs/adr/0011-incremental-deduplication.md) |
 | One `gds-mock` app serving the three providers, no code shared with the aggregator | [0012](docs/adr/0012-single-gds-mock-application.md) |
 | Mock data generated per request from per-itinerary seeds, streamed, never materialised | [0013](docs/adr/0013-stateless-seeded-streamed-generation.md) |
@@ -76,6 +77,7 @@ type in the class diagrams exists in the package it names): [overview](docs/arch
 | Redis cache-aside as a decorator of the query ports, keyed by a transactional data version | [0022](docs/adr/0022-search-cache.md) |
 | Dashboard "real time" by polling the latest run (30 s, 3 s while running), never auto-replacing results | [0023](docs/adr/0023-real-time-by-polling.md) |
 | Frontend types generated from the OpenAPI description; Vitest + RTL + MSW; ESLint + Prettier | [0024](docs/adr/0024-contract-generated-client-and-frontend-toolchain.md) |
+| Per-record provider currencies converted to EUR at the ingestion boundary with live rates (Frankfurter, ECB) fetched once per run; FX outage fails only non-EUR partitions; the mock draws currencies from a seeded stream of its own | [0025](docs/adr/0025-currency-normalisation-live-rates.md) |
 
 ### 1.3 Per feature
 
@@ -84,7 +86,8 @@ findings and how they were resolved. What follows is what a reviewer is most lik
 
 **Core domain** ([spec 001](specs/001-itinerary-aggregation/spec.md),
 [package pages](docs/architecture/packages/flight-aggregator/aggregation-domain-model.md)). Two kinds of bad input are
-handled differently: *malformed* data (a 2-letter airport, a non-positive or non-EUR price) fails when the value
+handled differently: *malformed* data (a 2-letter airport, a non-positive price, a currency that is not ISO 4217 or
+has no rate) fails when the value
 object is built and is counted per provider and reason; *well-formed but unsellable* itineraries (dead legs, invalid
 connections: mixed airlines, arrival not after departure, unchained segments, a revisited airport, connection < 45 min,
 layover > 24 h, already departed) are discarded with one `DiscardReason` each. Identity is the statement's: airline
@@ -146,6 +149,18 @@ out (a Mock-Beta outage) gives a `PARTIAL` run with Beta `FAILED`, its breaker `
 *Found:* `GDS_MOCK_PROFILE=deterministic` alone kept 10 % errors, because compose sets the error rate explicitly and
 an environment variable beats a profile file; the docs had claimed otherwise.
 
+**Provider currencies** ([spec 008](specs/008-different-currency/spec.md),
+[ADR-0025](docs/adr/0025-currency-normalisation-live-rates.md)). Every provider record declares its own currency (Alpha
+`cur`, Beta `currency`, a new Gamma `CURRENCY` column) and the parsers convert it to EUR with live ECB rates
+([Frankfurter](https://frankfurter.dev)) fetched once per run through an `ExchangeRateSource` port, so the cheapest
+offer is chosen in one currency and nothing downstream changed. If the FX API fails, EUR prices are still ingested and
+only partitions with another currency fail, as a new `EXCHANGE_RATES_UNAVAILABLE` kind that is neither retried nor
+counted by the provider's breaker (it isn't the provider's fault); the stale-day policy covers the gap. In gds-mock each
+record's currency is drawn from its provider's list with a random of its own seeded from the world seed and the record,
+so the world and `/admin/world/stats` are identical under any currency mix and every reconciliation still holds
+exactly; the mock also serves its rates as a Frankfurter-compatible `/fx/latest` for tests and CI. *Kept small on
+purpose:* no multi-currency `Money`, no per-provider currency setting in the aggregator, no rates cache.
+
 ### 1.4 SOLID, and what is deliberately not abstracted
 
 | Principle | Where it shows |
@@ -193,7 +208,11 @@ and review fixes. Every merge result is green.
   them. Adapters convert provider local times with their offsets or zones.
 - **Money** is a `BigDecimal` in EUR at scale 2, rounded `HALF_EVEN` once when created; the markup is computed exactly
   and rounded once (no double rounding). Untrusted amounts are bounded, so input like `1E999999999` is rejected
-  cheaply.
+  cheaply — before and after conversion.
+- **Currencies** (spec 008) stop at the edge: each record's `amount + currency` becomes EUR `Money` in the parser with
+  the run's `ExchangeRates` (`amount / rate`, the exact quotient rounded once), so the domain, the `numeric(12,2)`
+  columns and the API never see another currency. The rates are a run-level snapshot behind an `ExchangeRateSource`
+  port: one FX request per run, whatever the volume, and every partition converted with the same rates.
 - **Deduplication key** — a readable, deterministic `ItineraryKey` such as
   `IB3456:MAD-BCN@2026-11-10T08:00:00Z|IB3457:BCN-LHR@2026-11-10T10:30:00Z` (flight numbers, airports, departure
   instants). It is also the unique key of the `itinerary` table.
@@ -338,7 +357,11 @@ the cache mostly takes repeated load off the database; it pays off for the expen
 
 ### 3.3 Domain assumptions
 
-- EUR only, single-airline itineraries, fixed 45 min / 24 h connection thresholds, one-way only (a revisited airport,
+- Prices are stored, filtered and shown in EUR only. Provider currencies are converted at ingestion with the latest
+  ECB reference rates (published once per working day), not the provider's sale-time rate; the original amount and
+  currency are not kept; currencies the ECB doesn't publish (~30 are) are `INVALID_RECORD`
+  ([ADR-0025](docs/adr/0025-currency-normalisation-live-rates.md)).
+- Single-airline itineraries, fixed 45 min / 24 h connection thresholds, one-way only (a revisited airport,
   including a return to the origin, is discarded) — [ADR-0010](docs/adr/0010-domain-assumptions.md).
 - An itinerary breaking several rules is counted under its first failing reason only, so the counts add up.
 - Arrival times are not part of the identity: if providers disagree for the same flight, the earliest arrival is kept.
@@ -364,6 +387,11 @@ the cache mostly takes repeated load off the database; it pays off for the expen
   transaction mode) and holds one extra connection for up to 10 min. A lost lock is detected at the next day boundary;
   each day stays atomic, but there is no fencing token in the write itself ([ADR-0019](docs/adr/0019-ingestion-run-lock.md)).
 - Keep `maximum-pool-size` ≥ `max-concurrent-days` + 2, or publishes wait for connections.
+- **The FX API is an external dependency** (spec 008). If it is down when a run starts, every partition holding a
+  non-EUR price fails as `EXCHANGE_RATES_UNAVAILABLE`; with mixed currencies that is nearly all of them, so the run
+  behaves like a total provider outage and search serves the previous snapshots until `max-stale-age` (2 h). There is
+  no last-known-rates cache or second FX source yet; the default compose stack needs internet for it, the CI stack
+  uses gds-mock's `/fx/latest` double.
 - Runs are not cancellable; history keeps 7 days; a run cut by a crash stays `RUNNING` until the next run aborts it
   (≤ 15 min). Graceful shutdown waits up to 30 s for a run to store its `FAILED` state.
 
@@ -381,6 +409,11 @@ the cache mostly takes repeated load off the database; it pays off for the expen
 
 ### 3.6 The mock
 
+- Currencies are drawn uniformly per record and priced at fixed rates (`gds.fx.rates`), the same ones `/fx/latest`
+  serves; with the live API the aggregator's EUR prices differ from the mock's by the gap between the two sets of
+  rates (counts still reconcile; the e2e test uses the mock's rates). Even with the same rates, a rate below 1
+  (GBP 0.85) brings about 15 % of prices back one cent off (two roundings, ×0.85 then ÷0.85), which can flip a
+  near-tie between providers; the exact end-to-end test uses a rate of 2 for that reason.
 - It regenerates the world on every request (CPU instead of memory; cheap at this volume); records come in generation
   order, not shuffled.
 - The three providers share one JVM, so a GC pause or crash affects all three at once; real providers fail more
@@ -409,6 +442,7 @@ the cache mostly takes repeated load off the database; it pays off for the expen
 | Data | Plain table, autovacuum defaults | Day partitions (instant retention, no dead tuples) or autovacuum tuned for the table; read replica for search; backups |
 | Freshness | Polling every 30 s | SSE for run events ([ADR-0023](docs/adr/0023-real-time-by-polling.md)); per-day cache versions |
 | Providers | Full feed per day, re-downloaded on retry | Incremental or delta feeds where providers offer them; resumable downloads; per-provider rate limits |
+| Exchange rates | Latest ECB rates from the free Frankfurter API, once per run, no fallback | A contracted FX provider with an SLA, a last-known-rates fallback with a maximum age, sale-time rates if the business needs them, and the original amount stored for audit |
 | Delivery | `docker compose` | Container images built once in CI and promoted; Kubernetes with readiness/liveness from the existing probes; Flyway migrations as a separate job |
 
 ### 4.1 Observability

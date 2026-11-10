@@ -16,6 +16,9 @@ services:
       # First run right away; the next scheduled one far enough away not to collide with the script's own run (409).
       AGGREGATOR_INGESTION_SCHEDULE_INITIAL_DELAY: 2s
       AGGREGATOR_INGESTION_SCHEDULE_FIXED_DELAY: 6h
+      # Spec 008: gds-mock's Frankfurter-compatible double, so the mixed-currency feeds convert with the very rates the
+      # mock priced them with and the e2e reconciliation never depends on the internet.
+      FX_API_URL: http://gds-mock:8081/fx
 
   frontend:
     environment:

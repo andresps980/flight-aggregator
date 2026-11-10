@@ -7,6 +7,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.andresps.flights.aggregation.domain.model.AirportCode;
+import com.andresps.flights.aggregation.domain.model.ExchangeRates;
 import com.andresps.flights.aggregation.domain.model.FlightNumber;
 import com.andresps.flights.aggregation.domain.model.FlightOffer;
 import com.andresps.flights.aggregation.domain.model.Money;
@@ -121,7 +122,8 @@ class BetaXmlParserTest {
     void streamsRecords() {
         PartitionBuffer buffer = new PartitionBuffer();
 
-        assertThatThrownBy(() -> parser.parse(failingAfter(HEAD + "<itineraries>" + valid() + valid()), buffer))
+        assertThatThrownBy(() -> parser.parse(
+                        failingAfter(HEAD + "<itineraries>" + valid() + valid()), ExchangeRates.unavailable(), buffer))
                 .isInstanceOf(IOException.class);
         assertThat(buffer.offers()).hasSize(2);
     }
@@ -138,7 +140,7 @@ class BetaXmlParserTest {
                 "non-numeric flight    | <flightNumber>345<               | <flightNumber>3A5<                | BAD_FLIGHT_NUMBER",
                 "bad carrier           | <carrier>IB<                     | <carrier>I<                       | BAD_FLIGHT_NUMBER",
                 "non-numeric price     | >131.40<                         | >abc<                             | INVALID_RECORD",
-                "non-EUR currency      | currency=\"EUR\"                   | currency=\"USD\"                   | INVALID_RECORD",
+                "not an ISO currency   | currency=\"EUR\"                   | currency=\"XYZ\"                   | INVALID_RECORD",
                 "missing currency      | ' currency=\"EUR\"'                | ''                                | INVALID_RECORD",
                 "missing departure time | ' dateTime=\"2026-11-10T09:00:00+01:00\"' | ''                       | INVALID_RECORD",
                 "missing carrier       | <carrier>IB</carrier>            | ''                                | INVALID_RECORD",

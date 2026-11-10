@@ -3,6 +3,8 @@ package com.andresps.flights.ingestion.application.service;
 import com.andresps.flights.aggregation.domain.deduplication.AggregationResult;
 import com.andresps.flights.aggregation.domain.deduplication.AggregationStatistics;
 import com.andresps.flights.aggregation.domain.deduplication.OfferAggregator;
+import com.andresps.flights.aggregation.domain.model.ExchangeRates;
+import com.andresps.flights.aggregation.domain.model.ExchangeRatesUnavailableException;
 import com.andresps.flights.aggregation.domain.model.ProviderId;
 import com.andresps.flights.aggregation.domain.pricing.MarkupPolicy;
 import com.andresps.flights.aggregation.domain.validation.ItineraryValidator;
@@ -10,6 +12,7 @@ import com.andresps.flights.ingestion.application.port.in.IngestFlightsUseCase;
 import com.andresps.flights.ingestion.application.port.in.PublicationGuard;
 import com.andresps.flights.ingestion.application.port.in.RunLockLostException;
 import com.andresps.flights.ingestion.application.port.out.DayAggregationSink;
+import com.andresps.flights.ingestion.application.port.out.ExchangeRateSource;
 import com.andresps.flights.ingestion.application.port.out.PartitionFetchException;
 import com.andresps.flights.ingestion.application.port.out.ProviderFeed;
 import com.andresps.flights.ingestion.domain.CircuitState;
@@ -71,6 +74,7 @@ public final class IngestionService implements IngestFlightsUseCase {
 
     private static final Logger LOG = LoggerFactory.getLogger(IngestionService.class);
 
+    private final ExchangeRateSource exchangeRates;
     private final List<ProviderFeed> feeds;
     private final DayAggregationSink sink;
     private final MarkupPolicy markupPolicy;
@@ -78,11 +82,13 @@ public final class IngestionService implements IngestFlightsUseCase {
     private final IngestionSettings settings;
 
     public IngestionService(
+            ExchangeRateSource exchangeRates,
             List<ProviderFeed> feeds,
             DayAggregationSink sink,
             MarkupPolicy markupPolicy,
             Clock clock,
             IngestionSettings settings) {
+        this.exchangeRates = Objects.requireNonNull(exchangeRates, "exchangeRates");
         this.feeds = List.copyOf(feeds);
         this.sink = Objects.requireNonNull(sink, "sink");
         this.markupPolicy = Objects.requireNonNull(markupPolicy, "markupPolicy");
@@ -109,8 +115,9 @@ public final class IngestionService implements IngestFlightsUseCase {
                 .mapToObj(reference::plusDays)
                 .toList();
 
-        // "Now" is read once per run and shared by every day (ADR-0011).
-        Run run = new Run(runId, guard, days.size(), ItineraryValidator.withDefaultRules(clock));
+        // "Now" is read once per run and shared by every day (ADR-0011); so are the exchange rates (spec 008).
+        ExchangeRates rates = latestRates(runId);
+        Run run = new Run(runId, guard, days.size(), ItineraryValidator.withDefaultRules(clock), rates);
         List<DayReport> dayReports = run.execute(days);
         if (run.lockLost) {
             LOG.error("Ingestion {} lost its lock and stopped publishing", runId);
@@ -124,6 +131,25 @@ public final class IngestionService implements IngestFlightsUseCase {
                 new IngestionReport(runId, startedAt, clock.instant(), run.providerReports(), dayReports, statistics);
         log(report);
         return report;
+    }
+
+    /** The run's rates, or none if the FX API failed: EUR prices are still ingested (spec 008 AC-10). */
+    private ExchangeRates latestRates(UUID runId) {
+        try {
+            ExchangeRates rates = exchangeRates.latest();
+            LOG.info("Ingestion {} converts with {}", runId, rates);
+            return rates;
+        } catch (ExchangeRatesUnavailableException e) {
+            LOG.warn(
+                    "Ingestion {} has no exchange rates ({}): partitions with non-EUR prices will fail",
+                    runId,
+                    e.getMessage());
+            return ExchangeRates.unavailable();
+        } catch (RuntimeException e) {
+            // an adapter breaking the port contract must not cost the EUR offers of the whole run
+            LOG.error("Ingestion {}: the exchange rate source failed unexpectedly; continuing without rates", runId, e);
+            return ExchangeRates.unavailable();
+        }
     }
 
     private static void log(IngestionReport report) {
@@ -150,14 +176,21 @@ public final class IngestionService implements IngestFlightsUseCase {
         private volatile boolean lockLost;
         private final int partitionsPerProvider;
         private final ItineraryValidator validator;
+        private final ExchangeRates rates;
         private final long deadline;
         private final Semaphore dayPermits;
         private final Map<ProviderId, Semaphore> providerPermits = new LinkedHashMap<>();
         private final Map<ProviderId, ProviderTally> tallies = new LinkedHashMap<>();
         private ExecutorService executor;
 
-        Run(UUID runId, PublicationGuard guard, int partitionsPerProvider, ItineraryValidator validator) {
+        Run(
+                UUID runId,
+                PublicationGuard guard,
+                int partitionsPerProvider,
+                ItineraryValidator validator,
+                ExchangeRates rates) {
             this.runId = runId;
+            this.rates = rates;
             this.guard = guard;
             this.partitionsPerProvider = partitionsPerProvider;
             this.validator = validator;
@@ -353,7 +386,7 @@ public final class IngestionService implements IngestFlightsUseCase {
                 if (remainingNanos() == 0) {
                     return PartitionOutcome.runTimeout(feed.provider(), day);
                 }
-                ProviderPartition partition = feed.fetch(day);
+                ProviderPartition partition = feed.fetch(day, rates);
                 return PartitionOutcome.succeeded(partition, start, System.nanoTime());
             } catch (PartitionFetchException e) {
                 LOG.warn("Partition {} {} failed: {} after {} attempts", feed.provider(), day, e.kind(), e.attempts());

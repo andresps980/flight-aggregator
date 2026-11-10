@@ -115,6 +115,26 @@ abstract class ProviderFormatContractTest {
     }
 
     @Test
+    @DisplayName("AC-12: records in different currencies parse back with their own price and currency")
+    void mixedCurrenciesRoundTrip() {
+        ProviderRecord eur = direct();
+        ProviderRecord usd = new ProviderRecord(
+                provider(),
+                "20261110-000020-0",
+                0,
+                eur.segments(),
+                new BigDecimal("142.89"),
+                java.util.Currency.getInstance("USD"),
+                Optional.empty());
+        var records = List.of(eur, usd, malformed(MalformationKind.NON_POSITIVE_PRICE));
+
+        List<ParsedRecord> parsed = parse(write(records));
+
+        assertThat(parsed).isEqualTo(expected(records));
+        assertThat(parsed).extracting(ParsedRecord::currency).containsExactly("EUR", "USD", "EUR");
+    }
+
+    @Test
     @DisplayName("AC-11: hand-built records (direct, connection across time zones) parse back exactly")
     void handBuiltRoundTrip() {
         var records = List.of(direct(), connection());

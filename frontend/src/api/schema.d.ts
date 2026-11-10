@@ -144,7 +144,7 @@ export interface components {
         FailureDocument: {
             day: string;
             /** @enum {string} */
-            kind: "TIMEOUT" | "SERVER_ERROR" | "CLIENT_ERROR" | "IO_ERROR" | "MALFORMED_DOCUMENT" | "CIRCUIT_OPEN" | "RUN_TIMEOUT" | "UNEXPECTED_ERROR";
+            kind: "TIMEOUT" | "SERVER_ERROR" | "CLIENT_ERROR" | "IO_ERROR" | "MALFORMED_DOCUMENT" | "CIRCUIT_OPEN" | "RUN_TIMEOUT" | "EXCHANGE_RATES_UNAVAILABLE" | "UNEXPECTED_ERROR";
             /** Format: int32 */
             attempts: number;
             detail: string;

@@ -5,6 +5,7 @@ import com.andresps.flights.ingestion.application.port.in.IngestFlightsUseCase;
 import com.andresps.flights.ingestion.application.port.in.StartIngestionUseCase;
 import com.andresps.flights.ingestion.application.port.out.DayAggregationSink;
 import com.andresps.flights.ingestion.application.port.out.DaySnapshotStore;
+import com.andresps.flights.ingestion.application.port.out.ExchangeRateSource;
 import com.andresps.flights.ingestion.application.port.out.IngestionRunLock;
 import com.andresps.flights.ingestion.application.port.out.IngestionRunRepository;
 import com.andresps.flights.ingestion.application.port.out.ProviderFeed;
@@ -15,6 +16,7 @@ import com.andresps.flights.ingestion.application.service.IngestionRunService;
 import com.andresps.flights.ingestion.application.service.IngestionService;
 import com.andresps.flights.ingestion.domain.SnapshotPolicy;
 import com.andresps.flights.ingestion.infrastructure.adapter.in.scheduling.IngestionScheduler;
+import com.andresps.flights.ingestion.infrastructure.adapter.out.fx.FrankfurterExchangeRateSource;
 import com.andresps.flights.ingestion.infrastructure.adapter.out.persistence.PostgresAdvisoryRunLock;
 import com.andresps.flights.ingestion.infrastructure.adapter.out.persistence.PostgresDaySnapshotStore;
 import com.andresps.flights.ingestion.infrastructure.adapter.out.persistence.PostgresIngestionRunRepository;
@@ -22,11 +24,13 @@ import com.andresps.flights.ingestion.infrastructure.adapter.out.provider.FeedPa
 import com.andresps.flights.ingestion.infrastructure.adapter.out.provider.HttpProviderFeed;
 import com.andresps.flights.ingestion.infrastructure.adapter.out.provider.ResiliencePolicies;
 import com.andresps.flights.ingestion.infrastructure.adapter.out.provider.ResilienceSettings;
+import com.andresps.flights.ingestion.infrastructure.adapter.out.provider.RetrySettings;
 import com.andresps.flights.ingestion.infrastructure.adapter.out.provider.alpha.AlphaJsonParser;
 import com.andresps.flights.ingestion.infrastructure.adapter.out.provider.beta.BetaXmlParser;
 import com.andresps.flights.ingestion.infrastructure.adapter.out.provider.gamma.GammaCsvParser;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import java.time.Clock;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -52,6 +56,16 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(AggregatorProperties.class)
 class IngestionConfiguration {
+
+    /** One FX request per run (spec 008): short timeouts so a slow FX API delays a run by seconds at most. */
+    private static final Duration FX_CONNECT_TIMEOUT = Duration.ofSeconds(1);
+
+    private static final Duration FX_READ_TIMEOUT = Duration.ofSeconds(5);
+
+    private static final Duration FX_ATTEMPT_TIMEOUT = Duration.ofSeconds(10);
+
+    /** 3 attempts, 500 ms then 1 s (± 50 %): at worst about 3 × 10 s + 1.5 s before a run gives up on the rates. */
+    private static final RetrySettings FX_RETRY = new RetrySettings(3, Duration.ofMillis(500), 2.0, 0.5);
 
     @Bean
     AlphaJsonParser alphaJsonParser() {
@@ -112,6 +126,17 @@ class IngestionConfiguration {
                 .toList();
     }
 
+    /** Spec 008: live rates, read once per run; only the location is configurable (ADR-0025). */
+    @Bean
+    ExchangeRateSource exchangeRateSource(AggregatorProperties properties) {
+        return new FrankfurterExchangeRateSource(
+                properties.exchangeRates().baseUrl(),
+                FX_CONNECT_TIMEOUT,
+                FX_READ_TIMEOUT,
+                FX_ATTEMPT_TIMEOUT,
+                FX_RETRY);
+    }
+
     // ----- persistence (spec 004): PostgreSQL adapters behind the outbound ports -----
 
     @Bean
@@ -142,11 +167,13 @@ class IngestionConfiguration {
 
     @Bean
     IngestFlightsUseCase ingestFlightsUseCase(
+            ExchangeRateSource exchangeRateSource,
             List<ProviderFeed> providerFeeds,
             DayAggregationSink dayAggregationSink,
             Clock clock,
             AggregatorProperties properties) {
         return new IngestionService(
+                exchangeRateSource,
                 providerFeeds,
                 dayAggregationSink,
                 new PercentageMarkupPolicy(properties.ingestion().markupPercentage()),

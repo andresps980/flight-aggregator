@@ -10,7 +10,12 @@ to absolute instants and to one flight-number format before deduplicating.
 | Mock-Beta | `GET /mock-beta/flights` | `application/xml` | ISO-8601 with the airport's offset: `2026-11-06T03:05:00+00:00` | `<carrier>VY</carrier><flightNumber>1</flightNumber>` | `BET-…` |
 | Mock-Gamma | `GET /mock-gamma/flights` | `text/csv;charset=UTF-8` | local date-time + IANA zone: `2026-11-06T03:05` + `Europe/Dublin` | zero-padded: `VY0001` | `GAM-…` |
 
-All prices are EUR with two decimals. Record ids are `<prefix>-<partition day yyyyMMdd>-<index>-<copy>`: the part
+Prices have two decimals and every record declares its own currency (ISO 4217, [spec 008](../specs/008-different-currency/spec.md)):
+Alpha `cur`, Beta's `currency` attribute, Gamma's `CURRENCY` column. By default every provider prices in EUR; with
+`gds.providers.<id>.currencies` (e.g. `[EUR, USD, GBP]`) each record's currency is drawn from that list with the world
+seed, and its price is the generated EUR price × `gds.fx.rates.<code>` (units per 1 EUR, `HALF_EVEN`). The draw uses a
+random of its own, so the world, its malformations and `/admin/world/stats` are the same under any currency setting.
+The examples below are all EUR. Record ids are `<prefix>-<partition day yyyyMMdd>-<index>-<copy>`: the part
 in the middle identifies the world itinerary (the same in every provider) and `copy` is `1` for a same-provider
 duplicate.
 
@@ -78,7 +83,8 @@ A zero offset is written `+00:00` (never `Z`).
 
 ### Mock-Gamma — comma-separated stream
 
-A header line, then one itinerary per line: `REF,PRICE_EUR,SEGMENTS`. Lines end with `\n` (not RFC 4180's CRLF),
+A header line, then one itinerary per line: `REF,PRICE,CURRENCY,SEGMENTS` (spec 008; before it, the header was
+`REF,PRICE_EUR,SEGMENTS`, which the aggregator now rejects). Lines end with `\n` (not RFC 4180's CRLF),
 as many legacy feeds do, and no field is quoted (no value contains a comma). The aggregator's parser also accepts CRLF line
 endings and skips blank lines (neither counts as a record), but every line, including the last, must be terminated:
 a last line without its line ending means the body was truncated, and the partition fails (spec 003). A line longer
@@ -86,8 +92,8 @@ than 64 KiB also fails the partition, so a broken feed can't grow memory without
 has 7 `~`-separated sub-fields: `flight~origin~localDeparture~originZone~destination~localArrival~destinationZone`.
 
 ```text
-REF,PRICE_EUR,SEGMENTS
-GAM-20261106-000001-0,459.15,VY0001~DUB~2026-11-06T03:05~Europe/Dublin~EZE~2026-11-06T10:40~America/Argentina/Buenos_Aires|VY8227~EZE~2026-11-06T15:25~America/Argentina/Buenos_Aires~FRA~2026-11-07T00:55~Europe/Berlin
+REF,PRICE,CURRENCY,SEGMENTS
+GAM-20261106-000001-0,459.15,EUR,VY0001~DUB~2026-11-06T03:05~Europe/Dublin~EZE~2026-11-06T10:40~America/Argentina/Buenos_Aires|VY8227~EZE~2026-11-06T15:25~America/Argentina/Buenos_Aires~FRA~2026-11-07T00:55~Europe/Berlin
 ```
 
 Local times only make sense with their zone: in the same feed, `OPO 2026-11-06T12:55 Europe/Lisbon` →
@@ -99,6 +105,10 @@ Local times only make sense with their zone: in the same feed, `OPO 2026-11-06T1
 |---|---|---|---|
 | Instant | `Instant.ofEpochMilli(depTs)` | `OffsetDateTime.parse(dateTime).toInstant()` | `LocalDateTime.parse(t).atZone(ZoneId.of(zone)).toInstant()` |
 | Flight number | `VY1` | `carrier + flightNumber` | strip leading zeros: `VY0001` → `VY1` |
+| Price (spec 008) | `totFare` in `cur` | `totalAmount` in its `currency` | `PRICE` in `CURRENCY` |
+
+Every price is converted to EUR with the run's exchange rates (`amount / rate`, rounded once to 2 decimals
+`HALF_EVEN`) before the offer is built, so the cheapest offer is chosen in one currency.
 
 Without this, the same flight from two providers produces two different itinerary keys (spec 001).
 
@@ -117,7 +127,7 @@ well-formed, so one bad record never breaks the feed.
 | Kind | Alpha | Beta | Gamma |
 |---|---|---|---|
 | `BAD_AIRPORT_CODE` | `"org":"M4D"` | `airport="M4D"` | `~M4D~` |
-| `NON_POSITIVE_PRICE` | `"totFare":0.00` or negative | `<totalAmount …>-12.50</totalAmount>` | `,-12.50,` |
+| `NON_POSITIVE_PRICE` | `"totFare":0.00` or negative | `<totalAmount …>-12.50</totalAmount>` | `,-12.50,EUR,` |
 | `UNPARSEABLE_TIME` (a departure) | `"depTs":"TBD"` (string in a numeric field) | `dateTime="2026-11-10T25:61:00+01:00"` | `~10/11/2026 9h~` |
 
 A digit replaces the middle letter of the origin code of one segment. The other providers' records of the same
@@ -140,3 +150,16 @@ spec 001's evaluation order, so discard counts can be reconciled:
 
 They are offered (and duplicated) by providers like valid itineraries. `GET /admin/world/stats` reports the exact
 counts and the figures spec 001 should produce (see [usage](usage.md#expected-figures)).
+
+## Exchange rates (`GET /fx/latest`)
+
+gds-mock also serves the rates it prices with, in the shape of the [Frankfurter](https://frankfurter.dev) API the
+aggregator consumes (spec 008), dated with the world's reference date. It is a test double for tests, CI and offline
+runs; it is never affected by chaos or outages.
+
+```bash
+curl -s "localhost:8081/fx/latest?base=EUR"
+# {"amount":1.0,"base":"EUR","date":"2026-11-05","rates":{"GBP":0.85,"USD":1.1}}
+```
+
+A rate is units of that currency per 1 EUR, so `EUR = amount / rate`. Any `base` other than `EUR` is a `400`.
