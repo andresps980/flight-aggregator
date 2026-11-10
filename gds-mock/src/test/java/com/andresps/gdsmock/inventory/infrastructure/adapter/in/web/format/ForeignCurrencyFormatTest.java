@@ -61,7 +61,7 @@ class ForeignCurrencyFormatTest {
     }
 
     @Test
-    @DisplayName("Spec 008 AC-12: Mock-Alpha writes each record's \"cur\" next to its totFare")
+    @DisplayName("AC-12: Mock-Alpha writes each record's \"cur\" next to its totFare")
     void alpha() {
         assertThat(write(new AlphaJsonFormat(), mixed("mock-alpha")))
                 .contains("\"totFare\":129.90,\"cur\":\"EUR\"")
@@ -70,7 +70,7 @@ class ForeignCurrencyFormatTest {
     }
 
     @Test
-    @DisplayName("Spec 008 AC-12: Mock-Beta writes each itinerary's currency attribute")
+    @DisplayName("AC-12: Mock-Beta writes each itinerary's currency attribute")
     void beta() {
         assertThat(write(new BetaXmlFormat(), mixed("mock-beta")))
                 .contains("<totalAmount currency=\"EUR\">129.90</totalAmount>")
@@ -79,7 +79,7 @@ class ForeignCurrencyFormatTest {
     }
 
     @Test
-    @DisplayName("Spec 008 AC-12: Mock-Gamma writes header REF,PRICE,CURRENCY,SEGMENTS and a currency per line")
+    @DisplayName("AC-12: Mock-Gamma writes header REF,PRICE,CURRENCY,SEGMENTS and a currency per line")
     void gamma() {
         String[] lines = write(new GammaCsvFormat(), mixed("mock-gamma")).split("\n");
 

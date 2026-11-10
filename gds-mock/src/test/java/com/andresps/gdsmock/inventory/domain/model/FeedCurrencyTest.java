@@ -17,14 +17,14 @@ class FeedCurrencyTest {
 
     @ParameterizedTest
     @CsvSource({"129.90, 162.38", "100.00, 125.00", "0.10, 0.12", "0.30, 0.38", "-12.50, -15.62", "0.00, 0.00"})
-    @DisplayName("Spec 008 AC-12: a generated EUR price is multiplied by the rate and rounded to 2 decimals HALF_EVEN")
+    @DisplayName("AC-12: a generated EUR price is multiplied by the rate and rounded to 2 decimals HALF_EVEN")
     void converts(String eur, String usd) {
         assertThat(USD.fromEur(new BigDecimal(eur))).isEqualTo(new BigDecimal(usd));
         assertThat(USD.code()).isEqualTo("USD");
     }
 
     @Test
-    @DisplayName("Spec 008 AC-12: EUR leaves the generated price untouched (same bytes as before)")
+    @DisplayName("AC-12: EUR leaves the generated price untouched (same bytes as before)")
     void eurIsIdentity() {
         BigDecimal price = new BigDecimal("129.90");
 
@@ -33,7 +33,7 @@ class FeedCurrencyTest {
     }
 
     @Test
-    @DisplayName("Spec 008 AC-12: the rate must be positive, and exactly 1 for EUR")
+    @DisplayName("AC-12: the rate must be positive, and exactly 1 for EUR")
     void validatesRate() {
         assertThatThrownBy(() -> new FeedCurrency(Currency.getInstance("USD"), BigDecimal.ZERO))
                 .isInstanceOf(IllegalArgumentException.class)

@@ -63,7 +63,7 @@ class WorldCurrencyTest {
     }
 
     @Test
-    @DisplayName("Spec 008 AC-12: every record declares one of its provider's currencies, each about a third")
+    @DisplayName("AC-12: every record declares one of its provider's currencies, each about a third")
     void currenciesAreMixed() {
         for (ProviderId provider : PROVIDERS) {
             List<ProviderRecord> providerRecords = records(mixedWorld).stream()
@@ -81,8 +81,8 @@ class WorldCurrencyTest {
     }
 
     @Test
-    @DisplayName("Spec 008 AC-12: the price is the record's EUR price × the rate, HALF_EVEN; malformed prices stay "
-            + "non-positive")
+    @DisplayName(
+            "AC-12: the price is the record's EUR price × the rate, HALF_EVEN; malformed prices stay " + "non-positive")
     void priceIsConverted() {
         Map<String, ProviderRecord> eurById = records(eurWorld).stream()
                 .collect(Collectors.toMap(r -> r.provider().value() + r.recordId(), Function.identity()));
@@ -100,7 +100,7 @@ class WorldCurrencyTest {
     }
 
     @Test
-    @DisplayName("Spec 008 AC-12: the same seed always gives the same currency to the same record")
+    @DisplayName("AC-12: the same seed always gives the same currency to the same record")
     void deterministic() {
         assertThat(mixedGenerator().itineraries().toList()).isEqualTo(mixedWorld);
         assertThat(mixedGenerator()
@@ -115,7 +115,7 @@ class WorldCurrencyTest {
     }
 
     @Test
-    @DisplayName("Spec 008 AC-12: another seed gives other currencies")
+    @DisplayName("AC-12: another seed gives other currencies")
     void seedChangesTheDraw() {
         List<Currency> seed7 =
                 records(mixedWorld).stream().map(ProviderRecord::currency).toList();
@@ -133,7 +133,7 @@ class WorldCurrencyTest {
     }
 
     @Test
-    @DisplayName("Spec 008 AC-13: the currency draw does not change the world: itineraries, records and stats")
+    @DisplayName("AC-13: the currency draw does not change the world: itineraries, records and stats")
     void worldUnchanged() {
         assertThat(mixedWorld).hasSameSizeAs(eurWorld);
         for (int i = 0; i < eurWorld.size(); i++) {
@@ -159,7 +159,7 @@ class WorldCurrencyTest {
     }
 
     @Test
-    @DisplayName("Spec 008 AC-13: a provider configured [EUR] (the default) gets exactly the records it had before")
+    @DisplayName("AC-13: a provider configured [EUR] (the default) gets exactly the records it had before")
     void eurOnlyProviderUnchanged() {
         ProviderId alpha = PROVIDERS.getFirst();
         WorldGenerator alphaInEur = new WorldGenerator(
@@ -174,7 +174,7 @@ class WorldCurrencyTest {
     }
 
     @Test
-    @DisplayName("Spec 008 AC-14: a provider's currency list must not be empty")
+    @DisplayName("AC-14: a provider's currency list must not be empty")
     void emptyListRejected() {
         assertThatThrownBy(() -> ProviderCurrencies.of(Map.of(PROVIDERS.getFirst(), List.of())))
                 .isInstanceOf(IllegalArgumentException.class)

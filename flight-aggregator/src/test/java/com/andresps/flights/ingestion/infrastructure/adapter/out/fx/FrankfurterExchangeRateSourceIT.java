@@ -82,7 +82,7 @@ class FrankfurterExchangeRateSourceIT {
     }
 
     @Test
-    @DisplayName("Spec 008 AC-9: requests {base-url}/latest?base=EUR once and returns its date and rates")
+    @DisplayName("AC-9: requests {base-url}/latest?base=EUR once and returns its date and rates")
     void fetchesLatestRates() {
         always(okJson(BODY));
 
@@ -96,7 +96,7 @@ class FrankfurterExchangeRateSourceIT {
     }
 
     @Test
-    @DisplayName("Spec 008 AC-11: rate entries whose code is not ISO 4217 are ignored; EUR always converts at 1")
+    @DisplayName("AC-11: rate entries whose code is not ISO 4217 are ignored; EUR always converts at 1")
     void ignoresUnknownCodes() {
         always(okJson("""
                 {"amount":1.0,"base":"EUR","date":"2026-11-09","rates":{"ZZZ":3,"usd":2,"USD":1.25}}"""));
@@ -111,7 +111,7 @@ class FrankfurterExchangeRateSourceIT {
     }
 
     @Test
-    @DisplayName("Spec 008 AC-10: a 5xx is retried; a success within the attempts returns the rates")
+    @DisplayName("AC-10: a 5xx is retried; a success within the attempts returns the rates")
     void retriesServerErrors() {
         server.stubFor(get(urlPathEqualTo(PATH))
                 .inScenario("fx")
@@ -128,7 +128,7 @@ class FrankfurterExchangeRateSourceIT {
     }
 
     @Test
-    @DisplayName("Spec 008 AC-10: a 5xx on every attempt is unavailable after the configured attempts")
+    @DisplayName("AC-10: a 5xx on every attempt is unavailable after the configured attempts")
     void serverErrorOnEveryAttempt() {
         always(aResponse().withStatus(500));
 
@@ -139,7 +139,7 @@ class FrankfurterExchangeRateSourceIT {
     }
 
     @Test
-    @DisplayName("Spec 008 AC-10: a 4xx is unavailable at once (our request was rejected; not retried)")
+    @DisplayName("AC-10: a 4xx is unavailable at once (our request was rejected; not retried)")
     void clientErrorNotRetried() {
         always(aResponse().withStatus(404));
 
@@ -148,7 +148,7 @@ class FrankfurterExchangeRateSourceIT {
     }
 
     @Test
-    @DisplayName("Spec 008 AC-10: a response slower than the read timeout is unavailable")
+    @DisplayName("AC-10: a response slower than the read timeout is unavailable")
     void timeout() {
         always(okJson(BODY).withFixedDelay(1_000));
 
@@ -157,7 +157,7 @@ class FrankfurterExchangeRateSourceIT {
     }
 
     @Test
-    @DisplayName("Spec 008 AC-10: a dropped connection is unavailable")
+    @DisplayName("AC-10: a dropped connection is unavailable")
     void connectionReset() {
         always(aResponse().withFault(Fault.CONNECTION_RESET_BY_PEER));
 
@@ -165,7 +165,7 @@ class FrankfurterExchangeRateSourceIT {
     }
 
     @Test
-    @DisplayName("Spec 008 AC-10: an FX API that refuses connections is unavailable")
+    @DisplayName("AC-10: an FX API that refuses connections is unavailable")
     void connectionRefused() throws Exception {
         int closedPort;
         try (ServerSocket socket = new ServerSocket(0)) {
@@ -192,7 +192,7 @@ class FrankfurterExchangeRateSourceIT {
                 "{\"amount\":1.0,\"base\":\"EUR\",\"date\":\"yesterday\",\"rates\":{\"USD\":1.1}}",
                 "{\"amount\":2.0,\"base\":\"EUR\",\"date\":\"2026-11-09\",\"rates\":{\"USD\":2.2}}"
             })
-    @DisplayName("Spec 008 AC-10: a body that is not valid Frankfurter JSON with base EUR and positive rates is "
+    @DisplayName("AC-10: a body that is not valid Frankfurter JSON with base EUR and positive rates is "
             + "unavailable, without retrying")
     void invalidBody(String body) {
         always(okJson(body));

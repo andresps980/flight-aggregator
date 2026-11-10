@@ -39,7 +39,7 @@ class GammaCsvFormatTest extends ProviderFormatContractTest {
 
     @Test
     @DisplayName(
-            "AC-10, spec 008: header, then one line per itinerary with its currency; local times with IANA zones; zero-padded flights")
+            "AC-10: header, then one line per itinerary with its currency; local times with IANA zones; zero-padded flights")
     void lines() {
         String[] lines = text(List.of(direct(), connection())).split("\n");
 

@@ -487,7 +487,7 @@ class HttpProviderFeedIT {
     }
 
     @Test
-    @DisplayName("Spec 008 AC-1/AC-9: the partition is converted with the rates passed to fetch")
+    @DisplayName("AC-1/AC-9: the partition is converted with the rates passed to fetch")
     void convertsWithTheRunRates() {
         always(csv(USD_BODY));
         ExchangeRates rates = ExchangeRates.of(
@@ -501,7 +501,7 @@ class HttpProviderFeedIT {
     }
 
     @Test
-    @DisplayName("Spec 008 AC-10: a non-EUR feed without rates fails as EXCHANGE_RATES_UNAVAILABLE after one attempt, "
+    @DisplayName("AC-10: a non-EUR feed without rates fails as EXCHANGE_RATES_UNAVAILABLE after one attempt, "
             + "never opening the breaker")
     void ratesUnavailable() {
         always(csv(USD_BODY));

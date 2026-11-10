@@ -46,7 +46,7 @@ class FxRatesIT {
     }
 
     @Test
-    @DisplayName("Spec 008 AC-15: GET /fx/latest?base=EUR answers the Frankfurter shape with the configured rates")
+    @DisplayName("AC-15: GET /fx/latest?base=EUR answers the Frankfurter shape with the configured rates")
     void latest() {
         var response = http.getText("/fx/latest?base=EUR");
 
@@ -63,7 +63,7 @@ class FxRatesIT {
     }
 
     @Test
-    @DisplayName("Spec 008 AC-15: base defaults to EUR; any other base is a 400 Problem Details")
+    @DisplayName("AC-15: base defaults to EUR; any other base is a 400 Problem Details")
     void otherBase() {
         assertThat(http.getText("/fx/latest").getStatusCode()).isEqualTo(HttpStatus.OK);
 
@@ -75,7 +75,7 @@ class FxRatesIT {
     }
 
     @Test
-    @DisplayName("Spec 008 AC-15: the FX endpoint is never delayed or failed by chaos, even with error-rate 1")
+    @DisplayName("AC-15: the FX endpoint is never delayed or failed by chaos, even with error-rate 1")
     void noChaos() {
         assertThat(http.getText("/mock-alpha/flights").getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
         for (int i = 0; i < 5; i++) {

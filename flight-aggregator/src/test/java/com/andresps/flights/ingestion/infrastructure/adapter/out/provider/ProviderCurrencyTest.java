@@ -106,14 +106,14 @@ class ProviderCurrencyTest {
     class Conversion {
 
         @Test
-        @DisplayName("Spec 008 AC-1: an Alpha record priced 100.00 USD has a base price of 80.00 EUR")
+        @DisplayName("AC-1: an Alpha record priced 100.00 USD has a base price of 80.00 EUR")
         void alphaUsd() {
             assertThat(price(parse(alpha, alphaFeed(alphaPriced("100.00", "USD")), RATES)))
                     .isEqualTo(Money.eur("80.00"));
         }
 
         @Test
-        @DisplayName("Spec 008 AC-1: the Alpha currency may come before the amount in the record")
+        @DisplayName("AC-1: the Alpha currency may come before the amount in the record")
         void alphaCurrencyFirst() {
             String record = """
                     [{"cur":"USD","offerRef":"ALP-1","cxr":"IB","totFare":100.00,
@@ -123,21 +123,21 @@ class ProviderCurrencyTest {
         }
 
         @Test
-        @DisplayName("Spec 008 AC-1: a Beta itinerary priced 100.00 USD has a base price of 80.00 EUR")
+        @DisplayName("AC-1: a Beta itinerary priced 100.00 USD has a base price of 80.00 EUR")
         void betaUsd() {
             assertThat(price(parse(beta, betaFeed(betaPriced("100.00", "USD")), RATES)))
                     .isEqualTo(Money.eur("80.00"));
         }
 
         @Test
-        @DisplayName("Spec 008 AC-1: a Gamma line priced 100.00 GBP has a base price of 125.00 EUR")
+        @DisplayName("AC-1: a Gamma line priced 100.00 GBP has a base price of 125.00 EUR")
         void gammaGbp() {
             assertThat(price(parse(gamma, gammaFeed(gammaLine("100.00", "GBP")), RATES)))
                     .isEqualTo(Money.eur("125.00"));
         }
 
         @Test
-        @DisplayName("Spec 008 AC-2: one feed mixing EUR, USD and GBP converts each record with its own rate")
+        @DisplayName("AC-2: one feed mixing EUR, USD and GBP converts each record with its own rate")
         void mixedCurrencies() {
             String[] amounts = {"100.00", "100.00", "100.00"};
             String[] currencies = {"EUR", "USD", "GBP"};
@@ -172,7 +172,7 @@ class ProviderCurrencyTest {
         }
 
         @Test
-        @DisplayName("Spec 008 AC-3: EUR records of every format are used as is when the rates are unavailable")
+        @DisplayName("AC-3: EUR records of every format are used as is when the rates are unavailable")
         void eurWithoutRates() {
             ExchangeRates none = ExchangeRates.unavailable();
 
@@ -185,7 +185,7 @@ class ProviderCurrencyTest {
         }
 
         @Test
-        @DisplayName("Spec 008 AC-4: the converted amount is rounded once, HALF_EVEN (0.05 at 2 -> 0.02; 0.15 -> 0.08)")
+        @DisplayName("AC-4: the converted amount is rounded once, HALF_EVEN (0.05 at 2 -> 0.02; 0.15 -> 0.08)")
         void roundsOnce() {
             ExchangeRates two = ExchangeRates.of(
                     LocalDate.parse("2026-11-09"), Map.of(Currency.getInstance("USD"), new BigDecimal("2")));
@@ -203,7 +203,7 @@ class ProviderCurrencyTest {
     class Aggregation {
 
         @Test
-        @DisplayName("Spec 008 AC-5: Alpha at 100.00 USD (80.00 EUR) beats Beta at 85.00 EUR; final price 84.00 EUR")
+        @DisplayName("AC-5: Alpha at 100.00 USD (80.00 EUR) beats Beta at 85.00 EUR; final price 84.00 EUR")
         void cheapestAfterConversion() {
             OfferAggregator aggregator = new OfferAggregator(
                     ItineraryValidator.withDefaultRules(
@@ -235,7 +235,7 @@ class ProviderCurrencyTest {
 
         @ParameterizedTest(name = "cur = ''{0}''")
         @ValueSource(strings = {"", " ", "usd", "XYZ", "EURO", "XAF"})
-        @DisplayName("Spec 008 AC-6: an Alpha record with a blank, non-ISO or unrated currency is INVALID_RECORD; the "
+        @DisplayName("AC-6: an Alpha record with a blank, non-ISO or unrated currency is INVALID_RECORD; the "
                 + "next record is parsed")
         void alphaBadCurrency(String currency) {
             String feed = alphaFeed(alphaPriced("10.00", currency), alphaPriced("10.00", "USD"));
@@ -245,7 +245,7 @@ class ProviderCurrencyTest {
 
         @ParameterizedTest(name = "currency = ''{0}''")
         @ValueSource(strings = {"", " ", "usd", "XYZ", "EURO", "XAF"})
-        @DisplayName("Spec 008 AC-6: a Beta itinerary with a blank, non-ISO or unrated currency is INVALID_RECORD")
+        @DisplayName("AC-6: a Beta itinerary with a blank, non-ISO or unrated currency is INVALID_RECORD")
         void betaBadCurrency(String currency) {
             String feed = betaFeed(betaPriced("10.00", currency), betaPriced("10.00", "USD"));
 
@@ -254,7 +254,7 @@ class ProviderCurrencyTest {
 
         @ParameterizedTest(name = "CURRENCY = ''{0}''")
         @ValueSource(strings = {"", " ", "usd", "XYZ", "EURO", "XAF"})
-        @DisplayName("Spec 008 AC-6: a Gamma line with a blank, non-ISO or unrated currency is INVALID_RECORD")
+        @DisplayName("AC-6: a Gamma line with a blank, non-ISO or unrated currency is INVALID_RECORD")
         void gammaBadCurrency(String currency) {
             String feed = gammaFeed(gammaLine("10.00", currency), gammaLine("10.00", "USD"));
 
@@ -262,7 +262,7 @@ class ProviderCurrencyTest {
         }
 
         @Test
-        @DisplayName("Spec 008 AC-6: Alpha and Beta records without a currency are INVALID_RECORD")
+        @DisplayName("AC-6: Alpha and Beta records without a currency are INVALID_RECORD")
         void missingCurrency() {
             assertThat(parse(alpha, alphaFeed(alphaRecord("10.00", "")), RATES).malformed())
                     .containsExactly(Map.entry(MalformedReason.INVALID_RECORD, 1L));
@@ -279,7 +279,7 @@ class ProviderCurrencyTest {
                     "REF,PRICE,CURRENCY,SEGMENTS,EXTRA",
                     "ref,price,currency,segments"
                 })
-        @DisplayName("Spec 008 AC-7: a Gamma header other than REF,PRICE,CURRENCY,SEGMENTS (the old PRICE_EUR one too) "
+        @DisplayName("AC-7: a Gamma header other than REF,PRICE,CURRENCY,SEGMENTS (the old PRICE_EUR one too) "
                 + "fails the document")
         void gammaBadHeader(String header) {
             String body = header + "\n" + gammaLine("10.00", "EUR");
@@ -288,7 +288,7 @@ class ProviderCurrencyTest {
         }
 
         @Test
-        @DisplayName("Spec 008 AC-7: a Gamma line without 4 fields (the old 3-field layout) is INVALID_RECORD")
+        @DisplayName("AC-7: a Gamma line without 4 fields (the old 3-field layout) is INVALID_RECORD")
         void gammaOldLine() {
             String oldLine =
                     "GAM-1,10.00,IB0345~MAD~2026-11-10T09:00~Europe/Madrid~BCN~2026-11-10T10:25~Europe/Madrid\n";
@@ -300,7 +300,7 @@ class ProviderCurrencyTest {
         }
 
         @Test
-        @DisplayName("Spec 008 AC-8: a non-positive price is NON_POSITIVE_PRICE whatever the currency")
+        @DisplayName("AC-8: a non-positive price is NON_POSITIVE_PRICE whatever the currency")
         void nonPositiveWhateverCurrency() {
             assertThat(parse(alpha, alphaFeed(alphaPriced("0.00", "USD")), RATES)
                             .malformed())
@@ -312,7 +312,7 @@ class ProviderCurrencyTest {
         }
 
         @Test
-        @DisplayName("Spec 008 AC-8: a converted amount beyond the Money bounds is INVALID_RECORD")
+        @DisplayName("AC-8: a converted amount beyond the Money bounds is INVALID_RECORD")
         void convertedOutOfBounds() {
             // 999,999,999 GBP is within bounds; at 0.80 it is 1,249,999,998.75 EUR, which is not
             assertThat(parse(gamma, gammaFeed(gammaLine("999999999", "GBP")), RATES)
@@ -321,7 +321,7 @@ class ProviderCurrencyTest {
         }
 
         @Test
-        @DisplayName("Spec 008 AC-8: a provider amount beyond the Money bounds is INVALID_RECORD before converting")
+        @DisplayName("AC-8: a provider amount beyond the Money bounds is INVALID_RECORD before converting")
         void providerAmountOutOfBounds() {
             assertThat(parse(alpha, alphaFeed(alphaPriced("1E999999999", "USD")), RATES)
                             .malformed())
@@ -333,7 +333,7 @@ class ProviderCurrencyTest {
     class RatesUnavailable {
 
         @Test
-        @DisplayName("Spec 008 AC-10: without rates, an Alpha non-EUR price fails the partition, not the record")
+        @DisplayName("AC-10: without rates, an Alpha non-EUR price fails the partition, not the record")
         void alpha() {
             String feed = alphaFeed(alphaPriced("10.00", "EUR"), alphaPriced("10.00", "USD"));
 
@@ -342,14 +342,14 @@ class ProviderCurrencyTest {
         }
 
         @Test
-        @DisplayName("Spec 008 AC-10: without rates, a Beta non-EUR price fails the partition")
+        @DisplayName("AC-10: without rates, a Beta non-EUR price fails the partition")
         void beta() {
             assertThatThrownBy(() -> parse(beta, betaFeed(betaPriced("10.00", "GBP")), ExchangeRates.unavailable()))
                     .isInstanceOf(ExchangeRatesUnavailableException.class);
         }
 
         @Test
-        @DisplayName("Spec 008 AC-10: without rates, a Gamma non-EUR line fails the partition")
+        @DisplayName("AC-10: without rates, a Gamma non-EUR line fails the partition")
         void gamma() {
             String feed = gammaFeed(gammaLine("10.00", "EUR"), gammaLine("10.00", "USD"));
 
@@ -358,7 +358,7 @@ class ProviderCurrencyTest {
         }
 
         @Test
-        @DisplayName("Spec 008 AC-10: without rates, an invalid currency code is still only an INVALID_RECORD")
+        @DisplayName("AC-10: without rates, an invalid currency code is still only an INVALID_RECORD")
         void invalidCurrencyStaysRecordLevel() {
             assertThat(parse(alpha, alphaFeed(alphaPriced("10.00", "XYZ")), ExchangeRates.unavailable())
                             .malformed())

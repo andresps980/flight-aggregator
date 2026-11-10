@@ -29,13 +29,13 @@ class ExchangeRatesTest {
     private static final ExchangeRates RATES = rates("1.25", "0.80");
 
     @Test
-    @DisplayName("Spec 008 AC-1: 100.00 USD at 1.25 USD per EUR is 80.00 EUR")
+    @DisplayName("AC-1: 100.00 USD at 1.25 USD per EUR is 80.00 EUR")
     void convertsUsd() {
         assertThat(RATES.toEur(new BigDecimal("100.00"), USD)).isEqualTo(Money.eur("80.00"));
     }
 
     @Test
-    @DisplayName("Spec 008 AC-1: 100.00 GBP at 0.80 GBP per EUR is 125.00 EUR")
+    @DisplayName("AC-1: 100.00 GBP at 0.80 GBP per EUR is 125.00 EUR")
     void convertsGbp() {
         assertThat(RATES.toEur(new BigDecimal("100.00"), GBP)).isEqualTo(Money.eur("125.00"));
     }
@@ -49,7 +49,7 @@ class ExchangeRatesTest {
         "100,   3,   33.33", // non-terminating quotient: rounded once
         "200,   3,   66.67"
     })
-    @DisplayName("Spec 008 AC-4: the EUR amount is the exact quotient rounded once to 2 decimals HALF_EVEN")
+    @DisplayName("AC-4: the EUR amount is the exact quotient rounded once to 2 decimals HALF_EVEN")
     void roundsOnceHalfEven(String amount, String usdRate, String expected) {
         ExchangeRates rates = rates(usdRate, "1");
 
@@ -59,7 +59,7 @@ class ExchangeRatesTest {
     }
 
     @Test
-    @DisplayName("Spec 008 AC-3: EUR is used as is, with rates or without them")
+    @DisplayName("AC-3: EUR is used as is, with rates or without them")
     void eurNeedsNoRate() {
         assertThat(RATES.toEur(new BigDecimal("12.345"), EUR)).isEqualTo(Money.eur("12.34"));
         assertThat(ExchangeRates.unavailable().toEur(new BigDecimal("12.30"), EUR))
@@ -67,7 +67,7 @@ class ExchangeRatesTest {
     }
 
     @Test
-    @DisplayName("Spec 008 AC-6: a currency the rates don't include is invalid data")
+    @DisplayName("AC-6: a currency the rates don't include is invalid data")
     void unknownCurrency() {
         assertThatThrownBy(() -> RATES.toEur(BigDecimal.TEN, XAF))
                 .isInstanceOf(InvalidFlightDataException.class)
@@ -75,7 +75,7 @@ class ExchangeRatesTest {
     }
 
     @Test
-    @DisplayName("Spec 008 AC-10: without rates, any currency but EUR is unavailable, not invalid")
+    @DisplayName("AC-10: without rates, any currency but EUR is unavailable, not invalid")
     void unavailableRates() {
         ExchangeRates none = ExchangeRates.unavailable();
 
@@ -88,7 +88,7 @@ class ExchangeRatesTest {
     }
 
     @Test
-    @DisplayName("Spec 008 AC-11: EUR always converts at 1; a rate of exactly 1 for EUR is accepted")
+    @DisplayName("AC-11: EUR always converts at 1; a rate of exactly 1 for EUR is accepted")
     void eurIsImplicit() {
         ExchangeRates withEur = ExchangeRates.of(DATE, Map.of(EUR, BigDecimal.ONE, USD, new BigDecimal("2")));
 
@@ -99,7 +99,7 @@ class ExchangeRatesTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"0", "-1.1"})
-    @DisplayName("Spec 008 AC-10: a rate that is not positive is rejected")
+    @DisplayName("AC-10: a rate that is not positive is rejected")
     void rejectsNonPositiveRate(String rate) {
         assertThatThrownBy(() -> ExchangeRates.of(DATE, Map.of(USD, new BigDecimal(rate))))
                 .isInstanceOf(InvalidFlightDataException.class)
@@ -107,14 +107,14 @@ class ExchangeRatesTest {
     }
 
     @Test
-    @DisplayName("Spec 008 AC-10: a EUR rate other than 1 is rejected (the base is EUR)")
+    @DisplayName("AC-10: a EUR rate other than 1 is rejected (the base is EUR)")
     void rejectsEurRateOtherThanOne() {
         assertThatThrownBy(() -> ExchangeRates.of(DATE, Map.of(EUR, new BigDecimal("1.1"))))
                 .isInstanceOf(InvalidFlightDataException.class);
     }
 
     @Test
-    @DisplayName("Spec 008 AC-8: the Money bounds apply to the provider amount before converting and to the result")
+    @DisplayName("AC-8: the Money bounds apply to the provider amount before converting and to the result")
     void boundsBeforeAndAfter() {
         assertThatThrownBy(() -> RATES.toEur(new BigDecimal("1E999999999"), USD))
                 .isInstanceOf(InvalidFlightDataException.class);
@@ -126,7 +126,7 @@ class ExchangeRatesTest {
     }
 
     @Test
-    @DisplayName("Spec 008: rates are an immutable snapshot of the map they were built from")
+    @DisplayName("AC-9: rates are an immutable snapshot of the map they were built from")
     void immutableSnapshot() {
         Map<Currency, BigDecimal> source = new java.util.HashMap<>(Map.of(USD, new BigDecimal("2")));
         ExchangeRates rates = ExchangeRates.of(DATE, source);

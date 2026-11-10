@@ -48,7 +48,7 @@ class ProviderCurrencyIT {
     }
 
     @Test
-    @DisplayName("Spec 008 AC-12: Beta and Gamma mix EUR, USD and GBP per record; Alpha (default [EUR]) is all EUR")
+    @DisplayName("AC-12: Beta and Gamma mix EUR, USD and GBP per record; Alpha (default [EUR]) is all EUR")
     void feedsMixCurrencies() {
         assertThat(currencies("mock-alpha", ProviderPayloads::parseAlpha))
                 .isNotEmpty()
@@ -58,7 +58,7 @@ class ProviderCurrencyIT {
     }
 
     @Test
-    @DisplayName("Spec 008 AC-12: the same request always serves the same currencies and prices")
+    @DisplayName("AC-12: the same request always serves the same currencies and prices")
     void deterministic() {
         assertThat(http.get("/mock-beta/flights" + DAY).getBody())
                 .isEqualTo(http.get("/mock-beta/flights" + DAY).getBody());

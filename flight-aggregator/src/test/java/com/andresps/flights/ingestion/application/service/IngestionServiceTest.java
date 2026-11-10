@@ -692,7 +692,7 @@ class IngestionServiceTest {
     class ExchangeRatesOfTheRun {
 
         @Test
-        @DisplayName("Spec 008 AC-9: the rates are requested once per run and every partition gets that same snapshot")
+        @DisplayName("AC-9: the rates are requested once per run and every partition gets that same snapshot")
         void oncePerRun() {
             ingest();
 
@@ -705,7 +705,7 @@ class IngestionServiceTest {
         }
 
         @Test
-        @DisplayName("Spec 008 AC-9: a second run requests the rates again")
+        @DisplayName("AC-9: a second run requests the rates again")
         void againOnTheNextRun() {
             ingest();
             ingest();
@@ -714,7 +714,7 @@ class IngestionServiceTest {
         }
 
         @Test
-        @DisplayName("Spec 008 AC-10: when the FX API fails, the run continues and every partition gets no rates")
+        @DisplayName("AC-10: when the FX API fails, the run continues and every partition gets no rates")
         void fxDownRunContinues() {
             ExchangeRateSource down = () -> {
                 throw new ExchangeRatesUnavailableException("FX API answered 503 (test)");
@@ -733,7 +733,7 @@ class IngestionServiceTest {
         }
 
         @Test
-        @DisplayName("Spec 008 AC-10: partitions failing with EXCHANGE_RATES_UNAVAILABLE make their provider PARTIAL")
+        @DisplayName("AC-10: partitions failing with EXCHANGE_RATES_UNAVAILABLE make their provider PARTIAL")
         void unavailableRatesFailOnlyThosePartitions() {
             beta.byDefault(fails(FailureKind.EXCHANGE_RATES_UNAVAILABLE, 1));
 

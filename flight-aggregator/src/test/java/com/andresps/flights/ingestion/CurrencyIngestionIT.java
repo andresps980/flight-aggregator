@@ -120,7 +120,7 @@ class CurrencyIngestionIT extends RecordedFeedsSpringTest {
     }
 
     @Test
-    @DisplayName("Spec 008 AC-1/AC-2/AC-5/AC-16: feeds mixing EUR, USD and GBP per record publish exactly the all-EUR "
+    @DisplayName("AC-1/AC-2/AC-5/AC-16: feeds mixing EUR, USD and GBP per record publish exactly the all-EUR "
             + "read model and reconcile with gds-mock's stats")
     void mixedCurrenciesPublishTheSameReadModel() {
         IngestionReport eurReport = ingestion.ingest(UUID.randomUUID(), PublicationGuard.ALWAYS);
@@ -137,7 +137,7 @@ class CurrencyIngestionIT extends RecordedFeedsSpringTest {
     }
 
     @Test
-    @DisplayName("Spec 008 AC-9: one run requests the FX API exactly once")
+    @DisplayName("AC-9: one run requests the FX API exactly once")
     void ratesOncePerRun() {
         stubMixedCurrencies();
 
@@ -148,7 +148,7 @@ class CurrencyIngestionIT extends RecordedFeedsSpringTest {
     }
 
     @Test
-    @DisplayName("Spec 008 AC-10: with the FX API down, partitions holding a non-EUR price fail as "
+    @DisplayName("AC-10: with the FX API down, partitions holding a non-EUR price fail as "
             + "EXCHANGE_RATES_UNAVAILABLE after one attempt, without opening a breaker; EUR-only feeds are ingested")
     void fxDown() {
         DAYS.forEach(day -> SERVER.stubFor(request(BETA, day).willReturn(ok(BETA, mixedFeed(BETA, day)))));

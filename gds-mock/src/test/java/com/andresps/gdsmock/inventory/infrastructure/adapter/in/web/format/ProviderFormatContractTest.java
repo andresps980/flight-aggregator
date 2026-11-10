@@ -115,7 +115,7 @@ abstract class ProviderFormatContractTest {
     }
 
     @Test
-    @DisplayName("Spec 008 AC-12: records in different currencies parse back with their own price and currency")
+    @DisplayName("AC-12: records in different currencies parse back with their own price and currency")
     void mixedCurrenciesRoundTrip() {
         ProviderRecord eur = direct();
         ProviderRecord usd = new ProviderRecord(
