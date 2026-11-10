@@ -4,7 +4,8 @@
 - **Date:** 2026-11-04
 - **Related spec:** [specs/001-itinerary-aggregation](../../specs/001-itinerary-aggregation/spec.md) (refines the rule
   list: equal arrival/departure is invalid, `MIXED_AIRLINES` and `REVISITED_AIRPORT` are discard reasons, fixed
-  evaluation order); [specs/005-search-api](../../specs/005-search-api/spec.md) (amends item 6)
+  evaluation order); [specs/005-search-api](../../specs/005-search-api/spec.md) (amends item 6);
+  [specs/008-different-currency](../../specs/008-different-currency/spec.md) (amends item 3, see ADR-0025)
 
 ## Context
 
@@ -24,7 +25,10 @@ We will assume:
    - the **flight has already departed** at ingestion time.
 2. **Identity for deduplication:** same airline, same ordered flight numbers, same connections (airports) and same
    departure times. Among duplicates from different providers, the **cheapest** offer wins.
-3. **Single currency: EUR.** All provider prices are EUR; no conversion.
+3. **Single currency: EUR.** All provider prices are EUR; no conversion. *Amended by
+   [spec 008](../../specs/008-different-currency/spec.md) / [ADR-0025](0025-currency-normalisation-live-rates.md)
+   (2026-11-10):* each provider record may be priced in any currency it declares; ingestion converts it to EUR with
+   live rates before deduplication, so the domain, read model and API remain EUR-only.
 4. **One airline per itinerary.** Every segment of an itinerary is operated by the same carrier (the carrier filter
    matches that airline).
 5. **Markup:** a configurable OTA markup, **5% by default**, applied to the selected cheapest price. Money is

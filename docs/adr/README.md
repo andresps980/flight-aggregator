@@ -29,3 +29,4 @@ New ADR: copy [`0000-template.md`](0000-template.md) or run `/adr` in Claude Cod
 | [0022](0022-search-cache.md) | Redis cache-aside keyed by a transactional data version, as a decorator of the query ports | Accepted |
 | [0023](0023-real-time-by-polling.md) | Real-time dashboard by polling the latest ingestion run | Accepted |
 | [0024](0024-contract-generated-client-and-frontend-toolchain.md) | Contract-generated TypeScript client and the frontend toolchain | Accepted |
+| [0025](0025-currency-normalisation-live-rates.md) | Per-record provider currencies, normalised to EUR at the ingestion boundary with live rates fetched once per run | Accepted |
