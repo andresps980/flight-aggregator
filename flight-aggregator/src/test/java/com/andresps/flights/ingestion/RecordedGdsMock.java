@@ -82,6 +82,25 @@ public final class RecordedGdsMock {
                 .withBody(body);
     }
 
+    /** Where the FX API double is served on the same WireMock (spec 008): {@code {base}/fx/latest?base=EUR}. */
+    public static final String FX_BASE_PATH = "/fx";
+
+    /** Spec 008: rates whose conversions of a doubled price are exact (2 units per EUR). */
+    public static final String FX_BODY =
+            "{\"amount\":1.0,\"base\":\"EUR\",\"date\":\"2026-11-04\",\"rates\":{\"GBP\":2,\"USD\":2}}";
+
+    public static MappingBuilder exchangeRatesRequest() {
+        return get(urlPathEqualTo(FX_BASE_PATH + "/latest")).withQueryParam("base", equalTo("EUR"));
+    }
+
+    public static void stubExchangeRates(WireMockServer server) {
+        server.stubFor(exchangeRatesRequest()
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody(FX_BODY)));
+    }
+
     /** Stubs every recorded partition of every provider. */
     public static void stubAll(WireMockServer server) {
         PROVIDERS.forEach(provider -> stubProvider(server, provider));

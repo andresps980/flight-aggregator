@@ -66,6 +66,8 @@ public abstract class RecordedFeedsSpringTest {
     @DynamicPropertySource
     static void providers(DynamicPropertyRegistry registry) {
         PROVIDERS.forEach(p -> registry.add("aggregator.providers." + p + ".base-url", SERVER::baseUrl));
+        // spec 008: the FX API is served by the same WireMock (stubbed in resetSharedState)
+        registry.add("aggregator.exchange-rates.base-url", () -> SERVER.baseUrl() + RecordedGdsMock.FX_BASE_PATH);
     }
 
     /**
@@ -94,6 +96,7 @@ public abstract class RecordedFeedsSpringTest {
     void resetSharedState() {
         SERVER.resetAll();
         RecordedGdsMock.stubAll(SERVER);
+        RecordedGdsMock.stubExchangeRates(SERVER);
         breakers.getAllCircuitBreakers().forEach(CircuitBreaker::reset);
         TestPostgres.truncateAll(dataSource);
     }

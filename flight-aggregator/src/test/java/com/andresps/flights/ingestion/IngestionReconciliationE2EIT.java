@@ -40,6 +40,9 @@ import tools.jackson.databind.json.JsonMapper;
  * Not against the default {@code docker compose up}: it runs chaos, which {@link #mockIsDeterministic()} rejects.
  * {@code scripts/stack-smoke.sh} (spec 007) runs this test against a deterministic compose stack.
  *
+ * Spec 008 AC-16: the rates come from gds-mock's own {@code /fx/latest}, so this reconciles whatever currencies the
+ * mock's providers are configured with (the smoke test's compose override mixes EUR, USD and GBP per record).
+ *
  * Both sides use today's UTC date as reference date, so don't run it across midnight UTC.
  */
 @Tag("e2e")
@@ -62,6 +65,8 @@ class IngestionReconciliationE2EIT {
     @DynamicPropertySource
     static void providers(DynamicPropertyRegistry registry) {
         RecordedGdsMock.PROVIDERS.forEach(p -> registry.add("aggregator.providers." + p + ".base-url", () -> MOCK_URL));
+        // spec 008 AC-16: gds-mock's Frankfurter-compatible FX double, whatever currencies its providers price in
+        registry.add("aggregator.exchange-rates.base-url", () -> MOCK_URL + "/fx");
     }
 
     @BeforeAll

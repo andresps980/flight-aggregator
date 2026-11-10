@@ -7,6 +7,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.andresps.flights.aggregation.domain.model.AirportCode;
+import com.andresps.flights.aggregation.domain.model.ExchangeRates;
 import com.andresps.flights.aggregation.domain.model.FlightNumber;
 import com.andresps.flights.aggregation.domain.model.FlightOffer;
 import com.andresps.flights.aggregation.domain.model.Money;
@@ -27,14 +28,14 @@ class GammaCsvParserTest {
 
     private final GammaCsvParser parser = new GammaCsvParser();
 
-    private static final String HEADER = "REF,PRICE_EUR,SEGMENTS\n";
+    private static final String HEADER = "REF,PRICE,CURRENCY,SEGMENTS\n";
     private static final String VALID =
-            "GAM-1,127.15,IB0345~MAD~2026-11-10T09:00~Europe/Madrid~BCN~2026-11-10T10:25~Europe/Madrid\n";
+            "GAM-1,127.15,EUR,IB0345~MAD~2026-11-10T09:00~Europe/Madrid~BCN~2026-11-10T10:25~Europe/Madrid\n";
 
     @Test
     @DisplayName("AC-1: a line becomes a FlightOffer with local times converted through their zones")
     void parsesValidLine() {
-        String line = "GAM-20261106-000001-0,459.15,"
+        String line = "GAM-20261106-000001-0,459.15,EUR,"
                 + "VY0001~DUB~2026-11-06T03:05~Europe/Dublin~EZE~2026-11-06T10:40~America/Argentina/Buenos_Aires|"
                 + "VY8227~EZE~2026-11-06T15:25~America/Argentina/Buenos_Aires~FRA~2026-11-07T00:55~Europe/Berlin\n";
 
@@ -63,7 +64,8 @@ class GammaCsvParserTest {
     @Test
     @DisplayName("AC-2: a flight across zones that 'lands before it takes off' in local time is a 4 h 20 min flight")
     void convertsAcrossZones() {
-        String line = "GAM-2,300.00,TP0201~OPO~2026-11-06T12:55~Europe/Lisbon~BOS~2026-11-06T12:15~America/New_York\n";
+        String line =
+                "GAM-2,300.00,EUR,TP0201~OPO~2026-11-06T12:55~Europe/Lisbon~BOS~2026-11-06T12:15~America/New_York\n";
 
         Segment segment = parse(parser, HEADER + line)
                 .offers()
@@ -113,7 +115,8 @@ class GammaCsvParserTest {
     void streamsRecords() {
         PartitionBuffer buffer = new PartitionBuffer();
 
-        assertThatThrownBy(() -> parser.parse(failingAfter(HEADER + VALID + VALID), buffer))
+        assertThatThrownBy(
+                        () -> parser.parse(failingAfter(HEADER + VALID + VALID), ExchangeRates.unavailable(), buffer))
                 .isInstanceOf(IOException.class);
         assertThat(buffer.offers()).hasSize(2);
     }
@@ -131,8 +134,8 @@ class GammaCsvParserTest {
                 "non-numeric price   | ,127.15,                | ,abc,                    | INVALID_RECORD",
                 "unknown zone        | ~Europe/Madrid~BCN      | ~Mars/Olympus~BCN        | INVALID_RECORD",
                 "6 sub-fields        | ~BCN~2026-11-10T10:25~Europe/Madrid | ~BCN~2026-11-10T10:25 | INVALID_RECORD",
-                "missing field       | GAM-1,127.15,           | GAM-1,                   | INVALID_RECORD",
-                "extra field         | ,127.15,                | ,127.15,EUR,             | INVALID_RECORD",
+                "missing field       | GAM-1,127.15,EUR,       | GAM-1,EUR,               | INVALID_RECORD",
+                "extra field         | ,127.15,EUR,            | ,127.15,EUR,EUR,         | INVALID_RECORD",
                 "same origin/dest    | ~BCN~                   | ~MAD~                    | INVALID_RECORD",
             })
     @DisplayName("AC-6: a malformed line is counted under its reason and skipped; the next line is still parsed")
@@ -160,8 +163,8 @@ class GammaCsvParserTest {
     @CsvSource(
             delimiter = '|',
             value = {
-                "last line without newline | REF,PRICE_EUR,SEGMENTS\\n%s%s",
-                "wrong header              | REF;PRICE;SEGMENTS\\n%s",
+                "last line without newline | REF,PRICE,CURRENCY,SEGMENTS\\n%s%s",
+                "wrong header              | REF;PRICE;CURRENCY;SEGMENTS\\n%s",
                 "missing header            | %s",
                 "empty body                | ''",
             })
@@ -175,7 +178,7 @@ class GammaCsvParserTest {
     @Test
     @DisplayName("AC-5/AC-7: a line longer than the limit fails the document instead of growing memory without bound")
     void rejectsHugeLine() {
-        String huge = "GAM-1,1.00," + "x".repeat(70_000) + "\n";
+        String huge = "GAM-1,1.00,EUR," + "x".repeat(70_000) + "\n";
 
         assertThatThrownBy(() -> parse(parser, HEADER + huge)).isInstanceOf(MalformedDocumentException.class);
     }

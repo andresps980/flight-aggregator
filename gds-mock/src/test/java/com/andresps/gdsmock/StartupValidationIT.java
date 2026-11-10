@@ -23,7 +23,14 @@ class StartupValidationIT {
         "gds.chaos.default.error-rate=2, error-rate",
         "gds.chaos.providers.mock-beta.latency-min=9s, providers.mock-beta",
         "gds.chaos.providers.mock-btea.error-rate=0.5, unknown provider",
-        "gds.chaos.providers.mockbeta.error-rate=0.5, gds.chaos.providers.mockbeta"
+        "gds.chaos.providers.mockbeta.error-rate=0.5, gds.chaos.providers.mockbeta",
+        // spec 008 AC-14: currencies must be ISO 4217 codes with a rate; rates must be positive, for ISO codes
+        "'gds.providers.mock-beta.currencies=EUR,XYZ', gds.providers.mock-beta.currencies",
+        "gds.providers.mock-beta.currencies=CHF, gds.providers.mock-beta.currencies",
+        "gds.providers.mock-beta.currencies=, gds.providers.mock-beta.currencies",
+        "gds.providers.mock-btea.currencies=USD, gds.providers.mock-btea",
+        "gds.fx.rates.USD=0, gds.fx.rates.USD",
+        "gds.fx.rates.ZZZ=1.5, gds.fx.rates.ZZZ"
     })
     @DisplayName("AC-3 (error): invalid settings fail the startup with a message naming the setting")
     void invalidSettingsFailStartup(String property, String named) {

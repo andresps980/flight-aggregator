@@ -10,8 +10,9 @@ import java.util.stream.Collectors;
  *
  * @param recordId the record id as sent, including the provider prefix (e.g. {@code ALP-20261110-000017-0})
  * @param price the price as sent
+ * @param currency the ISO 4217 code the record declares (spec 008)
  */
-public record ParsedRecord(String recordId, String price, List<TestSegment> segments) {
+public record ParsedRecord(String recordId, String price, String currency, List<TestSegment> segments) {
 
     private static final String IATA = "[A-Z]{3}";
 

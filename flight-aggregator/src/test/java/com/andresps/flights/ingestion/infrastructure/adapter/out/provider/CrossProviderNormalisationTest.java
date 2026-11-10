@@ -39,8 +39,8 @@ class CrossProviderNormalisationTest {
             </segments></option></originDestinationOptions></itinerary></itineraries></response>""";
 
     private static final String GAMMA = """
-            REF,PRICE_EUR,SEGMENTS
-            GAM-20261106-000001-0,459.15,VY0001~DUB~2026-11-06T03:05~Europe/Dublin~EZE~2026-11-06T10:40~America/Argentina/Buenos_Aires|VY8227~EZE~2026-11-06T15:25~America/Argentina/Buenos_Aires~FRA~2026-11-07T00:55~Europe/Berlin
+            REF,PRICE,CURRENCY,SEGMENTS
+            GAM-20261106-000001-0,459.15,EUR,VY0001~DUB~2026-11-06T03:05~Europe/Dublin~EZE~2026-11-06T10:40~America/Argentina/Buenos_Aires|VY8227~EZE~2026-11-06T15:25~America/Argentina/Buenos_Aires~FRA~2026-11-07T00:55~Europe/Berlin
             """;
 
     @Test
