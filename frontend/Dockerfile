@@ -10,7 +10,7 @@ COPY . .
 RUN npm run build
 
 # --- runtime: nginx, unprivileged
-FROM nginx:1.30-alpine
+FROM nginx:1.31-alpine
 COPY docker/nginx.conf /etc/nginx/nginx.conf
 COPY docker/security-headers.conf /etc/nginx/snippets/security-headers.conf
 COPY docker/entrypoint.sh /usr/local/bin/frontend-entrypoint.sh
