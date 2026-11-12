@@ -405,7 +405,8 @@ the cache mostly takes repeated load off the database; it pays off for the expen
   clean. The author dismissed the Dependabot alert as *risk is tolerable* (dev-only, transitive, not shipped, no
   compatible fix yet) — [docs/ai/009](docs/ai/009-dependabot-triage.md#open-item-for-the-author--resolved).
 - TypeScript 5.9 and ESLint 9 are held behind the latest majors until the tools' peer ranges accept them; Dependabot
-  ignores those majors with a revisit condition ([docs/frontend.md](docs/frontend.md#version-constraints)).
+  ignores those majors with a revisit condition ([docs/frontend.md](docs/frontend.md#version-constraints)). The nginx
+  image stays on the stable branch (even minors); Dependabot ignores the mainline (odd) minors.
 
 ### 3.6 The mock
 

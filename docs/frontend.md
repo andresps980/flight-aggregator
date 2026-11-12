@@ -245,12 +245,14 @@ then results, then status and demo. Rules that keep content inside its panel:
 
 Some majors cannot be installed yet without forcing peer dependencies (`--legacy-peer-deps`), which this project
 does not do. Dependabot ignores them (`.github/dependabot.yml`, `ignore`), each rule with its reason and revisit
-condition; decisions in [docs/ai/009](ai/009-dependabot-triage.md).
+condition; decisions in [docs/ai/009](ai/009-dependabot-triage.md). The nginx image is held by policy rather than by
+a peer range: only stable branches ([docs/ai/013](ai/013-nginx-stable-only.md)).
 
 | Package | Pinned to | Blocked by (declared peer range, as of 2026-11-06) | Revisit when | Dependabot |
 |---|---|---|---|---|
 | `typescript` | `~5.9` | `openapi-typescript` 7.13.0: `typescript ^5.x`; `typescript-eslint` 8.72.1: `typescript <6.1.0` | `openapi-typescript` supports TS ≥ 6 and `typescript-eslint` the target major | `>=6` ignored; #11 declined |
 | `eslint`, `@eslint/js` | `^9` | `eslint-plugin-jsx-a11y` 6.10.2: `eslint ^3 … ^9` | `eslint-plugin-jsx-a11y` declares ESLint 10 | `>=10` ignored; #10 declined |
+| `nginx` (runtime image, `frontend/Dockerfile`) | `1.30-alpine` (stable) | spec 006 AC-24 requires the stable branch (`nginx:<stable>-alpine`); odd minors are mainline | a new stable branch ships (even minor, e.g. 1.32): Dependabot proposes it; extend the odd-minor list before 1.39 | odd minors 1.31–1.39 ignored; #17 declined |
 | `minimatch` (transitive, via `typescript-eslint`) | 10.x | `@typescript-eslint/typescript-estree` requires `minimatch ^10`; the advisories' first fixed version is 11.0.1 | `typescript-eslint` moves to `minimatch` 11 | security update "not possible" (dev-only, accepted; see *Limitations*) |
 
 To check a constraint: `npm view <package> peerDependencies` for the blocking package's latest version; to try a bump,

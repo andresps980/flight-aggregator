@@ -52,6 +52,14 @@ updates:
       interval: weekly
     commit-message:
       prefix: "chore(deps)"
+    # nginx: stable branches only (spec 006 AC-24, nginx:<stable>-alpine). nginx numbers stable branches with an even
+    # minor and mainline branches with an odd one; Dependabot has no "odd minor" pattern, so each mainline minor is
+    # listed. Stable gets the security fixes (1.30.5/1.30.6 carry those of 1.31.6/1.31.7). Declined: #17
+    # (1.30-alpine -> 1.31-alpine). Revisit when a new stable ships: add the next odd minors before 1.39 is reached
+    # (docs/frontend.md -> Version constraints; decision in docs/ai/013).
+    ignore:
+      - dependency-name: "nginx"
+        versions: [">= 1.31, < 1.32", ">= 1.33, < 1.34", ">= 1.35, < 1.36", ">= 1.37, < 1.38", ">= 1.39, < 1.40"]
 
   - package-ecosystem: github-actions
     directory: /
