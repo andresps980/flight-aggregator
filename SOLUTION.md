@@ -323,7 +323,7 @@ the cache mostly takes repeated load off the database; it pays off for the expen
 | Default compose stack (100,000, chaos on), clean clone | build 22 s (Maven cache mount pruned, base images local), all five services healthy 18 s after `up`, first scheduled run `COMPLETED` in 18.3 s (94,503 itineraries) — 61 s from `build` to searchable data; every quick-start URL answered |
 | Full-stack smoke in CI | 15 checks in 2 min 17 s with an empty layer cache (build 74 s), 1 min 21 s with it warm (build 14 s); on `main` after the PR 14 merge (`3c2dc3b`) 2 min 13 s — `main` cannot read PR caches |
 | `./mvnw verify` (both modules: format, unit and integration tests, ArchUnit, coverage gate) | **67 s** on an Apple M1 Max: flight-aggregator 509 unit + 182 integration tests, gds-mock 146 + 41 |
-| Frontend | `npm run check` **7 s**: 118 tests, 99.7 % lines / 95.2 % branches (gate 80 / 70); bundle 76 kB gzipped JS; image smoke test 23 checks |
+| Frontend | `npm run check` **7 s**: 118 tests, 99.7 % lines / 95.2 % branches (gate 80 / 70); bundle 76 kB gzipped JS; image smoke test 24 checks |
 
 ## 3. System limitations and trade-offs
 
@@ -405,7 +405,9 @@ the cache mostly takes repeated load off the database; it pays off for the expen
   clean. The author dismissed the Dependabot alert as *risk is tolerable* (dev-only, transitive, not shipped, no
   compatible fix yet) — [docs/ai/009](docs/ai/009-dependabot-triage.md#open-item-for-the-author--resolved).
 - TypeScript 5.9 and ESLint 9 are held behind the latest majors until the tools' peer ranges accept them; Dependabot
-  ignores those majors with a revisit condition ([docs/frontend.md](docs/frontend.md#version-constraints)).
+  ignores those majors with a revisit condition ([docs/frontend.md](docs/frontend.md#version-constraints)). The nginx
+  image stays on the stable branch (even minors); Dependabot ignores the mainline (odd) minors and the image smoke test checks the branch
+  ([docs/ai/013](docs/ai/013-nginx-stable-only.md)).
 
 ### 3.6 The mock
 

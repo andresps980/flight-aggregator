@@ -9,7 +9,8 @@ RUN npm ci --no-audit --no-fund
 COPY . .
 RUN npm run build
 
-# --- runtime: nginx, unprivileged
+# --- runtime: nginx stable branch (even minor; odd minors are mainline), unprivileged. Spec 006 AC-24; checked by
+# docker/smoke-test.sh, Dependabot ignores mainline (docs/frontend.md -> Version constraints).
 FROM nginx:1.30-alpine
 COPY docker/nginx.conf /etc/nginx/nginx.conf
 COPY docker/security-headers.conf /etc/nginx/snippets/security-headers.conf
