@@ -64,6 +64,11 @@ on="$(base_url "$on_id")"
 echo "--- AC-24: image"
 check "runs as a non-root user" test "$(docker exec "$off_id" id -u)" != "0"
 check "contains no Node.js runtime" bash -c "! docker exec $off_id sh -c 'command -v node'"
+# nginx numbers stable branches with an even minor (1.30) and mainline with an odd one (1.31): AC-24 asks for stable.
+nginx_version="$(docker exec "$off_id" nginx -v 2>&1 | sed -nE 's#.*nginx/([0-9]+\.[0-9]+\.[0-9]+).*#\1#p')"
+nginx_minor="$(echo "$nginx_version" | cut -d. -f2)"
+check "nginx is a stable (even-minor) branch: ${nginx_version:-unknown}" \
+  bash -c "[ -n '$nginx_minor' ] && [ \$(( $nginx_minor % 2 )) -eq 0 ]"
 
 echo "--- AC-23: static files and headers"
 check "/healthz answers 200" test "$(status "$off/healthz")" = 200

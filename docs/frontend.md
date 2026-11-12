@@ -189,13 +189,14 @@ the page does not scroll sideways — naming the culprits when it does — and (
 broken across lines (spec 007 F-1). It runs in CI after the build. It was added after
 a layout bug found by hand (below) and checked against the old layout and against a deliberately broken one.
 
-`frontend/docker/smoke-test.sh` builds the image and checks what nginx serves (23 checks: headers, SPA fallback,
-proxy scope, demo flag, URL validation, non-root user, healthcheck command, no container left behind), also in CI.
+`frontend/docker/smoke-test.sh` builds the image and checks what nginx serves (24 checks: headers, SPA fallback,
+proxy scope, demo flag, URL validation, non-root user, nginx stable branch, healthcheck command, no container left
+behind), also in CI.
 
 ## Delivery: nginx and Docker
 
 - **Multi-stage Dockerfile**: `node:26-alpine` runs `npm ci` and `npm run build`; the final `nginx:1.30-alpine`
-  image holds only the static files and the config, and runs as the unprivileged `nginx` user (it writes only under
+  image (stable branch: even minor; the smoke test checks it) holds only the static files and the config, and runs as the unprivileged `nginx` user (it writes only under
   `/tmp`).
 - **nginx** (`docker/nginx.conf`): serves `dist/`, falls back to `index.html` for any other path (so `/?origin=MAD`
   and deep links work), caches hashed assets for a year and `index.html` never, gzips text, and sends
@@ -248,11 +249,11 @@ does not do. Dependabot ignores them (`.github/dependabot.yml`, `ignore`), each 
 condition; decisions in [docs/ai/009](ai/009-dependabot-triage.md). The nginx image is held by policy rather than by
 a peer range: only stable branches ([docs/ai/013](ai/013-nginx-stable-only.md)).
 
-| Package | Pinned to | Blocked by (declared peer range, as of 2026-11-06) | Revisit when | Dependabot |
+| Package | Pinned to | Blocked by (declared peer range as of 2026-11-06, or policy) | Revisit when | Dependabot |
 |---|---|---|---|---|
 | `typescript` | `~5.9` | `openapi-typescript` 7.13.0: `typescript ^5.x`; `typescript-eslint` 8.72.1: `typescript <6.1.0` | `openapi-typescript` supports TS ≥ 6 and `typescript-eslint` the target major | `>=6` ignored; #11 declined |
 | `eslint`, `@eslint/js` | `^9` | `eslint-plugin-jsx-a11y` 6.10.2: `eslint ^3 … ^9` | `eslint-plugin-jsx-a11y` declares ESLint 10 | `>=10` ignored; #10 declined |
-| `nginx` (runtime image, `frontend/Dockerfile`) | `1.30-alpine` (stable) | spec 006 AC-24 requires the stable branch (`nginx:<stable>-alpine`); odd minors are mainline | a new stable branch ships (even minor, e.g. 1.32): Dependabot proposes it; extend the odd-minor list before 1.39 | odd minors 1.31–1.39 ignored; #17 declined |
+| `nginx` (runtime image, `frontend/Dockerfile`) | `1.30-alpine` (stable) | spec 006 AC-24 requires the stable branch (`nginx:<stable>-alpine`); odd minors are mainline | a new stable branch ships (even minor, e.g. 1.32): Dependabot proposes it (it edits only the Dockerfile: update this row and *Delivery: nginx and Docker* in the same PR); extend the odd-minor list before 1.39 | odd minors 1.31–1.39 ignored; #17 declined |
 | `minimatch` (transitive, via `typescript-eslint`) | 10.x | `@typescript-eslint/typescript-estree` requires `minimatch ^10`; the advisories' first fixed version is 11.0.1 | `typescript-eslint` moves to `minimatch` 11 | security update "not possible" (dev-only, accepted; see *Limitations*) |
 
 To check a constraint: `npm view <package> peerDependencies` for the blocking package's latest version; to try a bump,

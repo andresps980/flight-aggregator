@@ -52,15 +52,18 @@ And then verify: ./mvnw verify <and other checks> green (report durations); <man
 
 The author asked to close it with `@dependabot ignore this minor version` (one comment, with the reason below the
 command). Dependabot closed the PR at 15:36:59 UTC. That ignore state lives on GitHub, outside the repository, and
-covers only 1.31.
+covers only 1.31. It adds to the `dependabot.yml` rule: if the rule is ever removed, 1.31 stays ignored until someone
+comments `@dependabot unignore nginx` on a Dependabot PR.
 
 ## The ignore rule
 
 `.github/dependabot.yml`, docker entry: `nginx` ignored for `>= 1.31, < 1.32`, `>= 1.33, < 1.34`, … up to 1.39.
 
 - **Why a list of ranges:** Dependabot has no "odd minor" pattern. GitHub's docs say Docker ignore ranges use Ruby
-  version syntax, hence `">= 1.31, < 1.32"`. Even minors (1.32, 1.34 …, the next stable branches) and patch releases
-  of the current stable keep flowing.
+  version syntax, hence `">= 1.31, < 1.32"`; dependabot-core strips the `-alpine` suffix before comparing
+  (`Tag#numeric_version`), so the ranges match the tags we use. Even minors (1.32, 1.34 …, the next stable branches)
+  are still proposed. Patches of the current stable never come through Dependabot: they arrive on rebuild through the
+  floating `1.30-alpine` tag (1.30.6 at the time of writing).
 - **Why up to 1.39:** nginx cuts one stable branch a year, so the list covers several years; the comment and
   `docs/frontend.md` say to extend it before 1.39.
 - **Why in the file as well:** same reasoning as in [009](009-dependabot-triage.md): the decision is versioned and
@@ -72,3 +75,36 @@ covers only 1.31.
 
 - `docs/frontend.md` → *Version constraints*: `nginx` row.
 - `SOLUTION.md` § 3.5: one sentence on nginx stable only.
+
+## Review findings
+
+`code-reviewer` and `spec-reviewer` on the first commit. No blocking findings; the rule itself was checked against
+dependabot-core's Docker update checker (suffix stripping, comma-separated requirements, nothing stable blocked).
+
+| Finding | Action |
+|---|---|
+| AC-24 "stable" is enforced by nothing: a hand edit to an odd minor passes CI | **Fixed**: `frontend/docker/smoke-test.sh` reads `nginx -v` inside the image and checks the minor is even (24 checks; reports `1.30.6`). Checked that the expression fails for `31` and for an empty version |
+| The stable-only policy is not visible next to the `FROM` line | **Fixed**: comment in `frontend/Dockerfile`; *Delivery* bullet in `docs/frontend.md` says "stable branch" |
+| A stable bump (1.32) edits only the Dockerfile; the `1.30` in `docs/frontend.md` goes stale | **Fixed**: the row's revisit condition says to update the row and the *Delivery* bullet in the same PR |
+| "Patches of the current stable keep flowing" is misleading (floating tag, Dependabot never proposes them) | **Fixed** (wording above) |
+| Table header says "declared peer range", nginx is held by policy | **Fixed**: header names both |
+| `SOLUTION.md` nginx sentence has no link | **Fixed**: links this record |
+| The `@dependabot ignore` state lives outside the repo | **Fixed**: noted in *Closing #17* |
+| CVE claims in the yml comment unverified | **Verified** against nginx.org/en/security_advisories.html: CVE-2026-90439 not vulnerable in 1.31.6+ / 1.30.5+; CVE-2026-15176, -93479, -95101, -97629, -97205 not vulnerable in 1.31.7+ / 1.30.6+. The only 1.31-only advisory (CVE-2026-42530, 1.31.0–1.31.1) never affected 1.30 |
+| The same Docker entry also watches `node:26-alpine`; a `node:27-alpine` PR would edit only the Dockerfile and leave `.nvmrc` / `engines` behind (AC-26) | **Not changed here** (Node, not nginx; outside this PR): left to the author as a follow-up |
+| Reviewer's own `./mvnw verify` failed | Environment: Testcontainers could not reach Docker from the reviewer's sandbox (Docker Desktop was also stopped at first). Re-run locally with Docker up: see *Verification* |
+
+## Verification (local, final tree, Docker Desktop running)
+
+| Gate | Result | Duration |
+|---|---|---|
+| `./mvnw verify` (unit + IT + coverage gate + Spotless + ArchUnit, all modules) | green | 77 s |
+| `npm run check` (Prettier, ESLint, tsc, Vitest 118 tests, 99.74 % lines / 95.18 % branches) | green | 6 s |
+| `bash frontend/docker/smoke-test.sh` | 24 passed, 0 failed (`nginx is a stable (even-minor) branch: 1.30.6`) | 3 s (cached image layers) |
+| `scripts/check-mermaid.sh` | green | 18 s |
+| `.claude/hooks/tests/guard-git.test.sh` / `classify-paths.test.sh` | 39 / 18 passed | 1 s / < 1 s |
+
+The first local `./mvnw verify` failed with 112 × "Could not find a valid Docker environment": Docker Desktop was not
+running, so the Testcontainers ITs (PostgreSQL, Redis) could not start. Not related to this branch; green once Docker
+was started. No compose run or measurement is needed: the image, its nginx and its config are unchanged (only a
+Dockerfile comment); the CI full-stack smoke job covers the stack.
