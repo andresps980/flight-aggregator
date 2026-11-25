@@ -40,7 +40,7 @@
         <resilience4j.version>2.4.0</resilience4j.version>
         <wiremock.version>3.13.2</wiremock.version>
         <!-- 3.2.x is built against Spring Boot 4.1.2 (spec 005, Q8) -->
-        <springdoc.version>3.2.0</springdoc.version>
+        <springdoc.version>3.2.1</springdoc.version>
         <!-- JUnit tags excluded by default: "slow" (long-running volume tests) and "e2e" (needs a running gds-mock).
              -Pslow-tests adds the slow ones, -Pe2e-tests adds the e2e ones. -->
         <test.excludedGroups>slow,e2e</test.excludedGroups>
